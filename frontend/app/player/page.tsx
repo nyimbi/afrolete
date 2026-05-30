@@ -8,6 +8,7 @@ import type {
   MessageRecipientRead,
   MetricCategory,
   PerformanceSharedHighlightReelRead,
+  PlayerMatchGuidanceFeedbackRead,
   PlayerMatchGuidanceRead,
   PlayerMatchTrainingFollowupRead,
   PlayerPerformanceProfileRead
@@ -791,6 +792,57 @@ export default function PlayerPerformancePage() {
     }
   };
 
+  const submitMatchGuidanceFeedback = async (
+    guidance: PlayerMatchGuidanceRead,
+    status: "acknowledged" | "needs_help" | "completed" | "confused" | "inspired",
+    requestedFollowUp = false
+  ) => {
+    if (!guidance.guidance_recipient_id || !organizationId) {
+      setError("This guidance card cannot accept feedback yet");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const feedback = await apiRequest<PlayerMatchGuidanceFeedbackRead>(
+        `/performance/my-match-guidance/${guidance.guidance_recipient_id}/feedback`,
+        {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: organizationId,
+            status,
+            rating: requestedFollowUp ? 3 : status === "completed" ? 5 : 4,
+            response_text: requestedFollowUp
+              ? "I reviewed this match guidance and need coach help."
+              : status === "completed"
+                ? "I reviewed this match guidance and completed the action plan."
+                : status === "confused"
+                  ? "I reviewed this match guidance but need it explained more clearly."
+                  : "I reviewed this match guidance.",
+            priority_focus: requestedFollowUp ? "coach_review" : status === "completed" ? "action_plan" : "self_review",
+            requested_follow_up: requestedFollowUp,
+            completed_action_count: status === "completed" ? guidance.action_plan.length : 0
+          }
+        }
+      );
+      setProfiles((current) =>
+        current.map((profile) => ({
+          ...profile,
+          match_guidance: profile.match_guidance.map((item) =>
+            item.guidance_recipient_id === guidance.guidance_recipient_id
+              ? { ...item, feedback, guidance_delivery_status: "read" }
+              : item
+          )
+        }))
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Match-guidance feedback failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const markSharedHighlightReviewed = async (highlight: PerformanceSharedHighlightReelRead) => {
     setBusy(true);
     setError("");
@@ -1004,6 +1056,14 @@ export default function PlayerPerformancePage() {
                       Shared {new Date(guidance.guidance_published_at).toLocaleDateString()} ·{" "}
                       {guidance.guidance_delivery_status.replaceAll("_", " ")} · {guidance.guidance_recipient_count} recipient(s)
                     </small>
+                    <small>
+                      {guidance.feedback
+                        ? `${guidance.feedback.status.replaceAll("_", " ")}${guidance.feedback.rating ? ` · ${guidance.feedback.rating}/5` : ""}${guidance.feedback.requested_follow_up ? " · coach help requested" : ""}`
+                        : "waiting for your feedback"}
+                    </small>
+                    {guidance.feedback?.agent_task_id ? (
+                      <small>Training Strategy Agent queued · {guidance.feedback.agent_task_id.slice(0, 8)}</small>
+                    ) : null}
                   </div>
                   <div className="chart-bars">
                     <div className="chart-bar-row">
@@ -1086,6 +1146,22 @@ export default function PlayerPerformancePage() {
                     onClick={() => markMatchGuidanceReviewed(guidance)}
                   >
                     Mark reviewed
+                  </button>
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy || !guidance.guidance_recipient_id}
+                    onClick={() => submitMatchGuidanceFeedback(guidance, "needs_help", true)}
+                  >
+                    Ask coach
+                  </button>
+                  <button
+                    className="player-inline-action"
+                    type="button"
+                    disabled={busy || !guidance.guidance_recipient_id}
+                    onClick={() => submitMatchGuidanceFeedback(guidance, "completed")}
+                  >
+                    Done
                   </button>
                   <button
                     className="player-inline-action"

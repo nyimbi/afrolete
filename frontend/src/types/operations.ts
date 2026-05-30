@@ -8638,6 +8638,28 @@ export type PlayerMatchGuidanceRead = {
   }[];
   tactical_context: string[];
   quality_warnings: string[];
+  feedback: PlayerMatchGuidanceFeedbackRead | null;
+};
+
+export type PlayerMatchGuidanceFeedbackRead = {
+  id: UUID;
+  organization_id: UUID;
+  tracking_run_id: UUID;
+  video_asset_id: UUID;
+  publish_audit_id: UUID;
+  message_id: UUID;
+  message_recipient_id: UUID;
+  person_id: UUID;
+  status: string;
+  rating: number | null;
+  response_text: string | null;
+  priority_focus: string | null;
+  requested_follow_up: boolean;
+  completed_action_count: number;
+  agent_task_id: UUID | null;
+  submitted_at: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PlayerMatchTrainingFollowupRead = {

@@ -400,6 +400,8 @@ import type {
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
   PerformanceMatchMomentRead,
+  PlayerMatchGuidanceFeedbackRead,
+  PlayerMatchGuidanceRead,
   PerformanceMatchPlayerGuidancePublishAuditRead,
   PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
@@ -429,6 +431,7 @@ import type {
   PerformanceWearableTokenRefreshRead,
   PerformanceWearableWebhookRead,
   PerformanceWearableWebhookRegistrationRead,
+  PlayerPerformanceProfileRead,
   NotificationFrequency,
   NotificationPreferenceRead,
   PredictiveRiskScoreRead,
@@ -1969,6 +1972,8 @@ export default function HomePage() {
     useState<PerformanceHighlightReelReminderRunRead | null>(null);
   const [myPerformanceHighlightReels, setMyPerformanceHighlightReels] =
     useState<PerformanceSharedHighlightReelRead[]>([]);
+  const [myPlayerPerformanceProfiles, setMyPlayerPerformanceProfiles] =
+    useState<PlayerPerformanceProfileRead[]>([]);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -4143,7 +4148,8 @@ export default function HomePage() {
       highlightExportData,
       highlightShareData,
       highlightEngagementData,
-      myHighlightReelData
+      myHighlightReelData,
+      myPlayerProfileData
     ] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
@@ -4208,6 +4214,10 @@ export default function HomePage() {
       apiRequest<PerformanceSharedHighlightReelRead[]>(
         `/performance/my-highlight-reels?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<PlayerPerformanceProfileRead[]>(
+        `/performance/my-profiles?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
@@ -4226,6 +4236,7 @@ export default function HomePage() {
     setPerformanceHighlightReelShares(highlightShareData);
     setPerformanceHighlightReelEngagements(highlightEngagementData);
     setMyPerformanceHighlightReels(myHighlightReelData);
+    setMyPlayerPerformanceProfiles(myPlayerProfileData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -5430,6 +5441,7 @@ export default function HomePage() {
       setPerformanceHighlightReelReminder(null);
       setPerformanceHighlightReelReminderRun(null);
       setMyPerformanceHighlightReels([]);
+      setMyPlayerPerformanceProfiles([]);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -11712,6 +11724,71 @@ export default function HomePage() {
           requestedFollowUp ? "neutral" : "good"
         );
         void loadOppositionScouting(selectedOrganizationId ?? reel.organization_id, selectedTeam?.id);
+      }
+    );
+  };
+
+  const submitMyPlayerMatchGuidanceFeedback = (
+    guidance: PlayerMatchGuidanceRead,
+    status: "acknowledged" | "needs_help" | "completed" | "confused" | "inspired",
+    requestedFollowUp = false
+  ) => {
+    if (!guidance.guidance_recipient_id) {
+      addLog("This match guidance card has no message recipient record", "bad");
+      return;
+    }
+    const profile = myPlayerPerformanceProfiles.find((item) =>
+      item.match_guidance.some((matchGuidance) => matchGuidance.guidance_recipient_id === guidance.guidance_recipient_id)
+    );
+    const organizationId = profile?.organization_id ?? selectedOrganizationId;
+    if (!organizationId) {
+      addLog("Select an organization before sending match-guidance feedback", "bad");
+      return;
+    }
+    const responseText = requestedFollowUp
+      ? "I reviewed this match guidance and need coach help."
+      : status === "completed"
+        ? "I reviewed this match guidance and completed the action plan."
+        : status === "confused"
+          ? "I reviewed this match guidance but need it explained more clearly."
+          : "I reviewed this match guidance.";
+    runAction(
+      `my-player-match-guidance-feedback-${guidance.guidance_recipient_id}-${status}`,
+      () =>
+        apiRequest<PlayerMatchGuidanceFeedbackRead>(
+          `/performance/my-match-guidance/${guidance.guidance_recipient_id}/feedback`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: organizationId,
+              status,
+              rating: requestedFollowUp ? 3 : status === "completed" ? 5 : 4,
+              response_text: responseText,
+              priority_focus: requestedFollowUp ? "coach_review" : status === "completed" ? "action_plan" : "self_review",
+              requested_follow_up: requestedFollowUp,
+              completed_action_count: status === "completed" ? guidance.action_plan.length : 0
+            }
+          }
+        ),
+      (feedback) => {
+        setMyPlayerPerformanceProfiles((current) =>
+          current.map((item) => ({
+            ...item,
+            match_guidance: item.match_guidance.map((matchGuidance) =>
+              matchGuidance.guidance_recipient_id === guidance.guidance_recipient_id
+                ? { ...matchGuidance, feedback, guidance_delivery_status: "read" }
+                : matchGuidance
+            )
+          }))
+        );
+        addLog(
+          requestedFollowUp
+            ? `${guidance.match_label ?? guidance.opponent_name} queued for coach help`
+            : `${guidance.match_label ?? guidance.opponent_name} feedback recorded`,
+          requestedFollowUp ? "neutral" : "good"
+        );
+        void loadOppositionScouting(organizationId, selectedTeam?.id);
       }
     );
   };
@@ -28638,6 +28715,62 @@ export default function HomePage() {
                       </div>
                     </article>
                   ) : null}
+                  {myPlayerPerformanceProfiles
+                    .flatMap((profile) =>
+                      profile.match_guidance.map((guidance) => ({ profile, guidance }))
+                    )
+                    .slice(0, 3)
+                    .map(({ profile, guidance }) => (
+                    <article key={`my-match-guidance-${guidance.guidance_recipient_id ?? `${guidance.tracking_run_id}-${guidance.track_id}`}`} className="task-card">
+                      <div>
+                        <strong>{guidance.match_label ?? guidance.opponent_name} · match guidance</strong>
+                        <span>
+                          {profile.athlete_name} · {Math.round(guidance.distance_m)}m ·{" "}
+                          {Math.round(guidance.high_speed_distance_m)}m high-speed · max {guidance.max_speed_mps.toFixed(1)} m/s
+                        </span>
+                        <small>
+                          {guidance.team_label ?? "Unassigned"} · {guidance.player_label ?? guidance.track_id}
+                          {guidance.jersey_number ? ` · #${guidance.jersey_number}` : ""} ·{" "}
+                          {guidance.guidance_delivery_status.replaceAll("_", " ")}
+                        </small>
+                        <small>
+                          {guidance.action_plan[0]?.focus ?? guidance.player_guidance[0] ?? "Review coach guidance"} ·{" "}
+                          {guidance.readiness_level.replaceAll("_", " ")}
+                        </small>
+                        <small>
+                          {guidance.feedback
+                            ? `${guidance.feedback.status.replaceAll("_", " ")}${guidance.feedback.rating ? ` · ${guidance.feedback.rating}/5` : ""}${guidance.feedback.requested_follow_up ? " · coach help requested" : ""}`
+                            : "waiting for player feedback"}
+                        </small>
+                        {guidance.feedback?.agent_task_id ? (
+                          <small>Training Strategy Agent queued · {guidance.feedback.agent_task_id.slice(0, 8)}</small>
+                        ) : null}
+                      </div>
+                      <span>
+                        <button
+                          type="button"
+                          onClick={() => submitMyPlayerMatchGuidanceFeedback(guidance, "acknowledged")}
+                          disabled={busyAction !== null || !guidance.guidance_recipient_id}
+                        >
+                          Ack
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => submitMyPlayerMatchGuidanceFeedback(guidance, "needs_help", true)}
+                          disabled={busyAction !== null || !guidance.guidance_recipient_id}
+                        >
+                          Help
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => submitMyPlayerMatchGuidanceFeedback(guidance, "completed")}
+                          disabled={busyAction !== null || !guidance.guidance_recipient_id}
+                        >
+                          Done
+                        </button>
+                      </span>
+                    </article>
+                    ))}
                   {myPerformanceHighlightReels.slice(0, 3).map((reel) => (
                     <article key={`my-highlight-${reel.recipient_id}`} className="task-card">
                       <div>

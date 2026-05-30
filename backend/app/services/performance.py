@@ -68,6 +68,7 @@ from app.models.performance import (
     PerformanceHighlightReelShareAudit,
     PerformanceMatchAnalysisReport,
     PerformanceMatchMoment,
+    PerformanceMatchPlayerGuidanceFeedback,
     PerformanceMatchPlayerGuidancePublishAudit,
     PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingIdentityReview,
@@ -136,6 +137,7 @@ from app.schemas.performance import (
     PerformanceMatchTrackingProviderWebhookCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingSampleCreate,
+    PlayerMatchGuidanceFeedbackCreate,
     PlayerMatchTrainingFollowupCreate,
     PerformanceMovementReferenceProfileCreate,
     PerformanceObservationCreate,
@@ -8203,6 +8205,11 @@ async def player_match_guidance_for_profile(
             .where(MessageRecipient.person_id == profile.person_id)
             .limit(1)
         )
+        feedback = (
+            await player_match_guidance_feedback_for_recipient(db, recipient.id)
+            if recipient is not None
+            else None
+        )
         guidance.append(
             build_player_match_guidance(
                 run=run,
@@ -8212,11 +8219,189 @@ async def player_match_guidance_for_profile(
                 summary=summary,
                 publish_audit=audit,
                 player_recipient=recipient,
+                feedback=feedback,
             )
         )
         if len(guidance) >= limit:
             break
     return guidance
+
+
+async def submit_my_player_match_guidance_feedback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recipient_id: UUID,
+    payload: PlayerMatchGuidanceFeedbackCreate,
+) -> PerformanceMatchPlayerGuidanceFeedback:
+    recipient = await db.get(MessageRecipient, recipient_id)
+    if recipient is None or recipient.person_id != identity.person_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match guidance recipient not found")
+    audit = await db.scalar(
+        select(PerformanceMatchPlayerGuidancePublishAudit)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.message_id == recipient.message_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.player_person_id == identity.person_id)
+        .where(PerformanceMatchPlayerGuidancePublishAudit.status == "published")
+        .limit(1)
+    )
+    if audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published match guidance not found")
+    if audit.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    existing = await player_match_guidance_feedback_for_recipient(db, recipient.id)
+    now = datetime.now(UTC)
+    response_text = (payload.response_text or "").strip() or None
+    priority_focus = (payload.priority_focus or "").strip() or None
+    if existing is None:
+        feedback = PerformanceMatchPlayerGuidanceFeedback(
+            organization_id=audit.organization_id,
+            tracking_run_id=audit.tracking_run_id,
+            video_asset_id=audit.video_asset_id,
+            publish_audit_id=audit.id,
+            message_id=audit.message_id,
+            message_recipient_id=recipient.id,
+            person_id=identity.person_id,
+            status=payload.status.strip().lower(),
+            rating=payload.rating,
+            response_text=response_text,
+            priority_focus=priority_focus,
+            requested_follow_up=payload.requested_follow_up,
+            completed_action_count=payload.completed_action_count,
+            submitted_at=now,
+        )
+        db.add(feedback)
+    else:
+        feedback = existing
+        feedback.status = payload.status.strip().lower()
+        feedback.rating = payload.rating
+        feedback.response_text = response_text
+        feedback.priority_focus = priority_focus
+        feedback.requested_follow_up = payload.requested_follow_up
+        feedback.completed_action_count = payload.completed_action_count
+        feedback.submitted_at = now
+    if recipient.delivery_status != MessageDeliveryStatus.READ:
+        recipient.delivery_status = MessageDeliveryStatus.READ
+        recipient.read_at = now
+    if payload.requested_follow_up and feedback.agent_task_id is None:
+        await db.flush()
+        agent_task = await queue_player_match_guidance_feedback_agent_review(
+            db,
+            identity,
+            organization_id=audit.organization_id,
+            tracking_run_id=audit.tracking_run_id,
+            video_asset_id=audit.video_asset_id,
+            publish_audit_id=audit.id,
+            message_recipient_id=recipient.id,
+            person_id=identity.person_id,
+            track_id=audit.track_id,
+            player_label=audit.player_label,
+            status_value=feedback.status,
+            priority_focus=priority_focus or feedback.status,
+        )
+        feedback.agent_task_id = agent_task.id
+    await db.commit()
+    await db.refresh(feedback)
+    return feedback
+
+
+async def player_match_guidance_feedback_for_recipient(
+    db: AsyncSession,
+    recipient_id: UUID,
+) -> PerformanceMatchPlayerGuidanceFeedback | None:
+    return await db.scalar(
+        select(PerformanceMatchPlayerGuidanceFeedback)
+        .where(PerformanceMatchPlayerGuidanceFeedback.message_recipient_id == recipient_id)
+        .limit(1)
+    )
+
+
+def player_match_guidance_feedback_read(
+    feedback: PerformanceMatchPlayerGuidanceFeedback,
+) -> dict[str, object]:
+    return {
+        "id": feedback.id,
+        "organization_id": feedback.organization_id,
+        "tracking_run_id": feedback.tracking_run_id,
+        "video_asset_id": feedback.video_asset_id,
+        "publish_audit_id": feedback.publish_audit_id,
+        "message_id": feedback.message_id,
+        "message_recipient_id": feedback.message_recipient_id,
+        "person_id": feedback.person_id,
+        "status": feedback.status,
+        "rating": feedback.rating,
+        "response_text": feedback.response_text,
+        "priority_focus": feedback.priority_focus,
+        "requested_follow_up": feedback.requested_follow_up,
+        "completed_action_count": feedback.completed_action_count,
+        "agent_task_id": feedback.agent_task_id,
+        "submitted_at": feedback.submitted_at,
+        "created_at": feedback.created_at,
+        "updated_at": feedback.updated_at,
+    }
+
+
+async def queue_player_match_guidance_feedback_agent_review(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    *,
+    organization_id: UUID,
+    tracking_run_id: UUID,
+    video_asset_id: UUID,
+    publish_audit_id: UUID,
+    message_recipient_id: UUID,
+    person_id: UUID,
+    track_id: str,
+    player_label: str,
+    status_value: str,
+    priority_focus: str,
+) -> AgentTask:
+    agent = await db.scalar(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.kind == AgentKind.COACHING,
+            Agent.name == "Training Strategy Agent",
+        )
+        .order_by(Agent.created_at)
+        .limit(1)
+    )
+    if agent is None:
+        agent = Agent(
+            organization_id=organization_id,
+            name="Training Strategy Agent",
+            kind=AgentKind.COACHING,
+            purpose=(
+                "Review training plans, match guidance feedback, athlete readiness, "
+                "and help requests so coaches can adjust the next block safely."
+            ),
+            status="active",
+            model_policy="human_review_required",
+        )
+        db.add(agent)
+        await db.flush()
+    input_ref = (
+        f"player-match-guidance-feedback:{organization_id};"
+        f"tracking:{tracking_run_id};"
+        f"video:{video_asset_id};"
+        f"publish:{publish_audit_id};"
+        f"recipient:{message_recipient_id};"
+        f"person:{person_id};"
+        f"track:{track_id};"
+        f"status:{status_value};"
+        f"focus:{priority_focus}"
+    )
+    return await queue_agent_task(
+        db,
+        identity,
+        agent.id,
+        AgentTaskCreate(
+            organization_id=organization_id,
+            task_type="player_match_guidance_feedback_review",
+            title=f"Review player match guidance feedback: {player_label}"[:240],
+            input_ref=input_ref[:500],
+        ),
+        None,
+        enforce_manage_organization=False,
+    )
 
 
 async def create_player_match_training_followup(
@@ -8859,6 +9044,7 @@ def build_player_match_guidance(
     summary: dict[str, object],
     publish_audit: PerformanceMatchPlayerGuidancePublishAudit,
     player_recipient: MessageRecipient | None = None,
+    feedback: PerformanceMatchPlayerGuidanceFeedback | None = None,
 ) -> dict[str, object]:
     team_label = str(metric.get("team_label") or sample.team_label or "").strip() or None
     track_id = str(metric.get("track_id") or sample.track_id)
@@ -8965,6 +9151,7 @@ def build_player_match_guidance(
         "action_plan": action_plan,
         "tactical_context": tactical_context[:4],
         "quality_warnings": [str(item) for item in summary.get("quality_warnings", []) if str(item)][:4],
+        "feedback": player_match_guidance_feedback_read(feedback) if feedback is not None else None,
     }
 
 

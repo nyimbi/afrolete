@@ -2480,6 +2480,37 @@ class PerformanceMatchTrainingFollowupRead(BaseModel):
     agent_task_title: str | None = None
 
 
+class PlayerMatchGuidanceFeedbackCreate(BaseModel):
+    organization_id: UUID
+    status: str = Field(default="acknowledged", pattern="^(acknowledged|needs_help|completed|confused|inspired)$")
+    rating: int | None = Field(default=None, ge=1, le=5)
+    response_text: str | None = Field(default=None, max_length=2000)
+    priority_focus: str | None = Field(default=None, max_length=120)
+    requested_follow_up: bool = False
+    completed_action_count: int = Field(default=0, ge=0, le=12)
+
+
+class PlayerMatchGuidanceFeedbackRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    tracking_run_id: UUID
+    video_asset_id: UUID
+    publish_audit_id: UUID
+    message_id: UUID
+    message_recipient_id: UUID
+    person_id: UUID
+    status: str
+    rating: int | None
+    response_text: str | None
+    priority_focus: str | None
+    requested_follow_up: bool
+    completed_action_count: int
+    agent_task_id: UUID | None = None
+    submitted_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
 class PlayerMatchGuidanceRead(BaseModel):
     tracking_run_id: UUID
     video_asset_id: UUID
@@ -2513,6 +2544,7 @@ class PlayerMatchGuidanceRead(BaseModel):
     action_plan: list[PlayerMatchActionPlanRead] = Field(default_factory=list)
     tactical_context: list[str] = Field(default_factory=list)
     quality_warnings: list[str] = Field(default_factory=list)
+    feedback: PlayerMatchGuidanceFeedbackRead | None = None
 
 
 class PlayerPerformanceProfileRead(BaseModel):

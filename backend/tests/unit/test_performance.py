@@ -370,6 +370,36 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     assert read_profile_response.status_code == 200
     assert read_profile_response.json()[0]["match_guidance"][0]["guidance_delivery_status"] == "read"
 
+    feedback_response = client.post(
+        f"/api/v1/performance/my-match-guidance/{match_guidance[0]['guidance_recipient_id']}/feedback",
+        headers=player_headers,
+        json={
+            "organization_id": organization["id"],
+            "status": "needs_help",
+            "rating": 3,
+            "response_text": "I need help turning this match guidance into training.",
+            "priority_focus": "pressing angle",
+            "requested_follow_up": True,
+            "completed_action_count": 0,
+        },
+    )
+    assert feedback_response.status_code == 201
+    feedback = feedback_response.json()
+    assert feedback["message_recipient_id"] == match_guidance[0]["guidance_recipient_id"]
+    assert feedback["status"] == "needs_help"
+    assert feedback["requested_follow_up"] is True
+    assert feedback["agent_task_id"] is not None
+
+    feedback_profile_response = client.get(
+        f"/api/v1/performance/my-profiles?organization_id={organization['id']}",
+        headers=player_headers,
+    )
+    assert feedback_profile_response.status_code == 200
+    feedback_guidance = feedback_profile_response.json()[0]["match_guidance"][0]
+    assert feedback_guidance["feedback"]["id"] == feedback["id"]
+    assert feedback_guidance["feedback"]["agent_task_id"] == feedback["agent_task_id"]
+    assert feedback_guidance["guidance_delivery_status"] == "read"
+
     followup_response = client.post(
         f"/api/v1/performance/my-profiles/{roster['athlete_profile_id']}/match-guidance/training-followups",
         headers=player_headers,
@@ -414,6 +444,10 @@ def test_player_can_load_own_performance_profile(client, identity_headers) -> No
     agent_task = next(task for task in agent_tasks_response.json() if task["id"] == followup["agent_task_id"])
     assert agent_task["task_type"] == "player_match_training_followup_review"
     assert f"plan:{followup['plan_id']}" in agent_task["input_ref"]
+    feedback_agent_task = next(task for task in agent_tasks_response.json() if task["id"] == feedback["agent_task_id"])
+    assert feedback_agent_task["task_type"] == "player_match_guidance_feedback_review"
+    assert f"recipient:{match_guidance[0]['guidance_recipient_id']}" in feedback_agent_task["input_ref"]
+    assert f"tracking:{tracking.json()['id']}" in feedback_agent_task["input_ref"]
 
     touch_metric = client.post(
         "/api/v1/performance/metrics",

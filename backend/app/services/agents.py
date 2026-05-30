@@ -3715,6 +3715,9 @@ def execute_with_deterministic_planner(
     if task.task_type == "player_match_training_followup_review":
         task.review_notes = deterministic_player_match_followup_notes(agent, task, model_name)
         return
+    if task.task_type == "player_match_guidance_feedback_review":
+        task.review_notes = deterministic_player_match_guidance_feedback_notes(agent, task, model_name)
+        return
     if task.task_type == "team_match_training_followup_review":
         task.review_notes = deterministic_team_match_followup_notes(agent, task, model_name)
         return
@@ -3863,6 +3866,28 @@ def deterministic_player_match_followup_notes(agent: Agent, task: AgentTask, mod
             "- Adjust sprint, pressing, recovery, and technical-load prescriptions for readiness and soreness.",
             "- Ask the player to complete a self-assessment after the follow-up block.",
             "Human review: coaches must approve material load changes and any medical or availability decisions.",
+        ]
+    )
+
+
+def deterministic_player_match_guidance_feedback_notes(agent: Agent, task: AgentTask, model_name: str) -> str:
+    context = parse_agent_input_ref(task.input_ref)
+    tracking = context.get("tracking", "unknown")
+    person = context.get("person", "unknown")
+    track = context.get("track", "unknown")
+    status = context.get("status", "unknown")
+    focus = context.get("focus", "match guidance feedback")
+    return "\n".join(
+        [
+            f"{agent.name} prepared a deterministic player match guidance feedback review using {model_name}.",
+            f"Person {person} responded {status} for tracking run {tracking}, track {track}.",
+            f"Requested focus: {focus}.",
+            "Recommended coach actions:",
+            "- Review the player response against the shared match guidance card and video clip context.",
+            "- If the player asked for help or reported confusion, schedule a short coach check-in before increasing load.",
+            "- Convert completed action counts into the next training feedback review instead of assuming readiness improved.",
+            "- Keep guardians copied where safeguarding, age, or consent policy requires it.",
+            "Human review: coaches own all player-facing guidance and training-load adjustments.",
         ]
     )
 

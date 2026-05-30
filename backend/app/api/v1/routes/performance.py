@@ -79,6 +79,8 @@ from app.schemas.performance import (
     PerformanceMatchPlayerGuidancePublishAuditRead,
     PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceMatchPlayerGuidancePublishRead,
+    PlayerMatchGuidanceFeedbackCreate,
+    PlayerMatchGuidanceFeedbackRead,
     PerformanceMatchPlayerGuidanceReviewRead,
     PerformanceMatchTrainingFollowupCreate,
     PerformanceMatchTrainingFollowupRead,
@@ -219,6 +221,7 @@ from app.services.performance import (
     list_performance_video_pose_samples,
     process_performance_video_pose_samples,
     publish_match_tracking_player_guidance,
+    player_match_guidance_feedback_read,
     share_performance_highlight_reel,
     list_performance_forecast_validation_runs,
     list_performance_model_extraction_benchmark_datasets,
@@ -250,6 +253,7 @@ from app.services.performance import (
     review_match_tracking_player_guidance,
     start_wearable_provider_oauth,
     submit_my_shared_highlight_reel_feedback,
+    submit_my_player_match_guidance_feedback,
     review_assessment,
     review_observation,
     send_performance_injury_risk_alert,
@@ -955,6 +959,24 @@ async def create_player_match_training_followup_route(
 ) -> PlayerMatchTrainingFollowupRead:
     return PlayerMatchTrainingFollowupRead(
         **await create_player_match_training_followup(db, identity, athlete_profile_id, payload)
+    )
+
+
+@router.post(
+    "/my-match-guidance/{recipient_id}/feedback",
+    response_model=PlayerMatchGuidanceFeedbackRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_my_player_match_guidance_feedback_route(
+    recipient_id: UUID,
+    payload: PlayerMatchGuidanceFeedbackCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> PlayerMatchGuidanceFeedbackRead:
+    return PlayerMatchGuidanceFeedbackRead(
+        **player_match_guidance_feedback_read(
+            await submit_my_player_match_guidance_feedback(db, identity, recipient_id, payload)
+        )
     )
 
 

@@ -1260,6 +1260,7 @@ Latest slices:
 - Football match tracking runs now queue Match Intelligence Agent review tasks and expose the queued task id beside run quality/readiness signals.
 - Executed Match Intelligence Agent reviews now flow back onto match tracking run payloads and the coach UI with review status, first-line notes, and an inline AI review action.
 - Match analysis reports now embed Match Intelligence Agent review status and notes in both API payloads and Markdown exports so governed AI context travels with coach report artifacts.
+- Player match-guidance cards now accept athlete feedback, completed-action acknowledgements, and help requests that queue Training Strategy Agent review tasks, with feedback state visible in the player portal and operations console.
 
 ## Next Actions
 
