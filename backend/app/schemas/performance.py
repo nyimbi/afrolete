@@ -638,6 +638,9 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     readiness_level: str = "unknown"
     quality_warnings: list[str] = Field(default_factory=list)
     coaching_guidance: list[str] = Field(default_factory=list)
+    tactical_guidance: list[str] = Field(default_factory=list)
+    team_shape_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    formation_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]
     samples: list[PerformanceMatchTrackingSampleRead]
     calibration: PerformanceMatchPitchCalibrationRead | None = None

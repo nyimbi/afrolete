@@ -2992,6 +2992,9 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
                 {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 0, "x_percent": 0, "y_percent": 60},
                 {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 1, "x_percent": 10, "y_percent": 60},
                 {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 2, "x_percent": 20, "y_percent": 60},
+                {"track_id": "home-4", "team_label": "Home", "player_label": "Center Back", "jersey_number": "4", "timestamp_seconds": 0, "x_percent": 0, "y_percent": 20},
+                {"track_id": "home-4", "team_label": "Home", "player_label": "Center Back", "jersey_number": "4", "timestamp_seconds": 1, "x_percent": 0, "y_percent": 20},
+                {"track_id": "home-4", "team_label": "Home", "player_label": "Center Back", "jersey_number": "4", "timestamp_seconds": 2, "x_percent": 0, "y_percent": 20},
                 {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 0, "x_percent": 0, "y_percent": 0},
                 {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 1, "x_percent": 3, "y_percent": 8},
                 {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 2, "x_percent": 6, "y_percent": 16},
@@ -3003,8 +3006,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["model_policy"] == "afrolete-match-tracking-import-v1"
     assert tracking["calibration_id"] == calibration["id"]
     assert tracking["calibration"]["name"] == "Broadcast wide camera"
-    assert tracking["sample_count"] == 6
-    assert tracking["player_count"] == 2
+    assert tracking["sample_count"] == 9
+    assert tracking["player_count"] == 3
     assert tracking["total_distance_m"] == 30.0
     assert tracking["max_speed_mps"] == 10.0
     assert tracking["high_speed_distance_m"] == 20.0
@@ -3021,6 +3024,12 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert striker["tracking_quality_score"] > 0.5
     assert any("High peak speed" in flag for flag in striker["coaching_flags"])
     assert striker["dominant_zone"] == "defensive_central"
+    home_shape = next(shape for shape in tracking["team_shape_metrics"] if shape["team_label"] == "Home")
+    assert home_shape["track_count"] == 2
+    assert home_shape["average_width_percent"] == 40.0
+    assert home_shape["shape_hint"] == "deep_block_shape"
+    assert any(snapshot["team_label"] == "Home" for snapshot in tracking["formation_snapshots"])
+    assert any("Home" in guidance for guidance in tracking["tactical_guidance"])
 
     calibrations = client.get(
         f"/api/v1/performance/scouting/pitch-calibrations?organization_id={organization['id']}&video_asset_id={video_asset['id']}",

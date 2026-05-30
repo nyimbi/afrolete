@@ -7984,6 +7984,7 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         overall_max_speed = max(overall_max_speed, max_speed)
     identity_continuity_score = sum(continuity_scores) / len(continuity_scores) if continuity_scores else 0.0
     average_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
+    team_shape = derive_match_team_shape(samples)
     return {
         "sample_count": len(samples),
         "player_count": len(player_metrics),
@@ -7995,7 +7996,109 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "average_detection_confidence": round(average_confidence, 3),
         "speed_spike_count": speed_spike_count,
         "player_metrics": player_metrics,
+        "team_shape_metrics": team_shape["team_shape_metrics"],
+        "formation_snapshots": team_shape["formation_snapshots"],
     }
+
+
+def derive_match_team_shape(samples: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
+    by_team: dict[str, list[dict[str, object]]] = {}
+    for sample in samples:
+        label = str(sample.get("team_label") or "unassigned").strip() or "unassigned"
+        by_team.setdefault(label, []).append(sample)
+    team_shape_metrics: list[dict[str, object]] = []
+    formation_snapshots: list[dict[str, object]] = []
+    for team_label, team_samples in sorted(by_team.items()):
+        track_ids = sorted({str(sample.get("track_id")) for sample in team_samples if sample.get("track_id")})
+        by_timestamp: dict[float, list[dict[str, object]]] = {}
+        for sample in team_samples:
+            by_timestamp.setdefault(round(float(sample["timestamp_seconds"]), 2), []).append(sample)
+        widths: list[float] = []
+        depths: list[float] = []
+        centroid_xs: list[float] = []
+        centroid_ys: list[float] = []
+        compactness_scores: list[float] = []
+        for timestamp, rows in sorted(by_timestamp.items()):
+            if not rows:
+                continue
+            x_values = [float(row["x_percent"]) for row in rows]
+            y_values = [float(row["y_percent"]) for row in rows]
+            width = max(y_values) - min(y_values)
+            depth = max(x_values) - min(x_values)
+            centroid_x = sum(x_values) / len(x_values)
+            centroid_y = sum(y_values) / len(y_values)
+            compactness = max(0.0, min(1.0, 1.0 - ((width + depth) / 200)))
+            widths.append(width)
+            depths.append(depth)
+            centroid_xs.append(centroid_x)
+            centroid_ys.append(centroid_y)
+            compactness_scores.append(compactness)
+            if len(formation_snapshots) < 24:
+                formation_snapshots.append(
+                    {
+                        "team_label": team_label,
+                        "timestamp_seconds": timestamp,
+                        "player_count": len(rows),
+                        "width_percent": round(width, 2),
+                        "depth_percent": round(depth, 2),
+                        "centroid_x_percent": round(centroid_x, 2),
+                        "centroid_y_percent": round(centroid_y, 2),
+                        "dominant_zone": match_tracking_zone(centroid_x, centroid_y),
+                    }
+                )
+        average_width = sum(widths) / len(widths) if widths else 0.0
+        average_depth = sum(depths) / len(depths) if depths else 0.0
+        average_centroid_x = sum(centroid_xs) / len(centroid_xs) if centroid_xs else 0.0
+        average_centroid_y = sum(centroid_ys) / len(centroid_ys) if centroid_ys else 0.0
+        average_compactness = sum(compactness_scores) / len(compactness_scores) if compactness_scores else 0.0
+        team_shape_metrics.append(
+            {
+                "team_label": team_label,
+                "track_count": len(track_ids),
+                "sample_count": len(team_samples),
+                "shape_sample_count": len(widths),
+                "average_width_percent": round(average_width, 2),
+                "average_depth_percent": round(average_depth, 2),
+                "average_centroid_x_percent": round(average_centroid_x, 2),
+                "average_centroid_y_percent": round(average_centroid_y, 2),
+                "average_compactness_score": round(average_compactness, 3),
+                "dominant_zone": match_tracking_zone(average_centroid_x, average_centroid_y),
+                "shape_hint": match_team_shape_hint(
+                    track_count=len(track_ids),
+                    average_width=average_width,
+                    average_depth=average_depth,
+                    average_centroid_x=average_centroid_x,
+                    average_compactness=average_compactness,
+                ),
+            }
+        )
+    return {
+        "team_shape_metrics": team_shape_metrics,
+        "formation_snapshots": formation_snapshots,
+    }
+
+
+def match_team_shape_hint(
+    *,
+    track_count: int,
+    average_width: float,
+    average_depth: float,
+    average_centroid_x: float,
+    average_compactness: float,
+) -> str:
+    if track_count < 2:
+        return "individual_track"
+    if average_centroid_x >= 62:
+        return "high_press_shape"
+    if average_centroid_x <= 38:
+        return "deep_block_shape"
+    if average_compactness < 0.55:
+        return "stretched_shape"
+    if average_width >= 48 and average_depth <= 24:
+        return "wide_flat_line"
+    if average_depth >= 45:
+        return "vertical_stagger"
+    return "compact_mid_block"
 
 
 def match_tracking_zone(x_percent: float, y_percent: float) -> str:
@@ -8096,6 +8199,7 @@ def enrich_match_tracking_summary(
         speed_spike_count=speed_spikes,
     )
     coaching_guidance = match_tracking_coaching_guidance(summary, readiness_level=readiness_level)
+    tactical_guidance = match_tracking_tactical_guidance(summary)
     return {
         **summary,
         "tracking_quality_score": round(tracking_quality, 3),
@@ -8103,6 +8207,7 @@ def enrich_match_tracking_summary(
         "readiness_level": readiness_level,
         "quality_warnings": quality_warnings,
         "coaching_guidance": coaching_guidance,
+        "tactical_guidance": tactical_guidance,
     }
 
 
@@ -8177,6 +8282,35 @@ def match_tracking_coaching_guidance(summary: dict[str, object], *, readiness_le
     if low_quality:
         guidance.append(f"Manually review identities for {', '.join(low_quality)} before publishing player reports.")
     return guidance or ["Tracking profile is stable enough for coach review."]
+
+
+def match_tracking_tactical_guidance(summary: dict[str, object]) -> list[str]:
+    shapes = [shape for shape in list(summary.get("team_shape_metrics") or []) if isinstance(shape, dict)]
+    if not shapes:
+        return ["Capture simultaneous player positions to derive team shape and formation guidance."]
+    guidance: list[str] = []
+    for shape in shapes[:4]:
+        team = str(shape.get("team_label") or "team")
+        hint = str(shape.get("shape_hint") or "")
+        width = float(shape.get("average_width_percent") or 0.0)
+        depth = float(shape.get("average_depth_percent") or 0.0)
+        compactness = float(shape.get("average_compactness_score") or 0.0)
+        centroid_x = float(shape.get("average_centroid_x_percent") or 0.0)
+        if hint == "high_press_shape":
+            guidance.append(f"{team} is holding a high press shape; review recovery cover behind the first line.")
+        elif hint == "deep_block_shape":
+            guidance.append(f"{team} is sitting deep; review outlet distances and transition support.")
+        elif hint == "stretched_shape" or compactness < 0.6:
+            guidance.append(f"{team} is stretched across width/depth; tighten distances before pressing triggers.")
+        elif hint == "wide_flat_line":
+            guidance.append(f"{team} has a wide flat line; inspect weak-side protection and central gaps.")
+        elif hint == "vertical_stagger":
+            guidance.append(f"{team} has strong vertical stagger; check support angles between lines.")
+        else:
+            guidance.append(
+                f"{team} shape is compact around x={round(centroid_x)}%, width={round(width)}%, depth={round(depth)}%."
+            )
+    return guidance
 
 
 def match_tracking_metric_label(metric: object) -> str:
@@ -8931,6 +9065,9 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "readiness_level": summary.get("readiness_level", "unknown"),
         "quality_warnings": summary.get("quality_warnings", []),
         "coaching_guidance": summary.get("coaching_guidance", []),
+        "tactical_guidance": summary.get("tactical_guidance", []),
+        "team_shape_metrics": summary.get("team_shape_metrics", []),
+        "formation_snapshots": summary.get("formation_snapshots", []),
         "player_metrics": summary.get("player_metrics", []),
         "samples": [match_tracking_sample_read(sample) for sample in samples],
         "calibration": match_pitch_calibration_read(calibration) if calibration is not None else None,

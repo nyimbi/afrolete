@@ -25105,12 +25105,36 @@ export default function HomePage() {
                       </div>
                     </article>
                   ))}
+                  {performanceMatchTrackingRun.tactical_guidance.slice(0, 4).map((guidance, index) => (
+                    <article key={`tracking-tactical-guidance-${index}`} className="task-card">
+                      <div>
+                        <strong>Tactical shape guidance</strong>
+                        <span>{guidance}</span>
+                        <small>{performanceMatchTrackingRun.formation_snapshots.length} synchronized shape snapshot(s)</small>
+                      </div>
+                    </article>
+                  ))}
                   {performanceMatchTrackingRun.quality_warnings.slice(0, 4).map((warning, index) => (
                     <article key={`tracking-warning-${index}`} className="task-card">
                       <div>
                         <strong>Review note</strong>
                         <span>{warning}</span>
                         <small>{performanceMatchTrackingRun.model_policy}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.team_shape_metrics.slice(0, 4).map((shape, index) => (
+                    <article key={`team-shape-${String(shape.team_label ?? index)}`} className="task-card">
+                      <div>
+                        <strong>{String(shape.team_label ?? "Team")} · {String(shape.shape_hint ?? "shape")}</strong>
+                        <span>
+                          {Number(shape.track_count ?? 0)} tracks · width {Math.round(Number(shape.average_width_percent ?? 0))}% ·{" "}
+                          depth {Math.round(Number(shape.average_depth_percent ?? 0))}% · compactness {Math.round(Number(shape.average_compactness_score ?? 0) * 100)}%
+                        </span>
+                        <small>
+                          centroid x {Math.round(Number(shape.average_centroid_x_percent ?? 0))}% ·{" "}
+                          y {Math.round(Number(shape.average_centroid_y_percent ?? 0))}% · {String(shape.dominant_zone ?? "unknown").replaceAll("_", " ")}
+                        </small>
                       </div>
                     </article>
                   ))}

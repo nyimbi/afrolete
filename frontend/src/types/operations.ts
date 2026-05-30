@@ -6934,6 +6934,9 @@ export type PerformanceMatchTrackingRunRead = {
   readiness_level: string;
   quality_warnings: string[];
   coaching_guidance: string[];
+  tactical_guidance: string[];
+  team_shape_metrics: Record<string, unknown>[];
+  formation_snapshots: Record<string, unknown>[];
   player_metrics: PerformanceMatchTrackingPlayerMetricRead[];
   samples: PerformanceMatchTrackingSampleRead[];
   calibration: PerformanceMatchPitchCalibrationRead | null;
