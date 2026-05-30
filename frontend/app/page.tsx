@@ -380,6 +380,7 @@ import type {
   PerformanceMatchAnalysisReportRead,
   PerformanceMatchPitchCalibrationRead,
   PerformanceMatchTrackingProviderIngestEventRead,
+  PerformanceMatchTrackingProviderWebhookRead,
   PerformanceMatchTrackingProviderImportCreate,
   PerformanceMatchTrackingRunCreate,
   PerformanceMatchTrackingIdentityReviewRead,
@@ -10407,6 +10408,44 @@ export default function HomePage() {
             : current
         );
         addLog(`Auto-tracked ${run.player_count} tracks from video frames`, "good");
+      }
+    );
+  };
+
+  const reprocessProviderMatchTrackingIngest = (ingest: PerformanceMatchTrackingProviderIngestEventRead) => {
+    if (!selectedOrganizationId || !ingest.payload_available) {
+      addLog("Select a retained provider ingest payload before reprocessing", "bad");
+      return;
+    }
+    runAction(
+      "reprocess-provider-match-tracking-ingest",
+      () =>
+        apiRequest<PerformanceMatchTrackingProviderWebhookRead>(
+          `/performance/scouting/tracking-provider-ingests/${ingest.id}/reprocess`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              calibration_id: performanceMatchPitchCalibration?.video_asset_id === ingest.video_asset_id
+                ? performanceMatchPitchCalibration.id
+                : null,
+              notes: "Operations console reprocess for updated calibration, review, or downstream metrics."
+            }
+          }
+        ),
+      (result) => {
+        if (result.tracking_run) {
+          setPerformanceMatchTrackingRun(result.tracking_run);
+          setPerformanceMatchTrackingRuns((current) => [
+            result.tracking_run!,
+            ...current.filter((item) => item.id !== result.tracking_run_id)
+          ]);
+        }
+        addLog(
+          `Reprocessed ${result.source_provider.replaceAll("_", " ")} callback into ${result.sample_count} samples`,
+          "good"
+        );
+        void loadOppositionScouting(selectedOrganizationId);
       }
     );
   };
@@ -25798,7 +25837,7 @@ export default function HomePage() {
                       <div>
                         <strong>{ingest.source_provider.replaceAll("_", " ")} · {ingest.status}</strong>
                         <span>
-                          {ingest.sample_count} samples · {ingest.player_count} players ·{" "}
+                          {ingest.frame_count} frames · {ingest.sample_count} samples · {ingest.player_count} players ·{" "}
                           {ingest.signature_required
                             ? ingest.signature_validated
                               ? "signature validated"
@@ -25806,11 +25845,20 @@ export default function HomePage() {
                             : "signature not required"}
                         </span>
                         <small>
-                          {ingest.external_event_id} · {new Date(ingest.received_at).toLocaleString()} ·{" "}
+                          {ingest.payload_available ? "payload retained" : "payload unavailable"} · {ingest.external_event_id} · {new Date(ingest.received_at).toLocaleString()} ·{" "}
                           {ingest.payload_hash.slice(0, 10)}
                         </small>
                       </div>
                       <span>
+                        {ingest.payload_available ? (
+                          <button
+                            type="button"
+                            onClick={() => reprocessProviderMatchTrackingIngest(ingest)}
+                            disabled={busyAction !== null}
+                          >
+                            Reprocess
+                          </button>
+                        ) : null}
                         {ingest.tracking_run_id ? (
                           <button
                             type="button"

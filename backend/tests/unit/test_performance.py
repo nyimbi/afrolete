@@ -3931,6 +3931,41 @@ def test_match_tracking_provider_webhook_is_signed_and_replay_safe(
     assert audit_rows[0]["sample_count"] == 4
     assert audit_rows[0]["player_count"] == 1
     assert audit_rows[0]["payload_hash"]
+    assert audit_rows[0]["payload_available"] is True
+    assert audit_rows[0]["frame_count"] == 2
+
+    reprocess_response = client.post(
+        f"/api/v1/performance/scouting/tracking-provider-ingests/{audit_rows[0]['id']}/reprocess",
+        headers=identity_headers,
+        json={"notes": "Reprocess after calibration review."},
+    )
+    assert reprocess_response.status_code == 200
+    reprocessed = reprocess_response.json()
+    assert reprocessed["reprocessed"] is True
+    assert reprocessed["tracking_run_id"] != ingest["tracking_run_id"]
+    assert reprocessed["sample_count"] == 4
+    assert reprocessed["tracking_run"]["model_policy"].endswith("-reprocess")
+
+    runs_after_reprocess = client.get(
+        f"/api/v1/performance/scouting/tracking-runs?organization_id={organization['id']}"
+        f"&video_asset_id={video_asset['id']}",
+        headers=identity_headers,
+    )
+    assert runs_after_reprocess.status_code == 200
+    run_rows = runs_after_reprocess.json()
+    assert len(run_rows) == 2
+    assert any(row["status"] == "superseded" for row in run_rows)
+
+    audit_after_reprocess = client.get(
+        f"/api/v1/performance/scouting/tracking-provider-ingests?organization_id={organization['id']}"
+        f"&video_asset_id={video_asset['id']}",
+        headers=identity_headers,
+    )
+    assert audit_after_reprocess.status_code == 200
+    audit_row = audit_after_reprocess.json()[0]
+    assert audit_row["status"] == "reprocessed"
+    assert audit_row["tracking_run_id"] == reprocessed["tracking_run_id"]
+    assert audit_row["payload_available"] is True
     performance_service.get_settings.cache_clear()
 
 

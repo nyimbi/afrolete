@@ -66,6 +66,7 @@ from app.schemas.performance import (
     PerformanceMatchTrackingIdentityReviewRead,
     PerformanceMatchTrackingIdentityReviewResultRead,
     PerformanceMatchTrackingProviderIngestEventRead,
+    PerformanceMatchTrackingProviderIngestReprocessCreate,
     PerformanceMatchTrackingProviderImportCreate,
     PerformanceMatchTrackingProviderWebhookCreate,
     PerformanceMatchTrackingProviderWebhookRead,
@@ -204,6 +205,7 @@ from app.services.performance import (
     run_wearable_provider_sync,
     refresh_wearable_provider_token,
     register_wearable_provider_webhook,
+    reprocess_match_tracking_provider_ingest_event,
     start_wearable_provider_oauth,
     review_assessment,
     review_observation,
@@ -1176,6 +1178,28 @@ async def list_match_tracking_provider_ingest_events_route(
             limit=limit,
         )
     ]
+
+
+@router.post(
+    "/scouting/tracking-provider-ingests/{ingest_event_id}/reprocess",
+    response_model=PerformanceMatchTrackingProviderWebhookRead,
+)
+async def reprocess_match_tracking_provider_ingest_event_route(
+    ingest_event_id: UUID,
+    payload: PerformanceMatchTrackingProviderIngestReprocessCreate | None = None,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchTrackingProviderWebhookRead:
+    return PerformanceMatchTrackingProviderWebhookRead(
+        **await reprocess_match_tracking_provider_ingest_event(
+            db,
+            identity,
+            ingest_event_id,
+            payload or PerformanceMatchTrackingProviderIngestReprocessCreate(),
+            authz,
+        )
+    )
 
 
 @router.post(

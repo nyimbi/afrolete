@@ -7189,7 +7189,32 @@ export type PerformanceMatchTrackingProviderIngestEventRead = {
   sample_count: number;
   player_count: number;
   status: string;
+  payload_available: boolean;
+  frame_count: number;
   created_at: string;
+};
+
+export type PerformanceMatchTrackingProviderIngestReprocessCreate = {
+  calibration_id?: UUID | null;
+  notes?: string | null;
+};
+
+export type PerformanceMatchTrackingProviderWebhookRead = {
+  ingest_event_id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  tracking_run_id: UUID | null;
+  source_provider: string;
+  external_event_id: string;
+  replayed: boolean;
+  reprocessed: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
+  sample_count: number;
+  player_count: number;
+  payload_hash: string;
+  received_at: string;
+  tracking_run: PerformanceMatchTrackingRunRead | null;
 };
 
 export type PerformanceMatchTrackingIdentityReviewRead = {

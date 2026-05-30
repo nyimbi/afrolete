@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -113,6 +113,7 @@ from app.schemas.performance import (
     PerformanceMatchTrackingProviderDetection,
     PerformanceMatchTrackingProviderFrame,
     PerformanceMatchTrackingProviderImportCreate,
+    PerformanceMatchTrackingProviderIngestReprocessCreate,
     PerformanceMatchTrackingProviderWebhookCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingSampleCreate,
@@ -863,6 +864,11 @@ async def create_match_tracking_run(
         if existing_runs:
             run_ids = [run.id for run in existing_runs]
             await db.execute(
+                update(PerformanceMatchTrackingProviderIngestEvent)
+                .where(PerformanceMatchTrackingProviderIngestEvent.tracking_run_id.in_(run_ids))
+                .values(tracking_run_id=None, status="superseded")
+            )
+            await db.execute(
                 delete(PerformanceMatchTrackingSample).where(
                     PerformanceMatchTrackingSample.tracking_run_id.in_(run_ids)
                 )
@@ -1056,6 +1062,7 @@ async def ingest_match_tracking_provider_webhook(
         provider=provider,
         external_event_id=payload.external_event_id,
         payload_hash=payload_hash,
+        payload_json=json.dumps(payload.model_dump(mode="json"), default=str),
         received_at=datetime.now(UTC),
         signature_required=signature_required,
         signature_validated=signature_validated,
@@ -1215,6 +1222,91 @@ async def list_match_tracking_provider_ingest_events(
                 ).limit(limit)
             )
         ).all()
+    )
+
+
+async def reprocess_match_tracking_provider_ingest_event(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    ingest_event_id: UUID,
+    payload: PerformanceMatchTrackingProviderIngestReprocessCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    ingest_event = await db.get(PerformanceMatchTrackingProviderIngestEvent, ingest_event_id)
+    if ingest_event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider ingest event not found")
+    await ensure_manage_performance(authz, identity, ingest_event.organization_id)
+    stored_payload = decode_json_dict(ingest_event.payload_json)
+    if not stored_payload:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider ingest payload was not retained for this event",
+        )
+    try:
+        webhook_payload = PerformanceMatchTrackingProviderWebhookCreate.model_validate(stored_payload)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider ingest payload can no longer be validated",
+        ) from error
+    if (
+        webhook_payload.organization_id != ingest_event.organization_id
+        or webhook_payload.video_asset_id != ingest_event.video_asset_id
+    ):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Provider ingest payload does not match audit row")
+    previous_run = (
+        await db.get(PerformanceMatchTrackingRun, ingest_event.tracking_run_id)
+        if ingest_event.tracking_run_id is not None
+        else None
+    )
+    if previous_run is not None:
+        previous_run.status = "superseded"
+    reprocessed_at = datetime.now(UTC)
+    warnings = list(webhook_payload.quality_warnings)
+    warnings.append(
+        "Provider tracking payload was reprocessed from the retained signed ingest audit; coach review remains required."
+    )
+    run = await create_match_tracking_provider_import(
+        db,
+        identity,
+        ingest_event.video_asset_id,
+        PerformanceMatchTrackingProviderImportCreate(
+            organization_id=ingest_event.organization_id,
+            calibration_id=payload.calibration_id or webhook_payload.calibration_id,
+            source_provider=webhook_payload.source_provider,
+            model_policy=f"{webhook_payload.model_policy}-reprocess"[:160],
+            pitch_length_m=webhook_payload.pitch_length_m,
+            pitch_width_m=webhook_payload.pitch_width_m,
+            replace_existing=False,
+            frames=webhook_payload.frames,
+            provider_metadata={
+                **webhook_payload.provider_metadata,
+                "external_event_id": webhook_payload.external_event_id,
+                "signature_required": ingest_event.signature_required,
+                "signature_validated": ingest_event.signature_validated,
+                "ingest_contract": "afrolete-provider-tracking-webhook-v1",
+                "reprocessed_from_ingest_event_id": str(ingest_event.id),
+                "reprocessed_at": reprocessed_at.isoformat(),
+                "reprocessed_by_person_id": str(identity.person_id),
+                **({"reprocess_notes": payload.notes} if payload.notes else {}),
+            },
+            quality_warnings=warnings,
+        ),
+        authz,
+    )
+    ingest_event.tracking_run_id = run["id"]
+    ingest_event.sample_count = int(run["sample_count"])
+    ingest_event.player_count = int(run["player_count"])
+    ingest_event.status = "reprocessed"
+    await db.commit()
+    await db.refresh(ingest_event)
+    tracking_run = await db.get(PerformanceMatchTrackingRun, run["id"])
+    return await match_tracking_provider_webhook_result(
+        db,
+        ingest_event,
+        replayed=False,
+        tracking_run=tracking_run,
+        reprocessed=True,
     )
 
 
@@ -3835,6 +3927,8 @@ def wearable_webhook_result(
 def match_tracking_provider_ingest_event_read(
     ingest_event: PerformanceMatchTrackingProviderIngestEvent,
 ) -> dict[str, object]:
+    stored_payload = decode_json_dict(ingest_event.payload_json)
+    frames = stored_payload.get("frames") if isinstance(stored_payload, dict) else None
     return {
         "id": ingest_event.id,
         "organization_id": ingest_event.organization_id,
@@ -3851,6 +3945,8 @@ def match_tracking_provider_ingest_event_read(
         "sample_count": ingest_event.sample_count,
         "player_count": ingest_event.player_count,
         "status": ingest_event.status,
+        "payload_available": bool(stored_payload),
+        "frame_count": len(frames) if isinstance(frames, list) else 0,
         "created_at": ingest_event.created_at,
     }
 
@@ -3861,6 +3957,7 @@ async def match_tracking_provider_webhook_result(
     *,
     replayed: bool,
     tracking_run: PerformanceMatchTrackingRun | None,
+    reprocessed: bool = False,
 ) -> dict[str, object]:
     return {
         "ingest_event_id": ingest_event.id,
@@ -3870,6 +3967,7 @@ async def match_tracking_provider_webhook_result(
         "source_provider": ingest_event.provider,
         "external_event_id": ingest_event.external_event_id,
         "replayed": replayed,
+        "reprocessed": reprocessed,
         "signature_required": ingest_event.signature_required,
         "signature_validated": ingest_event.signature_validated,
         "sample_count": ingest_event.sample_count,

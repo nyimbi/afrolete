@@ -812,6 +812,7 @@ class PerformanceMatchTrackingProviderWebhookRead(BaseModel):
     source_provider: str
     external_event_id: str
     replayed: bool
+    reprocessed: bool = False
     signature_required: bool
     signature_validated: bool
     sample_count: int
@@ -837,7 +838,14 @@ class PerformanceMatchTrackingProviderIngestEventRead(BaseModel):
     sample_count: int
     player_count: int
     status: str
+    payload_available: bool = False
+    frame_count: int = 0
     created_at: datetime
+
+
+class PerformanceMatchTrackingProviderIngestReprocessCreate(BaseModel):
+    calibration_id: UUID | None = None
+    notes: str | None = Field(default=None, max_length=1000)
 
 
 class PerformanceMatchTrackingIdentityReviewCreate(BaseModel):
