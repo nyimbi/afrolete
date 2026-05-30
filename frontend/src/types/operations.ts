@@ -6821,6 +6821,7 @@ export type OppositionScoutingReportRead = {
   id: UUID;
   organization_id: UUID;
   video_asset_id: UUID;
+  calibration_id: UUID | null;
   team_id: UUID | null;
   competition_id: UUID | null;
   event_id: UUID | null;
@@ -6839,6 +6840,31 @@ export type OppositionScoutingReportRead = {
   set_pieces: OppositionScoutingFindingRead[];
   status: string;
   generated_at: string;
+};
+
+export type PerformancePitchCalibrationPoint = {
+  label: string;
+  image_x_percent: number;
+  image_y_percent: number;
+  pitch_x_meters: number;
+  pitch_y_meters: number;
+};
+
+export type PerformanceMatchPitchCalibrationRead = {
+  id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  created_by_person_id: UUID | null;
+  name: string;
+  calibration_method: string;
+  pitch_length_m: number;
+  pitch_width_m: number;
+  quality_score: number;
+  points: PerformancePitchCalibrationPoint[];
+  transform: Record<string, number | string>;
+  status: string;
+  notes: string | null;
+  created_at: string;
 };
 
 export type PerformanceMatchTrackingSampleRead = {
@@ -6898,6 +6924,7 @@ export type PerformanceMatchTrackingRunRead = {
   sprint_count: number;
   player_metrics: PerformanceMatchTrackingPlayerMetricRead[];
   samples: PerformanceMatchTrackingSampleRead[];
+  calibration: PerformanceMatchPitchCalibrationRead | null;
   started_at: string;
   completed_at: string | null;
 };

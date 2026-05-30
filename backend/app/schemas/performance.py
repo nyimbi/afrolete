@@ -496,6 +496,42 @@ class PerformancePoseGaitAnalysisRead(BaseModel):
     coaching: PerformanceVideoCoachingRead | None
 
 
+class PerformancePitchCalibrationPoint(BaseModel):
+    label: str = Field(min_length=2, max_length=80)
+    image_x_percent: float = Field(ge=0, le=100)
+    image_y_percent: float = Field(ge=0, le=100)
+    pitch_x_meters: float = Field(ge=0, le=130)
+    pitch_y_meters: float = Field(ge=0, le=90)
+
+
+class PerformanceMatchPitchCalibrationCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    calibration_method: str = Field(default="manual_corner_map", min_length=2, max_length=80)
+    pitch_length_m: float = Field(default=105.0, ge=80, le=130)
+    pitch_width_m: float = Field(default=68.0, ge=45, le=90)
+    points: list[PerformancePitchCalibrationPoint] = Field(min_length=4, max_length=12)
+    status: str = Field(default="active", pattern="^(active|draft|retired)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class PerformanceMatchPitchCalibrationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    created_by_person_id: UUID | None
+    name: str
+    calibration_method: str
+    pitch_length_m: float
+    pitch_width_m: float
+    quality_score: float
+    points: list[PerformancePitchCalibrationPoint]
+    transform: dict[str, float | str]
+    status: str
+    notes: str | None
+    created_at: datetime
+
+
 class PerformanceMatchTrackingSampleCreate(BaseModel):
     track_id: str = Field(min_length=1, max_length=120)
     person_id: UUID | None = None
@@ -523,6 +559,7 @@ class PerformanceMatchTrackingSampleCreate(BaseModel):
 
 class PerformanceMatchTrackingRunCreate(BaseModel):
     organization_id: UUID
+    calibration_id: UUID | None = None
     source_provider: str = Field(default="manual_tracking", min_length=2, max_length=80)
     pitch_length_m: float = Field(default=105.0, ge=80, le=130)
     pitch_width_m: float = Field(default=68.0, ge=45, le=90)
@@ -575,6 +612,7 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     id: UUID
     organization_id: UUID
     video_asset_id: UUID
+    calibration_id: UUID | None
     team_id: UUID | None
     event_id: UUID | None
     created_by_person_id: UUID | None
@@ -591,6 +629,7 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     sprint_count: int
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]
     samples: list[PerformanceMatchTrackingSampleRead]
+    calibration: PerformanceMatchPitchCalibrationRead | None = None
     started_at: datetime
     completed_at: datetime | None
 

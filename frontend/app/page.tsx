@@ -369,6 +369,7 @@ import type {
   PerformanceModelExtractionBenchmarkRunRead,
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
+  PerformanceMatchPitchCalibrationRead,
   PerformanceMatchTrackingRunRead,
   PerformanceMovementReferenceProfileRead,
   PerformanceObservationRead,
@@ -1665,6 +1666,10 @@ export default function HomePage() {
     useState<PerformanceMatchTrackingRunRead[]>([]);
   const [performanceMatchTrackingRun, setPerformanceMatchTrackingRun] =
     useState<PerformanceMatchTrackingRunRead | null>(null);
+  const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
+    useState<PerformanceMatchPitchCalibrationRead[]>([]);
+  const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
+    useState<PerformanceMatchPitchCalibrationRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -3656,7 +3661,7 @@ export default function HomePage() {
     if (teamId) {
       params.set("team_id", teamId);
     }
-    const [videoData, reportData, trackingData] = await Promise.all([
+    const [videoData, reportData, trackingData, calibrationData] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
         { identity }
@@ -3668,11 +3673,16 @@ export default function HomePage() {
       apiRequest<PerformanceMatchTrackingRunRead[]>(
         `/performance/scouting/tracking-runs?${params.toString()}`,
         { identity }
+      ),
+      apiRequest<PerformanceMatchPitchCalibrationRead[]>(
+        `/performance/scouting/pitch-calibrations?${params.toString()}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
     setOppositionScoutingReports(reportData);
     setPerformanceMatchTrackingRuns(trackingData);
+    setPerformanceMatchPitchCalibrations(calibrationData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -3681,6 +3691,11 @@ export default function HomePage() {
     );
     setPerformanceMatchTrackingRun((current) =>
       current && trackingData.some((run) => run.id === current.id) ? current : trackingData[0] ?? null
+    );
+    setPerformanceMatchPitchCalibration((current) =>
+      current && calibrationData.some((calibration) => calibration.id === current.id)
+        ? current
+        : calibrationData[0] ?? null
     );
   }, [identity]);
 
@@ -4755,6 +4770,8 @@ export default function HomePage() {
       setOppositionScoutingReport(null);
       setPerformanceMatchTrackingRuns([]);
       setPerformanceMatchTrackingRun(null);
+      setPerformanceMatchPitchCalibrations([]);
+      setPerformanceMatchPitchCalibration(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -9771,6 +9788,45 @@ export default function HomePage() {
     );
   };
 
+  const calibrateOppositionMatchVideo = () => {
+    if (!selectedOrganizationId || !oppositionScoutingVideo) {
+      addLog("Upload or select an opponent match video before calibrating the pitch", "bad");
+      return;
+    }
+    runAction(
+      "calibrate-opposition-match-video",
+      () =>
+        apiRequest<PerformanceMatchPitchCalibrationRead>(
+          `/performance/scouting/videos/${oppositionScoutingVideo.id}/pitch-calibrations`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              name: "Broadcast wide camera",
+              pitch_length_m: 105,
+              pitch_width_m: 68,
+              points: [
+                { label: "top left", image_x_percent: 8, image_y_percent: 12, pitch_x_meters: 0, pitch_y_meters: 0 },
+                { label: "top right", image_x_percent: 92, image_y_percent: 12, pitch_x_meters: 105, pitch_y_meters: 0 },
+                { label: "bottom right", image_x_percent: 96, image_y_percent: 88, pitch_x_meters: 105, pitch_y_meters: 68 },
+                { label: "bottom left", image_x_percent: 4, image_y_percent: 88, pitch_x_meters: 0, pitch_y_meters: 68 }
+              ],
+              notes: "Console-created calibration for match tracking review."
+            }
+          }
+        ),
+      (calibration) => {
+        setPerformanceMatchPitchCalibration(calibration);
+        setPerformanceMatchPitchCalibrations((current) => [
+          calibration,
+          ...current.filter((item) => item.id !== calibration.id)
+        ]);
+        addLog(`Pitch calibration ready at ${Math.round(calibration.quality_score * 100)}% quality`, "good");
+      }
+    );
+  };
+
   const trackOppositionMatchVideo = () => {
     if (!selectedOrganizationId || !oppositionScoutingVideo) {
       addLog("Upload or select an opponent match video before tracking players", "bad");
@@ -9811,6 +9867,9 @@ export default function HomePage() {
             identity,
             body: {
               organization_id: selectedOrganizationId,
+              calibration_id: performanceMatchPitchCalibration?.video_asset_id === oppositionScoutingVideo.id
+                ? performanceMatchPitchCalibration.id
+                : null,
               source_provider: "console_tracking_import",
               pitch_length_m: 105,
               pitch_width_m: 68,
@@ -23831,6 +23890,7 @@ export default function HomePage() {
                 <button type="button" onClick={annotatePerformanceVideo} disabled={busyAction !== null}>Annotate</button>
                 <button type="button" onClick={uploadOppositionScoutingVideo} disabled={busyAction !== null}>Scout video</button>
                 <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Scout report</button>
+                <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate</button>
                 <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
@@ -24384,6 +24444,7 @@ export default function HomePage() {
                 <div className="event-toolbar">
                   <button type="button" onClick={uploadOppositionScoutingVideo} disabled={busyAction !== null}>Upload scout video</button>
                   <button type="button" onClick={generateOppositionScoutingReport} disabled={busyAction !== null}>Generate report</button>
+                  <button type="button" onClick={calibrateOppositionMatchVideo} disabled={busyAction !== null}>Calibrate pitch</button>
                   <button type="button" onClick={trackOppositionMatchVideo} disabled={busyAction !== null}>Track match</button>
                 </div>
               </div>
@@ -24416,6 +24477,15 @@ export default function HomePage() {
                       : "Track the match to calculate locations, distance, high-speed work, and heatmaps."}
                   </p>
                 </article>
+                <article className="mini-card">
+                  <span className="muted">Calibration</span>
+                  <strong>{performanceMatchPitchCalibration ? `${Math.round(performanceMatchPitchCalibration.quality_score * 100)}%` : "none"}</strong>
+                  <p>
+                    {performanceMatchPitchCalibration
+                      ? `${performanceMatchPitchCalibration.name} · ${performanceMatchPitchCalibration.pitch_length_m}m x ${performanceMatchPitchCalibration.pitch_width_m}m`
+                      : "Create a pitch map before trusting distance metrics from camera footage."}
+                  </p>
+                </article>
               </div>
               {oppositionScoutingVideo ? (
                 <div className="task-list">
@@ -24431,6 +24501,9 @@ export default function HomePage() {
                           setOppositionScoutingVideo(video);
                           setPerformanceMatchTrackingRun(
                             performanceMatchTrackingRuns.find((run) => run.video_asset_id === video.id) ?? null
+                          );
+                          setPerformanceMatchPitchCalibration(
+                            performanceMatchPitchCalibrations.find((calibration) => calibration.video_asset_id === video.id) ?? null
                           );
                         }} disabled={busyAction !== null}>Select</button>
                       </span>
@@ -24449,6 +24522,7 @@ export default function HomePage() {
                       </span>
                       <small>
                         {performanceMatchTrackingRun.source_provider.replaceAll("_", " ")} · pitch {performanceMatchTrackingRun.pitch_length_m}m x {performanceMatchTrackingRun.pitch_width_m}m
+                        {performanceMatchTrackingRun.calibration ? ` · calibrated ${Math.round(performanceMatchTrackingRun.calibration.quality_score * 100)}%` : " · uncalibrated"}
                       </small>
                     </div>
                   </article>

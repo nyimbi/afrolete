@@ -50,6 +50,7 @@ from app.models.performance import (
     OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
     PerformanceGoal,
+    PerformanceMatchPitchCalibration,
     PerformanceMatchTrackingRun,
     PerformanceMatchTrackingSample,
     PerformanceMetricDefinition,
@@ -87,6 +88,7 @@ from app.schemas.performance import (
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
+    PerformanceMatchPitchCalibrationCreate,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingSampleCreate,
     PerformanceMovementReferenceProfileCreate,
@@ -701,6 +703,66 @@ async def list_opposition_scouting_reports(
     )
 
 
+async def create_match_pitch_calibration(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    video_asset_id: UUID,
+    payload: PerformanceMatchPitchCalibrationCreate,
+    authz: AuthorizationService,
+) -> PerformanceMatchPitchCalibration:
+    video_asset = await get_opposition_scouting_video_asset(db, video_asset_id)
+    if video_asset.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    transform = match_pitch_calibration_transform(
+        [point.model_dump() for point in payload.points],
+        payload.pitch_length_m,
+        payload.pitch_width_m,
+    )
+    calibration = PerformanceMatchPitchCalibration(
+        organization_id=video_asset.organization_id,
+        video_asset_id=video_asset.id,
+        created_by_person_id=identity.person_id,
+        name=payload.name,
+        calibration_method=payload.calibration_method.strip().lower(),
+        pitch_length_m=payload.pitch_length_m,
+        pitch_width_m=payload.pitch_width_m,
+        quality_score=float(transform["quality_score"]),
+        points_json=json.dumps([point.model_dump() for point in payload.points]),
+        transform_json=json.dumps(transform),
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(calibration)
+    await db.commit()
+    await db.refresh(calibration)
+    return calibration
+
+
+async def list_match_pitch_calibrations(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    video_asset_id: UUID | None = None,
+) -> list[PerformanceMatchPitchCalibration]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceMatchPitchCalibration).where(
+        PerformanceMatchPitchCalibration.organization_id == organization_id
+    )
+    if video_asset_id is not None:
+        statement = statement.where(PerformanceMatchPitchCalibration.video_asset_id == video_asset_id)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    PerformanceMatchPitchCalibration.created_at.desc(),
+                ).limit(25)
+            )
+        ).all()
+    )
+
+
 async def create_match_tracking_run(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -713,6 +775,13 @@ async def create_match_tracking_run(
     if video_asset.organization_id != payload.organization_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
     await ensure_manage_performance(authz, identity, video_asset.organization_id)
+    calibration = (
+        await get_match_pitch_calibration(db, payload.calibration_id, video_asset.organization_id, video_asset.id)
+        if payload.calibration_id is not None
+        else None
+    )
+    pitch_length_m = calibration.pitch_length_m if calibration is not None else payload.pitch_length_m
+    pitch_width_m = calibration.pitch_width_m if calibration is not None else payload.pitch_width_m
     selected_settings = settings or get_settings()
     sample_payloads = list(payload.samples)
     source_provider = payload.source_provider.strip().lower()
@@ -728,8 +797,8 @@ async def create_match_tracking_run(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stored video checksum mismatch")
         extracted = extract_match_tracking_samples_from_video_content(
             content,
-            pitch_length_m=payload.pitch_length_m,
-            pitch_width_m=payload.pitch_width_m,
+            pitch_length_m=pitch_length_m,
+            pitch_width_m=pitch_width_m,
             max_frames=payload.max_frames,
             sample_every_seconds=payload.sample_every_seconds,
             min_detection_confidence=payload.min_detection_confidence,
@@ -763,23 +832,27 @@ async def create_match_tracking_run(
             await db.execute(delete(PerformanceMatchTrackingRun).where(PerformanceMatchTrackingRun.id.in_(run_ids)))
     now = datetime.now(UTC)
     normalized_samples = [
-        normalize_match_tracking_sample(item, payload.pitch_length_m, payload.pitch_width_m)
+        normalize_match_tracking_sample(item, pitch_length_m, pitch_width_m, calibration=calibration)
         for item in sample_payloads
     ]
     summary = summarize_match_tracking_samples(normalized_samples)
     if warnings:
         summary["warnings"] = warnings
+    if calibration is not None:
+        summary["calibration_id"] = str(calibration.id)
+        summary["calibration_quality_score"] = calibration.quality_score
     run = PerformanceMatchTrackingRun(
         organization_id=video_asset.organization_id,
         video_asset_id=video_asset.id,
+        calibration_id=calibration.id if calibration is not None else None,
         team_id=video_asset.team_id,
         event_id=video_asset.event_id,
         created_by_person_id=identity.person_id,
         source_provider=source_provider,
         model_policy=model_policy,
         status="completed",
-        pitch_length_m=payload.pitch_length_m,
-        pitch_width_m=payload.pitch_width_m,
+        pitch_length_m=pitch_length_m,
+        pitch_width_m=pitch_width_m,
         sample_count=len(normalized_samples),
         player_count=len(summary["player_metrics"]),
         total_distance_m=float(summary["total_distance_m"]),
@@ -6901,6 +6974,22 @@ async def get_opposition_scouting_video_asset(
     return video_asset
 
 
+async def get_match_pitch_calibration(
+    db: AsyncSession,
+    calibration_id: UUID,
+    organization_id: UUID,
+    video_asset_id: UUID,
+) -> PerformanceMatchPitchCalibration:
+    calibration = await db.get(PerformanceMatchPitchCalibration, calibration_id)
+    if (
+        calibration is None
+        or calibration.organization_id != organization_id
+        or calibration.video_asset_id != video_asset_id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match pitch calibration not found")
+    return calibration
+
+
 async def ensure_scouting_scope(
     db: AsyncSession,
     organization_id: UUID,
@@ -6952,20 +7041,116 @@ def opposition_scouting_video_object_key(video_asset: OppositionScoutingVideoAss
         return (Path(str(video_asset.organization_id)) / "scouting" / Path(video_asset.storage_path).name).as_posix()
 
 
+def match_pitch_calibration_read(calibration: PerformanceMatchPitchCalibration) -> dict[str, object]:
+    return {
+        "id": calibration.id,
+        "organization_id": calibration.organization_id,
+        "video_asset_id": calibration.video_asset_id,
+        "created_by_person_id": calibration.created_by_person_id,
+        "name": calibration.name,
+        "calibration_method": calibration.calibration_method,
+        "pitch_length_m": calibration.pitch_length_m,
+        "pitch_width_m": calibration.pitch_width_m,
+        "quality_score": calibration.quality_score,
+        "points": decode_match_pitch_calibration_points(calibration.points_json),
+        "transform": decode_match_pitch_calibration_transform(calibration.transform_json),
+        "status": calibration.status,
+        "notes": calibration.notes,
+        "created_at": calibration.created_at,
+    }
+
+
+def decode_match_pitch_calibration_points(value: str) -> list[dict[str, object]]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def decode_match_pitch_calibration_transform(value: str) -> dict[str, float | str]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {"method": "linear_percent_to_pitch", "quality_score": 0.0}
+    return parsed if isinstance(parsed, dict) else {"method": "linear_percent_to_pitch", "quality_score": 0.0}
+
+
+def match_pitch_calibration_transform(
+    points: list[dict[str, object]],
+    pitch_length_m: float,
+    pitch_width_m: float,
+) -> dict[str, float | str]:
+    xs = [float(point["image_x_percent"]) for point in points]
+    ys = [float(point["image_y_percent"]) for point in points]
+    pitch_xs = [float(point["pitch_x_meters"]) for point in points]
+    pitch_ys = [float(point["pitch_y_meters"]) for point in points]
+    image_min_x, image_max_x = min(xs), max(xs)
+    image_min_y, image_max_y = min(ys), max(ys)
+    pitch_min_x, pitch_max_x = min(pitch_xs), max(pitch_xs)
+    pitch_min_y, pitch_max_y = min(pitch_ys), max(pitch_ys)
+    pitch_width = max(pitch_max_y - pitch_min_y, 0.001)
+    pitch_length = max(pitch_max_x - pitch_min_x, 0.001)
+    coverage_x = min(pitch_length / pitch_length_m, 1.0)
+    coverage_y = min(pitch_width / pitch_width_m, 1.0)
+    point_bonus = min(len(points) / 8, 1.0) * 0.15
+    quality_score = max(0.2, min((coverage_x + coverage_y) / 2 + point_bonus, 0.98))
+    return {
+        "method": "bounding_box_linear_homography_approximation",
+        "image_min_x": image_min_x,
+        "image_max_x": image_max_x,
+        "image_min_y": image_min_y,
+        "image_max_y": image_max_y,
+        "pitch_min_x": pitch_min_x,
+        "pitch_max_x": pitch_max_x,
+        "pitch_min_y": pitch_min_y,
+        "pitch_max_y": pitch_max_y,
+        "quality_score": round(quality_score, 3),
+    }
+
+
+def apply_match_pitch_calibration(
+    calibration: PerformanceMatchPitchCalibration,
+    x_percent: float,
+    y_percent: float,
+) -> tuple[float, float]:
+    transform = decode_match_pitch_calibration_transform(calibration.transform_json)
+    image_min_x = float(transform.get("image_min_x", 0))
+    image_max_x = float(transform.get("image_max_x", 100))
+    image_min_y = float(transform.get("image_min_y", 0))
+    image_max_y = float(transform.get("image_max_y", 100))
+    pitch_min_x = float(transform.get("pitch_min_x", 0))
+    pitch_max_x = float(transform.get("pitch_max_x", calibration.pitch_length_m))
+    pitch_min_y = float(transform.get("pitch_min_y", 0))
+    pitch_max_y = float(transform.get("pitch_max_y", calibration.pitch_width_m))
+    x_ratio = (x_percent - image_min_x) / max(image_max_x - image_min_x, 0.001)
+    y_ratio = (y_percent - image_min_y) / max(image_max_y - image_min_y, 0.001)
+    x_meters = pitch_min_x + x_ratio * (pitch_max_x - pitch_min_x)
+    y_meters = pitch_min_y + y_ratio * (pitch_max_y - pitch_min_y)
+    return (
+        max(0.0, min(x_meters, calibration.pitch_length_m)),
+        max(0.0, min(y_meters, calibration.pitch_width_m)),
+    )
+
+
 def normalize_match_tracking_sample(
     sample: PerformanceMatchTrackingSampleCreate | dict[str, object],
     pitch_length_m: float,
     pitch_width_m: float,
+    calibration: PerformanceMatchPitchCalibration | None = None,
 ) -> dict[str, object]:
     raw = sample.model_dump() if hasattr(sample, "model_dump") else dict(sample)
     x_meters = raw.get("x_meters")
     y_meters = raw.get("y_meters")
     x_percent = raw.get("x_percent")
     y_percent = raw.get("y_percent")
-    if x_meters is None and x_percent is not None:
-        x_meters = float(x_percent) / 100 * pitch_length_m
-    if y_meters is None and y_percent is not None:
-        y_meters = float(y_percent) / 100 * pitch_width_m
+    if calibration is not None and x_meters is None and y_meters is None and x_percent is not None and y_percent is not None:
+        x_meters, y_meters = apply_match_pitch_calibration(calibration, float(x_percent), float(y_percent))
+    else:
+        if x_meters is None and x_percent is not None:
+            x_meters = float(x_percent) / 100 * pitch_length_m
+        if y_meters is None and y_percent is not None:
+            y_meters = float(y_percent) / 100 * pitch_width_m
     if x_percent is None and x_meters is not None:
         x_percent = float(x_meters) / pitch_length_m * 100
     if y_percent is None and y_meters is not None:
@@ -7076,10 +7261,12 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         summary = json.loads(run.summary_json)
     except json.JSONDecodeError:
         summary = {}
+    calibration = await db.get(PerformanceMatchPitchCalibration, run.calibration_id) if run.calibration_id else None
     return {
         "id": run.id,
         "organization_id": run.organization_id,
         "video_asset_id": run.video_asset_id,
+        "calibration_id": run.calibration_id,
         "team_id": run.team_id,
         "event_id": run.event_id,
         "created_by_person_id": run.created_by_person_id,
@@ -7096,6 +7283,7 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "sprint_count": run.sprint_count,
         "player_metrics": summary.get("player_metrics", []),
         "samples": [match_tracking_sample_read(sample) for sample in samples],
+        "calibration": match_pitch_calibration_read(calibration) if calibration is not None else None,
         "started_at": run.started_at,
         "completed_at": run.completed_at,
     }

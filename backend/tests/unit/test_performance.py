@@ -2960,28 +2960,49 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert upload_response.status_code == 201
     video_asset = upload_response.json()
 
+    calibration_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/pitch-calibrations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Broadcast wide camera",
+            "pitch_length_m": 100,
+            "pitch_width_m": 50,
+            "points": [
+                {"label": "top left", "image_x_percent": 0, "image_y_percent": 0, "pitch_x_meters": 0, "pitch_y_meters": 0},
+                {"label": "top right", "image_x_percent": 100, "image_y_percent": 0, "pitch_x_meters": 100, "pitch_y_meters": 0},
+                {"label": "bottom right", "image_x_percent": 100, "image_y_percent": 100, "pitch_x_meters": 100, "pitch_y_meters": 50},
+                {"label": "bottom left", "image_x_percent": 0, "image_y_percent": 100, "pitch_x_meters": 0, "pitch_y_meters": 50},
+            ],
+        },
+    )
+    assert calibration_response.status_code == 201
+    calibration = calibration_response.json()
+    assert calibration["quality_score"] >= 0.9
+
     tracking_response = client.post(
         f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-runs",
         headers=identity_headers,
         json={
             "organization_id": organization["id"],
+            "calibration_id": calibration["id"],
             "source_provider": "provider_tracking_import",
-            "pitch_length_m": 105,
-            "pitch_width_m": 68,
             "replace_existing": True,
             "samples": [
-                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 0, "x_meters": 0, "y_meters": 30},
-                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 1, "x_meters": 10, "y_meters": 30},
-                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 2, "x_meters": 20, "y_meters": 30},
-                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 0, "x_meters": 0, "y_meters": 0},
-                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 1, "x_meters": 3, "y_meters": 4},
-                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 2, "x_meters": 6, "y_meters": 8},
+                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 0, "x_percent": 0, "y_percent": 60},
+                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 1, "x_percent": 10, "y_percent": 60},
+                {"track_id": "home-9", "team_label": "Home", "player_label": "Striker", "jersey_number": "9", "timestamp_seconds": 2, "x_percent": 20, "y_percent": 60},
+                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 0, "x_percent": 0, "y_percent": 0},
+                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 1, "x_percent": 3, "y_percent": 8},
+                {"track_id": "away-6", "team_label": "Away", "player_label": "Midfielder", "jersey_number": "6", "timestamp_seconds": 2, "x_percent": 6, "y_percent": 16},
             ],
         },
     )
     assert tracking_response.status_code == 201
     tracking = tracking_response.json()
     assert tracking["model_policy"] == "afrolete-match-tracking-import-v1"
+    assert tracking["calibration_id"] == calibration["id"]
+    assert tracking["calibration"]["name"] == "Broadcast wide camera"
     assert tracking["sample_count"] == 6
     assert tracking["player_count"] == 2
     assert tracking["total_distance_m"] == 30.0
@@ -2992,6 +3013,13 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert striker["distance_m"] == 20.0
     assert striker["sprint_count"] == 1
     assert striker["dominant_zone"] == "defensive_central"
+
+    calibrations = client.get(
+        f"/api/v1/performance/scouting/pitch-calibrations?organization_id={organization['id']}&video_asset_id={video_asset['id']}",
+        headers=identity_headers,
+    )
+    assert calibrations.status_code == 200
+    assert calibrations.json()[0]["id"] == calibration["id"]
 
     runs = client.get(
         f"/api/v1/performance/scouting/tracking-runs?organization_id={organization['id']}&video_asset_id={video_asset['id']}",

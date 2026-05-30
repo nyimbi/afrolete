@@ -48,6 +48,8 @@ from app.schemas.performance import (
     PerformanceMetricTrendSeriesRead,
     PerformanceMatchTrackingRunCreate,
     PerformanceMatchTrackingRunRead,
+    PerformanceMatchPitchCalibrationCreate,
+    PerformanceMatchPitchCalibrationRead,
     PerformanceMovementReferenceProfileCreate,
     PerformanceMovementReferenceProfileRead,
     PerformanceObservationCreate,
@@ -98,6 +100,7 @@ from app.services.performance import (
     create_athlete_pathway_projection,
     create_metric_definition,
     create_match_tracking_run,
+    create_match_pitch_calibration,
     create_movement_reference_profile,
     create_observation,
     create_opposition_scouting_report,
@@ -121,6 +124,8 @@ from app.services.performance import (
     list_performance_goals,
     list_metric_definitions,
     list_match_tracking_runs,
+    list_match_pitch_calibrations,
+    match_pitch_calibration_read,
     list_movement_reference_profiles,
     list_my_player_performance,
     list_observations,
@@ -794,6 +799,45 @@ async def create_opposition_scouting_report_route(
     return to_opposition_scouting_report_read(
         await create_opposition_scouting_report(db, identity, video_asset_id, payload, authz)
     )
+
+
+@router.post(
+    "/scouting/videos/{video_asset_id}/pitch-calibrations",
+    response_model=PerformanceMatchPitchCalibrationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_match_pitch_calibration_route(
+    video_asset_id: UUID,
+    payload: PerformanceMatchPitchCalibrationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchPitchCalibrationRead:
+    return PerformanceMatchPitchCalibrationRead(
+        **match_pitch_calibration_read(
+            await create_match_pitch_calibration(db, identity, video_asset_id, payload, authz)
+        )
+    )
+
+
+@router.get("/scouting/pitch-calibrations", response_model=list[PerformanceMatchPitchCalibrationRead])
+async def list_match_pitch_calibrations_route(
+    organization_id: UUID = Query(),
+    video_asset_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceMatchPitchCalibrationRead]:
+    return [
+        PerformanceMatchPitchCalibrationRead(**match_pitch_calibration_read(calibration))
+        for calibration in await list_match_pitch_calibrations(
+            db,
+            identity,
+            organization_id,
+            authz,
+            video_asset_id=video_asset_id,
+        )
+    ]
 
 
 @router.post(

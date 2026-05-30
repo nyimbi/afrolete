@@ -334,6 +334,27 @@ class OppositionScoutingReport(IdMixin, TimestampMixin, Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class PerformanceMatchPitchCalibration(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_match_pitch_calibrations"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    calibration_method: Mapped[str] = mapped_column(String(80), default="manual_corner_map", nullable=False, index=True)
+    pitch_length_m: Mapped[float] = mapped_column(Float, default=105.0, nullable=False)
+    pitch_width_m: Mapped[float] = mapped_column(Float, default=68.0, nullable=False)
+    quality_score: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
+    points_json: Mapped[str] = mapped_column(Text, nullable=False)
+    transform_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class PerformanceMatchTrackingRun(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_match_tracking_runs"
 
@@ -342,6 +363,9 @@ class PerformanceMatchTrackingRun(IdMixin, TimestampMixin, Base):
     )
     video_asset_id: Mapped[UUID] = mapped_column(
         GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    calibration_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_match_pitch_calibrations.id"), index=True
     )
     team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
     event_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("events.id"), index=True)
