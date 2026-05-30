@@ -4606,6 +4606,10 @@ def test_match_moment_detection_scores_tracking_actions_for_review(client, ident
     assert any(moment["action_type"] in {"pass_completion", "tackle", "interception"} for moment in moments)
     assert all(moment["end_seconds"] > moment["start_seconds"] for moment in moments)
     assert any("ai_moment" in moment["tags"] for moment in moments)
+    guidance_moment = next(moment for moment in moments if "player_guidance" in moment["tags"])
+    assert guidance_moment["action_type"] == "player_guidance_review"
+    assert guidance_moment["primary_track_id"]
+    assert guidance_moment["source_event"]["clip_start_seconds"] == guidance_moment["start_seconds"]
 
     listed = client.get(
         f"/api/v1/performance/scouting/match-moments?organization_id={organization['id']}&tracking_run_id={tracking['id']}",

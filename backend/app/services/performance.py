@@ -2439,6 +2439,10 @@ def build_match_moment_payloads(
         if float(metric.get("high_speed_distance_m") or 0.0) <= 0:
             continue
         moments.append(match_moment_from_player_metric(metric, index=index, audience=audience))
+    for index, metric in enumerate(player_metrics[:12]):
+        guidance_moment = match_moment_from_player_guidance(metric, tracking, index=index, audience=audience)
+        if guidance_moment is not None:
+            moments.append(guidance_moment)
     filtered = [moment for moment in moments if float(moment["moment_score"]) >= min_score]
     filtered.sort(
         key=lambda moment: (
@@ -2534,6 +2538,74 @@ def match_moment_from_player_metric(
         ),
         "coaching_note": "Use this as a player-load teaching moment for sprint timing and recovery.",
         "tags": sorted({"ai_moment", "player_load", "high_speed", audience.strip().lower()}),
+        "source_event": source_event,
+    }
+
+
+def match_moment_from_player_guidance(
+    metric: dict[str, object],
+    tracking: dict[str, object],
+    *,
+    index: int,
+    audience: str,
+) -> dict[str, object] | None:
+    track_id = str(metric.get("track_id") or "").strip()
+    if not track_id:
+        return None
+    guidance = match_player_guidance_card(
+        metric,
+        publishable=float(metric.get("tracking_quality_score") or 0.0) >= 0.45,
+        summary=tracking,
+    )
+    clip_start = guidance.get("clip_start_seconds")
+    clip_end = guidance.get("clip_end_seconds")
+    if not isinstance(clip_start, (int, float)) or not isinstance(clip_end, (int, float)):
+        return None
+    confidence = max(
+        float(metric.get("tracking_quality_score") or tracking.get("tracking_quality_score") or 0.0),
+        0.72,
+    )
+    components = match_moment_score_components("player_guidance_review", confidence, metric)
+    score = max(weighted_match_moment_score(components), 66.0)
+    label = match_tracking_metric_label(metric)
+    start_seconds = max(float(clip_start), 0.0)
+    end_seconds = max(float(clip_end), start_seconds + 1.0)
+    source_event = {
+        "action_type": "player_guidance_review",
+        "track_id": track_id,
+        "guidance_headline": guidance.get("headline"),
+        "recommended_next_action": guidance.get("recommended_next_action"),
+        "clip_label": guidance.get("clip_label"),
+        "clip_start_seconds": start_seconds,
+        "clip_end_seconds": end_seconds,
+    }
+    return {
+        "action_type": "player_guidance_review",
+        "moment_category": match_moment_category(score),
+        "title": f"{label} player guidance review"[:180],
+        "start_seconds": round(start_seconds, 2),
+        "end_seconds": round(end_seconds, 2),
+        "duration_seconds": round(end_seconds - start_seconds, 2),
+        "moment_score": score,
+        **components,
+        "confidence": round(confidence, 3),
+        "primary_track_id": cleaned_optional_text(track_id),
+        "secondary_track_id": None,
+        "team_label": cleaned_optional_text(metric.get("team_label")),
+        "player_label": cleaned_optional_text(metric.get("player_label")),
+        "jersey_number": cleaned_optional_text(metric.get("jersey_number")),
+        "zone": cleaned_optional_text(metric.get("dominant_zone")),
+        "evidence": str(guidance.get("evidence") or guidance.get("headline") or "Player guidance review moment.")[:2000],
+        "coaching_note": str(guidance.get("recommended_next_action") or "Review this player-specific clip before feedback.")[:2000],
+        "tags": sorted(
+            {
+                "ai_moment",
+                "player_guidance",
+                "coach_review",
+                "clip_window",
+                audience.strip().lower(),
+            }
+        ),
         "source_event": source_event,
     }
 

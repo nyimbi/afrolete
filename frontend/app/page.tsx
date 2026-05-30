@@ -27771,7 +27771,7 @@ export default function HomePage() {
                           {performanceMatchMoments.filter((moment) => moment.tracking_run_id === performanceMatchTrackingRun.id).length} scored moment(s) ·{" "}
                           top {Math.round(performanceMatchMoments.filter((moment) => moment.tracking_run_id === performanceMatchTrackingRun.id)[0]?.moment_score ?? 0)}
                         </span>
-                        <small>Moment scores combine technical quality, tactical importance, impact, rarity, and match context.</small>
+                        <small>Moment scores combine technical quality, tactical importance, impact, rarity, match context, and player-guidance review anchors.</small>
                       </div>
                       <span>
                         <button type="button" onClick={detectPerformanceMatchMoments} disabled={busyAction !== null}>Refresh</button>
@@ -27781,8 +27781,8 @@ export default function HomePage() {
                     <article className="task-card">
                       <div>
                         <strong>AI moment detector</strong>
-                        <span>Score recognized actions into teaching and highlight moments.</span>
-                        <small>Create durable moments before building player-specific reels or social clips.</small>
+                        <span>Score recognized actions and player-guidance clips into review moments.</span>
+                        <small>Create durable moments before building player-specific reels, coaching packs, or social clips.</small>
                       </div>
                       <span>
                         <button type="button" onClick={detectPerformanceMatchMoments} disabled={busyAction !== null}>Detect</button>
