@@ -20,6 +20,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.assets import (
+    ClubhouseAmenity,
+    ClubhouseAmenityReservation,
+    ClubhouseVisit,
     EmergencyActionPlan,
     EmergencyPlanActivation,
     EquipmentCheckout,
@@ -73,6 +76,15 @@ from app.schemas.assets import (
     AssetAccountingExportRow,
     AssetAccountingSyncRead,
     AssetSummaryRead,
+    ClubhouseAmenityCreate,
+    ClubhouseAmenityRead,
+    ClubhouseAmenityReservationCreate,
+    ClubhouseAmenityReservationRead,
+    ClubhouseAmenityReservationUpdate,
+    ClubhouseDashboardRead,
+    ClubhouseVisitCreate,
+    ClubhouseVisitRead,
+    ClubhouseVisitUpdate,
     EmergencyActivationAlertCreate,
     EmergencyActivationIncidentCreate,
     EmergencyActionPlanCreate,
@@ -2178,6 +2190,264 @@ async def update_facility_utility_alert(
     return facility_utility_alert_read(alert)
 
 
+async def create_clubhouse_amenity(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseAmenityCreate,
+    authz: AuthorizationService,
+) -> ClubhouseAmenityRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    amenity = ClubhouseAmenity(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        name=payload.name,
+        amenity_type=payload.amenity_type.strip().lower(),
+        location=payload.location,
+        capacity=payload.capacity,
+        reservation_required=payload.reservation_required,
+        hourly_rate=payload.hourly_rate,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(amenity)
+    await db.commit()
+    await db.refresh(amenity)
+    return clubhouse_amenity_read(amenity)
+
+
+async def list_clubhouse_amenities(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+) -> list[ClubhouseAmenityRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseAmenity).where(ClubhouseAmenity.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseAmenity.facility_id == facility_id)
+    rows = await db.scalars(statement.order_by(ClubhouseAmenity.amenity_type, ClubhouseAmenity.name))
+    return [clubhouse_amenity_read(row) for row in rows.all()]
+
+
+async def create_clubhouse_visit(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseVisitCreate,
+    authz: AuthorizationService,
+) -> ClubhouseVisitRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    facility = await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+    if payload.access_event_id is not None:
+        event = await db.get(FacilityAccessEvent, payload.access_event_id)
+        if event is None or event.organization_id != payload.organization_id or event.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility access event not found")
+    check_in_at = payload.check_in_at or datetime.now(UTC)
+    projected = await clubhouse_current_occupancy(db, payload.organization_id, payload.facility_id)
+    if facility.capacity is not None and projected + payload.party_size > facility.capacity:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Clubhouse capacity would be exceeded")
+    visit = ClubhouseVisit(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        person_id=payload.person_id,
+        access_event_id=payload.access_event_id,
+        guest_name=payload.guest_name,
+        guest_email=payload.guest_email,
+        check_in_at=check_in_at,
+        party_size=payload.party_size,
+        purpose=payload.purpose,
+        notes=payload.notes,
+    )
+    db.add(visit)
+    await db.commit()
+    await db.refresh(visit)
+    return clubhouse_visit_read(visit)
+
+
+async def list_clubhouse_visits(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[ClubhouseVisitRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseVisit).where(ClubhouseVisit.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseVisit.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(ClubhouseVisit.status == status_filter)
+    rows = await db.scalars(statement.order_by(ClubhouseVisit.check_in_at.desc()).limit(50))
+    return [clubhouse_visit_read(row) for row in rows.all()]
+
+
+async def update_clubhouse_visit(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    visit_id: UUID,
+    payload: ClubhouseVisitUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseVisitRead:
+    visit = await get_clubhouse_visit(db, visit_id)
+    await ensure_manage_assets(authz, identity, visit.organization_id)
+    visit.status = payload.status
+    if payload.status == "checked_out":
+        visit.check_out_at = payload.check_out_at or datetime.now(UTC)
+    elif payload.status == "checked_in":
+        visit.check_out_at = None
+    if payload.notes:
+        visit.notes = append_note(visit.notes, payload.notes)
+    await db.commit()
+    await db.refresh(visit)
+    return clubhouse_visit_read(visit)
+
+
+async def create_clubhouse_amenity_reservation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ClubhouseAmenityReservationCreate,
+    authz: AuthorizationService,
+) -> ClubhouseAmenityReservationRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    amenity = await get_clubhouse_amenity(db, payload.amenity_id)
+    if amenity.organization_id != payload.organization_id or amenity.facility_id != payload.facility_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse amenity not found")
+    if amenity.status != "active":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Clubhouse amenity is not active")
+    if payload.ends_at <= payload.starts_at:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ends_at must be after starts_at")
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+    overlapping = await clubhouse_amenity_reserved_party_size(db, amenity.id, payload.starts_at, payload.ends_at)
+    if amenity.capacity is not None and overlapping + payload.party_size > amenity.capacity:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Amenity capacity would be exceeded")
+    reservation = ClubhouseAmenityReservation(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        amenity_id=payload.amenity_id,
+        person_id=payload.person_id,
+        guest_name=payload.guest_name,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        party_size=payload.party_size,
+        expected_fee=payload.expected_fee if payload.expected_fee is not None else clubhouse_amenity_fee(amenity, payload),
+        notes=payload.notes,
+    )
+    db.add(reservation)
+    await db.commit()
+    await db.refresh(reservation)
+    return clubhouse_reservation_read(reservation)
+
+
+async def list_clubhouse_amenity_reservations(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    facility_id: UUID | None = None,
+    amenity_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[ClubhouseAmenityReservationRead]:
+    await ensure_manage_assets(authz, identity, organization_id)
+    statement = select(ClubhouseAmenityReservation).where(ClubhouseAmenityReservation.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(ClubhouseAmenityReservation.facility_id == facility_id)
+    if amenity_id is not None:
+        statement = statement.where(ClubhouseAmenityReservation.amenity_id == amenity_id)
+    if status_filter is not None:
+        statement = statement.where(ClubhouseAmenityReservation.status == status_filter)
+    rows = await db.scalars(statement.order_by(ClubhouseAmenityReservation.starts_at.desc()).limit(50))
+    return [clubhouse_reservation_read(row) for row in rows.all()]
+
+
+async def update_clubhouse_amenity_reservation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    reservation_id: UUID,
+    payload: ClubhouseAmenityReservationUpdate,
+    authz: AuthorizationService,
+) -> ClubhouseAmenityReservationRead:
+    reservation = await get_clubhouse_reservation(db, reservation_id)
+    await ensure_manage_assets(authz, identity, reservation.organization_id)
+    reservation.status = payload.status
+    if payload.notes:
+        reservation.notes = append_note(reservation.notes, payload.notes)
+    await db.commit()
+    await db.refresh(reservation)
+    return clubhouse_reservation_read(reservation)
+
+
+async def clubhouse_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> ClubhouseDashboardRead:
+    await get_organization(db, organization_id)
+    facility: Facility | None = None
+    if facility_id is not None:
+        facility = await get_facility_for_organization(db, facility_id, organization_id)
+    amenity_statement = select(ClubhouseAmenity).where(ClubhouseAmenity.organization_id == organization_id)
+    visit_statement = select(ClubhouseVisit).where(ClubhouseVisit.organization_id == organization_id)
+    reservation_statement = select(ClubhouseAmenityReservation).where(
+        ClubhouseAmenityReservation.organization_id == organization_id
+    )
+    if facility_id is not None:
+        amenity_statement = amenity_statement.where(ClubhouseAmenity.facility_id == facility_id)
+        visit_statement = visit_statement.where(ClubhouseVisit.facility_id == facility_id)
+        reservation_statement = reservation_statement.where(ClubhouseAmenityReservation.facility_id == facility_id)
+    amenities = list((await db.scalars(amenity_statement)).all())
+    active_visits = list(
+        (
+            await db.scalars(
+                visit_statement
+                .where(ClubhouseVisit.status == "checked_in")
+                .order_by(ClubhouseVisit.check_in_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
+    now = datetime.now(UTC)
+    day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=UTC)
+    day_end = day_start + timedelta(days=1)
+    reservations_today = list(
+        (
+            await db.scalars(
+                reservation_statement
+                .where(ClubhouseAmenityReservation.starts_at >= day_start)
+                .where(ClubhouseAmenityReservation.starts_at < day_end)
+                .where(ClubhouseAmenityReservation.status.in_(["reserved", "checked_in"]))
+                .order_by(ClubhouseAmenityReservation.starts_at.asc())
+                .limit(25)
+            )
+        ).all()
+    )
+    occupancy = sum(visit.party_size for visit in active_visits)
+    capacity = facility.capacity if facility is not None else None
+    return ClubhouseDashboardRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        current_occupancy=occupancy,
+        capacity=capacity,
+        capacity_remaining=max(capacity - occupancy, 0) if capacity is not None else None,
+        active_member_visits=len([visit for visit in active_visits if visit.person_id is not None]),
+        active_guest_visits=len([visit for visit in active_visits if visit.person_id is None]),
+        amenity_count=len(amenities),
+        reservations_today=len(reservations_today),
+        expected_revenue_today=sum((reservation.expected_fee or Decimal("0")) for reservation in reservations_today),
+        active_visits=[clubhouse_visit_read(visit) for visit in active_visits[:10]],
+        upcoming_reservations=[clubhouse_reservation_read(row) for row in reservations_today[:10]],
+        popular_amenities=clubhouse_popular_amenities(amenities, reservations_today),
+        recommendation=clubhouse_dashboard_recommendation(occupancy, capacity, reservations_today, amenities),
+    )
+
+
 async def create_facility_booking(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -3713,6 +3983,30 @@ async def get_facility_utility_alert(
     return alert
 
 
+async def get_clubhouse_amenity(db: AsyncSession, amenity_id: UUID) -> ClubhouseAmenity:
+    amenity = await db.get(ClubhouseAmenity, amenity_id)
+    if amenity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse amenity not found")
+    return amenity
+
+
+async def get_clubhouse_visit(db: AsyncSession, visit_id: UUID) -> ClubhouseVisit:
+    visit = await db.get(ClubhouseVisit, visit_id)
+    if visit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse visit not found")
+    return visit
+
+
+async def get_clubhouse_reservation(
+    db: AsyncSession,
+    reservation_id: UUID,
+) -> ClubhouseAmenityReservation:
+    reservation = await db.get(ClubhouseAmenityReservation, reservation_id)
+    if reservation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clubhouse amenity reservation not found")
+    return reservation
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -4680,6 +4974,131 @@ def facility_utility_dashboard_recommendation(
     if any(meter.last_reading_at is None for meter in meters):
         return "Seed initial readings for all active meters so cost and usage trends become reliable."
     return "Utility monitoring is stable; keep gateway readings on a daily cadence."
+
+
+def clubhouse_amenity_read(amenity: ClubhouseAmenity) -> ClubhouseAmenityRead:
+    return ClubhouseAmenityRead(
+        id=amenity.id,
+        organization_id=amenity.organization_id,
+        facility_id=amenity.facility_id,
+        name=amenity.name,
+        amenity_type=amenity.amenity_type,
+        location=amenity.location,
+        capacity=amenity.capacity,
+        reservation_required=amenity.reservation_required,
+        hourly_rate=amenity.hourly_rate,
+        status=amenity.status,
+        notes=amenity.notes,
+    )
+
+
+def clubhouse_visit_read(visit: ClubhouseVisit) -> ClubhouseVisitRead:
+    return ClubhouseVisitRead(
+        id=visit.id,
+        organization_id=visit.organization_id,
+        facility_id=visit.facility_id,
+        person_id=visit.person_id,
+        access_event_id=visit.access_event_id,
+        guest_name=visit.guest_name,
+        guest_email=visit.guest_email,
+        check_in_at=visit.check_in_at,
+        check_out_at=visit.check_out_at,
+        status=visit.status,
+        party_size=visit.party_size,
+        purpose=visit.purpose,
+        notes=visit.notes,
+    )
+
+
+def clubhouse_reservation_read(
+    reservation: ClubhouseAmenityReservation,
+) -> ClubhouseAmenityReservationRead:
+    return ClubhouseAmenityReservationRead(
+        id=reservation.id,
+        organization_id=reservation.organization_id,
+        facility_id=reservation.facility_id,
+        amenity_id=reservation.amenity_id,
+        person_id=reservation.person_id,
+        guest_name=reservation.guest_name,
+        starts_at=reservation.starts_at,
+        ends_at=reservation.ends_at,
+        status=reservation.status,
+        party_size=reservation.party_size,
+        expected_fee=reservation.expected_fee,
+        notes=reservation.notes,
+    )
+
+
+async def clubhouse_current_occupancy(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID,
+) -> int:
+    visits = await db.scalars(
+        select(ClubhouseVisit)
+        .where(ClubhouseVisit.organization_id == organization_id)
+        .where(ClubhouseVisit.facility_id == facility_id)
+        .where(ClubhouseVisit.status == "checked_in")
+    )
+    return sum(visit.party_size for visit in visits.all())
+
+
+async def clubhouse_amenity_reserved_party_size(
+    db: AsyncSession,
+    amenity_id: UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> int:
+    rows = await db.scalars(
+        select(ClubhouseAmenityReservation)
+        .where(ClubhouseAmenityReservation.amenity_id == amenity_id)
+        .where(ClubhouseAmenityReservation.status.in_(["reserved", "checked_in"]))
+        .where(ClubhouseAmenityReservation.starts_at < ends_at)
+        .where(ClubhouseAmenityReservation.ends_at > starts_at)
+    )
+    return sum(row.party_size for row in rows.all())
+
+
+def clubhouse_amenity_fee(
+    amenity: ClubhouseAmenity,
+    payload: ClubhouseAmenityReservationCreate,
+) -> Decimal | None:
+    if amenity.hourly_rate is None:
+        return None
+    seconds = max((payload.ends_at - payload.starts_at).total_seconds(), 0)
+    hours = Decimal(str(seconds / 3600)).quantize(Decimal("0.01"))
+    return (amenity.hourly_rate * hours).quantize(Decimal("0.01"))
+
+
+def clubhouse_popular_amenities(
+    amenities: list[ClubhouseAmenity],
+    reservations: list[ClubhouseAmenityReservation],
+) -> list[str]:
+    names = {amenity.id: amenity.name for amenity in amenities}
+    counts: dict[str, int] = {}
+    for reservation in reservations:
+        name = names.get(reservation.amenity_id, str(reservation.amenity_id))
+        counts[name] = counts.get(name, 0) + reservation.party_size
+    if not counts:
+        return [amenity.name for amenity in amenities[:3]]
+    return [name for name, _ in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:3]]
+
+
+def clubhouse_dashboard_recommendation(
+    occupancy: int,
+    capacity: int | None,
+    reservations: list[ClubhouseAmenityReservation],
+    amenities: list[ClubhouseAmenity],
+) -> str:
+    if capacity is not None and capacity > 0 and occupancy >= int(capacity * 0.9):
+        return "Clubhouse is near capacity; pause guest entry and prioritize reservation holders."
+    if reservations and not amenities:
+        return "Reservations exist without configured amenities; review clubhouse setup."
+    if not amenities:
+        return "Add bookable clubhouse amenities so members can reserve spaces without staff back-and-forth."
+    if reservations:
+        return "Clubhouse operations are active; monitor check-ins against reservation capacity."
+    return "Clubhouse is ready; promote bookable amenities to members and families."
 
 
 def maintenance_work_order_notes(schedule: FacilityMaintenanceSchedule) -> str:

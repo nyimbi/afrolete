@@ -2988,6 +2988,68 @@ export type FacilityUtilityDashboardRead = {
   recommendation: string;
 };
 
+export type ClubhouseAmenityRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  name: string;
+  amenity_type: string;
+  location: string | null;
+  capacity: number | null;
+  reservation_required: boolean;
+  hourly_rate: string | null;
+  status: "active" | "maintenance" | "closed" | "retired";
+  notes: string | null;
+};
+
+export type ClubhouseVisitRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  person_id: UUID | null;
+  access_event_id: UUID | null;
+  guest_name: string | null;
+  guest_email: string | null;
+  check_in_at: string;
+  check_out_at: string | null;
+  status: "checked_in" | "checked_out" | "cancelled";
+  party_size: number;
+  purpose: string | null;
+  notes: string | null;
+};
+
+export type ClubhouseAmenityReservationRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  amenity_id: UUID;
+  person_id: UUID | null;
+  guest_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  status: "reserved" | "checked_in" | "completed" | "cancelled" | "no_show";
+  party_size: number;
+  expected_fee: string | null;
+  notes: string | null;
+};
+
+export type ClubhouseDashboardRead = {
+  organization_id: UUID;
+  facility_id: UUID | null;
+  current_occupancy: number;
+  capacity: number | null;
+  capacity_remaining: number | null;
+  active_member_visits: number;
+  active_guest_visits: number;
+  amenity_count: number;
+  reservations_today: number;
+  expected_revenue_today: string;
+  active_visits: ClubhouseVisitRead[];
+  upcoming_reservations: ClubhouseAmenityReservationRead[];
+  popular_amenities: string[];
+  recommendation: string;
+};
+
 export type FacilityBookingRead = {
   id: UUID;
   organization_id: UUID;

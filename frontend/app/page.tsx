@@ -235,6 +235,10 @@ import type {
   EquipmentReaderRead,
   EquipmentScanEventRead,
   EquipmentScanRead,
+  ClubhouseAmenityRead,
+  ClubhouseAmenityReservationRead,
+  ClubhouseDashboardRead,
+  ClubhouseVisitRead,
   FacilityAccessCredentialRead,
   FacilityAccessCommandRead,
   FacilityAccessDashboardRead,
@@ -1828,6 +1832,10 @@ export default function HomePage() {
   const [facilityUtilityDashboard, setFacilityUtilityDashboard] = useState<FacilityUtilityDashboardRead | null>(null);
   const [facilityUtilityProvision, setFacilityUtilityProvision] = useState<FacilityUtilityMeterProvisionRead | null>(null);
   const [facilityUtilityReading, setFacilityUtilityReading] = useState<FacilityUtilityReadingResultRead | null>(null);
+  const [clubhouseAmenities, setClubhouseAmenities] = useState<ClubhouseAmenityRead[]>([]);
+  const [clubhouseVisits, setClubhouseVisits] = useState<ClubhouseVisitRead[]>([]);
+  const [clubhouseReservations, setClubhouseReservations] = useState<ClubhouseAmenityReservationRead[]>([]);
+  const [clubhouseDashboard, setClubhouseDashboard] = useState<ClubhouseDashboardRead | null>(null);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2745,6 +2753,20 @@ export default function HomePage() {
     reading_value: 1300,
     reading_at: "2026-08-02T08:00",
     external_reference: "meter-event-001"
+  });
+  const [clubhouseForm, setClubhouseForm] = useState({
+    amenity_name: "Members Lounge",
+    amenity_type: "lounge",
+    amenity_location: "Ground floor",
+    amenity_capacity: 12,
+    amenity_rate: 20,
+    reservation_required: true,
+    guest_name: "Visiting Parent",
+    guest_email: "visitor@example.com",
+    party_size: 2,
+    purpose: "matchday guest",
+    starts_at: "2026-09-03T10:00",
+    ends_at: "2026-09-03T12:00"
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -4040,6 +4062,10 @@ export default function HomePage() {
       accessLockdownDashboardData,
       utilityMeterData,
       utilityDashboardData,
+      clubhouseAmenityData,
+      clubhouseVisitData,
+      clubhouseReservationData,
+      clubhouseDashboardData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -4081,6 +4107,17 @@ export default function HomePage() {
         identity
       }),
       apiRequest<FacilityUtilityDashboardRead>(`/assets/utility-dashboard?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<ClubhouseAmenityRead[]>(`/assets/clubhouse/amenities?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<ClubhouseVisitRead[]>(`/assets/clubhouse/visits?organization_id=${organizationId}${facilityQuery}`, {
+        identity
+      }),
+      apiRequest<ClubhouseAmenityReservationRead[]>(
+        `/assets/clubhouse/reservations?organization_id=${organizationId}${facilityQuery}`,
+        { identity }
+      ),
+      apiRequest<ClubhouseDashboardRead>(`/assets/clubhouse/dashboard?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -4136,6 +4173,10 @@ export default function HomePage() {
     setFacilityAccessLockdownDashboard(accessLockdownDashboardData);
     setFacilityUtilityMeters(utilityMeterData);
     setFacilityUtilityDashboard(utilityDashboardData);
+    setClubhouseAmenities(clubhouseAmenityData);
+    setClubhouseVisits(clubhouseVisitData);
+    setClubhouseReservations(clubhouseReservationData);
+    setClubhouseDashboard(clubhouseDashboardData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -4740,7 +4781,34 @@ export default function HomePage() {
       setRfidProvision(null);
       setEquipmentCheckouts([]);
       setWorkOrders([]);
+      setMaintenanceSchedules([]);
+      setMaintenanceDashboard(null);
+      setFacilityLeases([]);
+      setFacilityLeaseInvoice(null);
+      setFacilityAccessCredentials([]);
+      setFacilityAccessDashboard(null);
+      setFacilityAccessEvent(null);
+      setFacilityAccessDevices([]);
+      setFacilityAccessProvision(null);
+      setFacilityAccessGatewayScan(null);
+      setFacilityAccessDeviceHealth(null);
+      setFacilityAccessCommands([]);
+      setFacilityAccessLockdowns([]);
+      setFacilityAccessLockdownDashboard(null);
+      setFacilityAccessLockdownResult(null);
+      setFacilityUtilityMeters([]);
+      setFacilityUtilityDashboard(null);
+      setFacilityUtilityProvision(null);
+      setFacilityUtilityReading(null);
+      setClubhouseAmenities([]);
+      setClubhouseVisits([]);
+      setClubhouseReservations([]);
+      setClubhouseDashboard(null);
       setFacilityBookings([]);
+      setFacilityWaitlist([]);
+      setFacilityBookingRule(null);
+      setFacilityAvailability(null);
+      setFacilityUtilization(null);
       setAssetSummary(null);
       setProcurementRecommendations([]);
       setSupplierOrders([]);
@@ -13704,6 +13772,164 @@ export default function HomePage() {
     );
   };
 
+  const createClubhouseAmenity = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before creating clubhouse amenities", "bad");
+      return;
+    }
+    runAction(
+      "create-clubhouse-amenity",
+      () =>
+        apiRequest<ClubhouseAmenityRead>("/assets/clubhouse/amenities", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            name: clubhouseForm.amenity_name,
+            amenity_type: clubhouseForm.amenity_type,
+            location: clubhouseForm.amenity_location,
+            capacity: clubhouseForm.amenity_capacity,
+            reservation_required: clubhouseForm.reservation_required,
+            hourly_rate: clubhouseForm.amenity_rate,
+            notes: "Created from clubhouse operations console."
+          }
+        }),
+      (amenity) => {
+        setClubhouseAmenities((current) => [
+          amenity,
+          ...current.filter((item) => item.id !== amenity.id)
+        ]);
+        addLog(`${amenity.name} clubhouse amenity ready`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const checkInClubhouseVisit = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before clubhouse check-in", "bad");
+      return;
+    }
+    runAction(
+      "check-in-clubhouse-visit",
+      () =>
+        apiRequest<ClubhouseVisitRead>("/assets/clubhouse/visits", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            guest_name: clubhouseForm.guest_name,
+            guest_email: clubhouseForm.guest_email,
+            party_size: clubhouseForm.party_size,
+            purpose: clubhouseForm.purpose,
+            notes: "Checked in from clubhouse operations console."
+          }
+        }),
+      (visit) => {
+        setClubhouseVisits((current) => [
+          visit,
+          ...current.filter((item) => item.id !== visit.id)
+        ]);
+        addLog(`${visit.guest_name ?? "Member"} checked into clubhouse`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const checkOutClubhouseVisit = (visit: ClubhouseVisitRead) => {
+    runAction(
+      `check-out-clubhouse-${visit.id}`,
+      () =>
+        apiRequest<ClubhouseVisitRead>(`/assets/clubhouse/visits/${visit.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: visit.status === "checked_in" ? "checked_out" : "checked_in",
+            notes: visit.status === "checked_in"
+              ? "Checked out from clubhouse operations console."
+              : "Reopened from clubhouse operations console."
+          }
+        }),
+      (updated) => {
+        setClubhouseVisits((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.guest_name ?? "Member"} ${updated.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
+  const createClubhouseReservation = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before reserving clubhouse amenities", "bad");
+      return;
+    }
+    const amenity = clubhouseAmenities[0];
+    if (!amenity) {
+      addLog("Create a clubhouse amenity before reserving it", "bad");
+      return;
+    }
+    runAction(
+      "create-clubhouse-reservation",
+      () =>
+        apiRequest<ClubhouseAmenityReservationRead>("/assets/clubhouse/reservations", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            amenity_id: amenity.id,
+            guest_name: clubhouseForm.guest_name,
+            starts_at: new Date(clubhouseForm.starts_at).toISOString(),
+            ends_at: new Date(clubhouseForm.ends_at).toISOString(),
+            party_size: clubhouseForm.party_size,
+            notes: "Reserved from clubhouse operations console."
+          }
+        }),
+      (reservation) => {
+        setClubhouseReservations((current) => [
+          reservation,
+          ...current.filter((item) => item.id !== reservation.id)
+        ]);
+        addLog(`${amenity.name} reserved for ${reservation.party_size}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const completeClubhouseReservation = (reservation: ClubhouseAmenityReservationRead) => {
+    runAction(
+      `complete-clubhouse-reservation-${reservation.id}`,
+      () =>
+        apiRequest<ClubhouseAmenityReservationRead>(`/assets/clubhouse/reservations/${reservation.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: reservation.status === "completed" ? "reserved" : "completed",
+            notes: reservation.status === "completed"
+              ? "Reopened from clubhouse operations console."
+              : "Completed from clubhouse operations console."
+          }
+        }),
+      (updated) => {
+        setClubhouseReservations((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`Clubhouse reservation ${updated.status}`, "good");
+        if (selectedOrganizationId) {
+          void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        }
+      }
+    );
+  };
+
   const revokeFacilityAccessCredential = (credential: FacilityAccessCredentialRead) => {
     if (!selectedOrganizationId) {
       return;
@@ -19047,6 +19273,9 @@ export default function HomePage() {
                 <button type="button" onClick={provisionFacilityUtilityMeter} disabled={busyAction !== null}>Meter</button>
                 <button type="button" onClick={recordFacilityUtilityReading} disabled={busyAction !== null}>Utility</button>
                 <button type="button" onClick={gatewayFacilityUtilityReading} disabled={busyAction !== null}>Ingest</button>
+                <button type="button" onClick={createClubhouseAmenity} disabled={busyAction !== null}>Amenity</button>
+                <button type="button" onClick={checkInClubhouseVisit} disabled={busyAction !== null}>Check-in</button>
+                <button type="button" onClick={createClubhouseReservation} disabled={busyAction !== null}>Reserve</button>
                 <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
               </div>
             </div>
@@ -19110,6 +19339,21 @@ export default function HomePage() {
                 <span className="muted">Utility cost</span>
                 <strong>${facilityUtilityDashboard?.total_cost_last_30d ?? "0.00"}</strong>
                 <span className="muted">{facilityUtilityDashboard?.total_usage_last_30d ?? "0"} units</span>
+              </div>
+              <div>
+                <span className="muted">Clubhouse</span>
+                <strong>{clubhouseDashboard?.current_occupancy ?? 0}</strong>
+                <span className="muted">capacity {clubhouseDashboard?.capacity ?? "n/a"} · left {clubhouseDashboard?.capacity_remaining ?? "n/a"}</span>
+              </div>
+              <div>
+                <span className="muted">Club reservations</span>
+                <strong>{clubhouseDashboard?.reservations_today ?? clubhouseReservations.length}</strong>
+                <span className="muted">${clubhouseDashboard?.expected_revenue_today ?? "0.00"} expected today</span>
+              </div>
+              <div>
+                <span className="muted">Amenities</span>
+                <strong>{clubhouseDashboard?.amenity_count ?? clubhouseAmenities.length}</strong>
+                <span className="muted">{clubhouseDashboard?.popular_amenities[0] ?? clubhouseAmenities[0]?.name ?? "none"}</span>
               </div>
             </div>
             <div className="form-grid">
@@ -19354,6 +19598,56 @@ export default function HomePage() {
             </div>
             <div className="form-grid">
               <label>
+                Amenity
+                <input value={clubhouseForm.amenity_name} onChange={(event) => setClubhouseForm({ ...clubhouseForm, amenity_name: event.target.value })} />
+              </label>
+              <label>
+                Type
+                <input value={clubhouseForm.amenity_type} onChange={(event) => setClubhouseForm({ ...clubhouseForm, amenity_type: event.target.value })} />
+              </label>
+              <label>
+                Location
+                <input value={clubhouseForm.amenity_location} onChange={(event) => setClubhouseForm({ ...clubhouseForm, amenity_location: event.target.value })} />
+              </label>
+              <label>
+                Amenity capacity
+                <input type="number" min="1" value={clubhouseForm.amenity_capacity} onChange={(event) => setClubhouseForm({ ...clubhouseForm, amenity_capacity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Amenity rate
+                <input type="number" min="0" step="0.01" value={clubhouseForm.amenity_rate} onChange={(event) => setClubhouseForm({ ...clubhouseForm, amenity_rate: Number(event.target.value) })} />
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={clubhouseForm.reservation_required} onChange={(event) => setClubhouseForm({ ...clubhouseForm, reservation_required: event.target.checked })} />
+                Reservation required
+              </label>
+              <label>
+                Clubhouse guest
+                <input value={clubhouseForm.guest_name} onChange={(event) => setClubhouseForm({ ...clubhouseForm, guest_name: event.target.value })} />
+              </label>
+              <label>
+                Guest email
+                <input value={clubhouseForm.guest_email} onChange={(event) => setClubhouseForm({ ...clubhouseForm, guest_email: event.target.value })} />
+              </label>
+              <label>
+                Party size
+                <input type="number" min="1" value={clubhouseForm.party_size} onChange={(event) => setClubhouseForm({ ...clubhouseForm, party_size: Number(event.target.value) })} />
+              </label>
+              <label>
+                Starts
+                <input type="datetime-local" value={clubhouseForm.starts_at} onChange={(event) => setClubhouseForm({ ...clubhouseForm, starts_at: event.target.value })} />
+              </label>
+              <label>
+                Ends
+                <input type="datetime-local" value={clubhouseForm.ends_at} onChange={(event) => setClubhouseForm({ ...clubhouseForm, ends_at: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Purpose
+                <input value={clubhouseForm.purpose} onChange={(event) => setClubhouseForm({ ...clubhouseForm, purpose: event.target.value })} />
+              </label>
+            </div>
+            <div className="form-grid">
+              <label>
                 Title
                 <input value={workOrderForm.title} onChange={(event) => setWorkOrderForm({ ...workOrderForm, title: event.target.value })} />
               </label>
@@ -19552,6 +19846,51 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {clubhouseDashboard ? (
+                <article className={`task-card ${clubhouseDashboard.capacity_remaining !== null && clubhouseDashboard.capacity_remaining <= 0 ? "" : "selected"}`}>
+                  <div>
+                    <strong>Clubhouse occupancy · {clubhouseDashboard.current_occupancy}</strong>
+                    <span>{clubhouseDashboard.active_member_visits} member parties · {clubhouseDashboard.active_guest_visits} guest parties</span>
+                    <span>{clubhouseDashboard.recommendation}</span>
+                  </div>
+                </article>
+              ) : null}
+              {clubhouseAmenities.slice(0, 4).map((amenity) => (
+                <article key={amenity.id} className="task-card">
+                  <div>
+                    <strong>{amenity.name}</strong>
+                    <span>{amenity.amenity_type} · {amenity.status} · {amenity.location ?? "No location"}</span>
+                    <span>Capacity {amenity.capacity ?? "n/a"} · rate ${amenity.hourly_rate ?? "0.00"} · {amenity.reservation_required ? "reservation required" : "walk-up allowed"}</span>
+                  </div>
+                </article>
+              ))}
+              {clubhouseVisits.slice(0, 4).map((visit) => (
+                <article key={visit.id} className={`task-card ${visit.status === "checked_in" ? "" : "selected"}`}>
+                  <div>
+                    <strong>{visit.guest_name ?? "Member visit"} · {visit.status}</strong>
+                    <span>{visit.party_size} people · {visit.purpose ?? "clubhouse use"}</span>
+                    <span>{new Date(visit.check_in_at).toLocaleString()} · out {visit.check_out_at ? new Date(visit.check_out_at).toLocaleString() : "not yet"}</span>
+                  </div>
+                  <button type="button" onClick={() => checkOutClubhouseVisit(visit)}>
+                    {visit.status === "checked_in" ? "Check out" : "Reopen"}
+                  </button>
+                </article>
+              ))}
+              {clubhouseReservations.slice(0, 4).map((reservation) => {
+                const amenity = clubhouseAmenities.find((item) => item.id === reservation.amenity_id);
+                return (
+                  <article key={reservation.id} className={`task-card ${reservation.status === "completed" ? "selected" : ""}`}>
+                    <div>
+                      <strong>{amenity?.name ?? "Clubhouse amenity"} · {reservation.status}</strong>
+                      <span>{reservation.guest_name ?? "Member"} · party {reservation.party_size} · ${reservation.expected_fee ?? "0.00"}</span>
+                      <span>{new Date(reservation.starts_at).toLocaleString()} to {new Date(reservation.ends_at).toLocaleString()}</span>
+                    </div>
+                    <button type="button" onClick={() => completeClubhouseReservation(reservation)}>
+                      {reservation.status === "completed" ? "Reopen" : "Complete"}
+                    </button>
+                  </article>
+                );
+              })}
               {facilityAccessEvent ? (
                 <article className={`task-card ${facilityAccessEvent.decision === "granted" ? "selected" : ""}`}>
                   <div>

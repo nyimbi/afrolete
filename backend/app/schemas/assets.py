@@ -1164,6 +1164,118 @@ class FacilityUtilityDashboardRead(BaseModel):
     recommendation: str
 
 
+class ClubhouseAmenityCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    amenity_type: str = Field(default="lounge", min_length=2, max_length=80)
+    location: str | None = Field(default=None, max_length=240)
+    capacity: int | None = Field(default=None, ge=1, le=10000)
+    reservation_required: bool = False
+    hourly_rate: Decimal | None = Field(default=None, ge=0)
+    status: str = Field(default="active", pattern="^(active|maintenance|closed|retired)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseAmenityRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    name: str
+    amenity_type: str
+    location: str | None
+    capacity: int | None
+    reservation_required: bool
+    hourly_rate: Decimal | None
+    status: str
+    notes: str | None
+
+
+class ClubhouseVisitCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    person_id: UUID | None = None
+    access_event_id: UUID | None = None
+    guest_name: str | None = Field(default=None, max_length=180)
+    guest_email: str | None = Field(default=None, max_length=255)
+    check_in_at: datetime | None = None
+    party_size: int = Field(default=1, ge=1, le=500)
+    purpose: str | None = Field(default=None, max_length=180)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseVisitUpdate(BaseModel):
+    status: str = Field(pattern="^(checked_in|checked_out|cancelled)$")
+    check_out_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseVisitRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    person_id: UUID | None
+    access_event_id: UUID | None
+    guest_name: str | None
+    guest_email: str | None
+    check_in_at: datetime
+    check_out_at: datetime | None
+    status: str
+    party_size: int
+    purpose: str | None
+    notes: str | None
+
+
+class ClubhouseAmenityReservationCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    amenity_id: UUID
+    person_id: UUID | None = None
+    guest_name: str | None = Field(default=None, max_length=180)
+    starts_at: datetime
+    ends_at: datetime
+    party_size: int = Field(default=1, ge=1, le=500)
+    expected_fee: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseAmenityReservationUpdate(BaseModel):
+    status: str = Field(pattern="^(reserved|checked_in|completed|cancelled|no_show)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ClubhouseAmenityReservationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    amenity_id: UUID
+    person_id: UUID | None
+    guest_name: str | None
+    starts_at: datetime
+    ends_at: datetime
+    status: str
+    party_size: int
+    expected_fee: Decimal | None
+    notes: str | None
+
+
+class ClubhouseDashboardRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None
+    current_occupancy: int
+    capacity: int | None
+    capacity_remaining: int | None
+    active_member_visits: int
+    active_guest_visits: int
+    amenity_count: int
+    reservations_today: int
+    expected_revenue_today: Decimal
+    active_visits: list[ClubhouseVisitRead]
+    upcoming_reservations: list[ClubhouseAmenityReservationRead]
+    popular_amenities: list[str]
+    recommendation: str
+
+
 class FacilityBookingCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

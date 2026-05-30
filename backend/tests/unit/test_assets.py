@@ -1309,6 +1309,137 @@ def test_facility_access_lockdown_fans_out_signed_commands(client, identity_head
     assert {command["command_type"] for command in unlock.json()["commands"]} == {"unlock_all"}
 
 
+def test_clubhouse_visits_amenity_reservations_and_dashboard(client, identity_headers) -> None:
+    organization, _, member, _ = create_assets_context(client, identity_headers, "Clubhouse Ops Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Clubhouse Pavilion",
+            "facility_type": "clubhouse",
+            "capacity": 6,
+        },
+    ).json()
+
+    amenity_response = client.post(
+        "/api/v1/assets/clubhouse/amenities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Members Lounge",
+            "amenity_type": "lounge",
+            "location": "Ground floor",
+            "capacity": 4,
+            "reservation_required": True,
+            "hourly_rate": "20.00",
+        },
+    )
+    assert amenity_response.status_code == 201
+    amenity = amenity_response.json()
+
+    member_visit = client.post(
+        "/api/v1/assets/clubhouse/visits",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "person_id": member["subject_id"],
+            "party_size": 2,
+            "purpose": "family lounge",
+            "check_in_at": "2026-09-03T09:00:00Z",
+        },
+    )
+    assert member_visit.status_code == 201
+    guest_visit = client.post(
+        "/api/v1/assets/clubhouse/visits",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "guest_name": "Visiting Parent",
+            "guest_email": "visitor@example.com",
+            "party_size": 3,
+            "purpose": "matchday guest",
+            "check_in_at": "2026-09-03T09:10:00Z",
+        },
+    )
+    assert guest_visit.status_code == 201
+
+    capacity_block = client.post(
+        "/api/v1/assets/clubhouse/visits",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "guest_name": "Overflow Group",
+            "party_size": 2,
+        },
+    )
+    assert capacity_block.status_code == 409
+
+    reservation = client.post(
+        "/api/v1/assets/clubhouse/reservations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "amenity_id": amenity["id"],
+            "person_id": member["subject_id"],
+            "starts_at": "2026-09-03T10:00:00Z",
+            "ends_at": "2026-09-03T12:00:00Z",
+            "party_size": 3,
+        },
+    )
+    assert reservation.status_code == 201
+    assert reservation.json()["expected_fee"] == "40.00"
+
+    overlap = client.post(
+        "/api/v1/assets/clubhouse/reservations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "amenity_id": amenity["id"],
+            "guest_name": "Overflow Reservation",
+            "starts_at": "2026-09-03T10:30:00Z",
+            "ends_at": "2026-09-03T11:30:00Z",
+            "party_size": 2,
+        },
+    )
+    assert overlap.status_code == 409
+
+    dashboard = client.get(
+        f"/api/v1/assets/clubhouse/dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert dashboard.status_code == 200
+    summary = dashboard.json()
+    assert summary["current_occupancy"] == 5
+    assert summary["capacity_remaining"] == 1
+    assert summary["active_member_visits"] == 1
+    assert summary["active_guest_visits"] == 1
+    assert summary["amenity_count"] == 1
+    assert summary["popular_amenities"] == ["Members Lounge"]
+
+    checked_out = client.patch(
+        f"/api/v1/assets/clubhouse/visits/{member_visit.json()['id']}",
+        headers=identity_headers,
+        json={"status": "checked_out", "check_out_at": "2026-09-03T12:15:00Z"},
+    )
+    assert checked_out.status_code == 200
+    assert checked_out.json()["status"] == "checked_out"
+    assert checked_out.json()["check_out_at"].startswith("2026-09-03T12:15:00")
+
+    completed = client.patch(
+        f"/api/v1/assets/clubhouse/reservations/{reservation.json()['id']}",
+        headers=identity_headers,
+        json={"status": "completed", "notes": "Lounge cleaned and released."},
+    )
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "completed"
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(
