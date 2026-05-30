@@ -3507,6 +3507,14 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert any("draft-only" in note for note in guidance_review["review_notes"])
     assert guidance_review["coach_guidance"]
 
+    blocked_publish_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{revised_tracking['id']}/player-guidance-publish",
+        headers=identity_headers,
+        json={"organization_id": organization["id"], "channel": "in_app"},
+    )
+    assert blocked_publish_response.status_code == 422
+    assert "required_actions" in blocked_publish_response.json()["detail"]
+
 
 def test_match_video_auto_tracking_uses_video_frame_extractor(
     client,
@@ -3637,6 +3645,111 @@ def test_match_video_auto_tracking_uses_video_frame_extractor(
     assert any("Synthetic extractor warning" in warning for warning in tracking["quality_warnings"])
     assert any(sample["source"] == "opencv_motion_tracker" for sample in tracking["samples"])
     assert any(sample["source"] == "opencv_ball_tracker" for sample in tracking["samples"])
+
+
+def test_publishable_match_guidance_sends_private_player_messages(client, identity_headers) -> None:
+    organization, team, member, _ = create_rostered_athlete(client, identity_headers)
+    upload_response = client.post(
+        "/api/v1/performance/scouting/videos",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "opponent_name": "Share Ready FC",
+            "sport": "football",
+            "filename": "share-ready-fc.mp4",
+            "content_type": "video/mp4",
+            "content_base64": base64.b64encode(b"share ready match video").decode(),
+            "clip_label": "Share-ready player guidance",
+            "match_context": "Calibrated provider tracking for player guidance publishing.",
+            "analysis_focus": "player guidance distribution",
+        },
+    )
+    assert upload_response.status_code == 201
+    video_asset = upload_response.json()
+    calibration_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/pitch-calibrations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Share-ready camera",
+            "pitch_length_m": 100,
+            "pitch_width_m": 50,
+            "points": [
+                {"label": "top left", "image_x_percent": 0, "image_y_percent": 0, "pitch_x_meters": 0, "pitch_y_meters": 0},
+                {"label": "top right", "image_x_percent": 100, "image_y_percent": 0, "pitch_x_meters": 100, "pitch_y_meters": 0},
+                {"label": "bottom right", "image_x_percent": 100, "image_y_percent": 100, "pitch_x_meters": 100, "pitch_y_meters": 50},
+                {"label": "bottom left", "image_x_percent": 0, "image_y_percent": 100, "pitch_x_meters": 0, "pitch_y_meters": 50},
+            ],
+        },
+    )
+    assert calibration_response.status_code == 201
+    calibration = calibration_response.json()
+    tracking_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "calibration_id": calibration["id"],
+            "source_provider": "provider_tracking_import",
+            "replace_existing": True,
+            "samples": [
+                {
+                    "track_id": "home-9",
+                    "person_id": member["subject_id"],
+                    "team_label": "Home",
+                    "player_label": "Performance Athlete",
+                    "jersey_number": "9",
+                    "timestamp_seconds": second,
+                    "x_percent": 10 + second * 10,
+                    "y_percent": 50,
+                    "confidence": 0.92,
+                }
+                for second in range(6)
+            ],
+        },
+    )
+    assert tracking_response.status_code == 201
+    tracking = tracking_response.json()
+
+    review_response = client.get(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-review",
+        headers=identity_headers,
+    )
+    assert review_response.status_code == 200
+    review = review_response.json()
+    assert review["publishable"] is True
+    assert review["guidance_status"] == "player_shareable"
+
+    publish_response = client.post(
+        f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/player-guidance-publish",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "subject_prefix": "Coach-reviewed match guidance",
+            "message_intro": "Your coach has cleared this player guidance card for review.",
+        },
+    )
+    assert publish_response.status_code == 201
+    published = publish_response.json()
+    assert published["publishable"] is True
+    assert published["message_count"] == 1
+    assert published["recipient_count"] == 1
+    assert published["messages"][0]["player_person_id"] == member["subject_id"]
+    assert published["messages"][0]["track_id"] == "home-9"
+
+    recipients = client.get(
+        f"/api/v1/communications/messages/{published['messages'][0]['message_id']}/recipients",
+        headers=identity_headers,
+    )
+    assert recipients.status_code == 200
+    assert recipients.json()[0]["person_id"] == member["subject_id"]
+    messages = client.get(
+        f"/api/v1/communications/messages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert any(message["subject"].startswith("Coach-reviewed match guidance") for message in messages)
 
 
 def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(client, identity_headers) -> None:

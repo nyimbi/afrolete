@@ -107,6 +107,7 @@ from app.schemas.performance import (
     PerformanceIngestionCreate,
     PerformanceModelExtractionBulkReviewCreate,
     PerformanceMatchAnalysisReportCreate,
+    PerformanceMatchPlayerGuidancePublishCreate,
     PerformanceModelExtractionBenchmarkCaseCreate,
     PerformanceModelExtractionBenchmarkDatasetCreate,
     PerformanceModelExtractionBenchmarkRunCreate,
@@ -146,6 +147,7 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.agents import queue_agent_task
 from app.services.communications import (
+    create_message_for_recipients,
     destination_for_channel,
     guardian_person_ids,
     initial_delivery_status,
@@ -1860,6 +1862,155 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
         "evidence": actions[0],
         "caution": None if publishable else "Coach review required before sharing this guidance with the player.",
     }
+
+
+async def publish_match_tracking_player_guidance(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    tracking_run_id: UUID,
+    payload: PerformanceMatchPlayerGuidancePublishCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    run = await get_match_tracking_run(db, tracking_run_id)
+    if run.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, run.organization_id)
+    review = await review_match_tracking_player_guidance(db, identity, tracking_run_id, authz)
+    if payload.require_publishable and not review["publishable"]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Player guidance is not publishable yet",
+                "required_actions": review["required_actions"],
+            },
+        )
+    video_asset = await get_opposition_scouting_video_asset(db, run.video_asset_id)
+    player_person_by_track = await match_tracking_player_person_by_track(db, run)
+    guidance_by_track = {
+        str(item.get("track_id")): item
+        for item in review["player_guidance"]
+        if isinstance(item, dict) and item.get("track_id")
+    }
+    skipped_tracks: list[str] = []
+    messages: list[dict[str, object]] = []
+    for track_id, guidance in sorted(guidance_by_track.items()):
+        player_person_id = player_person_by_track.get(track_id)
+        if player_person_id is None:
+            skipped_tracks.append(track_id)
+            continue
+        recipient_ids = [player_person_id]
+        if payload.include_guardians:
+            recipient_ids.extend(sorted(await guardian_person_ids(db, player_person_id), key=str))
+        recipient_ids = list(dict.fromkeys(recipient_ids))
+        player_label = str(guidance.get("player_label") or track_id)
+        subject = f"{payload.subject_prefix}: {video_asset.opponent_name} - {player_label}"[:240]
+        body = match_player_guidance_message_body(
+            guidance,
+            video_asset=video_asset,
+            run=run,
+            message_intro=payload.message_intro,
+        )
+        message = await create_message_for_recipients(
+            db,
+            organization_id=run.organization_id,
+            message_type=CommunicationMessageType.REPORT,
+            channel=payload.channel,
+            scope_type=CommunicationScopeType.PERSON,
+            scope_id=player_person_id,
+            recipient_person_ids=recipient_ids,
+            subject=subject,
+            body=body,
+            created_by_person_id=identity.person_id,
+        )
+        messages.append(
+            {
+                "message_id": message.id,
+                "player_person_id": player_person_id,
+                "recipient_person_ids": recipient_ids,
+                "track_id": track_id,
+                "player_label": player_label,
+                "subject": subject,
+                "channel": payload.channel,
+            }
+        )
+    if not messages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No confirmed player tracks are available for guidance publishing",
+        )
+    return {
+        "tracking_run_id": run.id,
+        "organization_id": run.organization_id,
+        "video_asset_id": run.video_asset_id,
+        "publishable": bool(review["publishable"]),
+        "guidance_status": str(review["guidance_status"]),
+        "message_count": len(messages),
+        "recipient_count": sum(len(message["recipient_person_ids"]) for message in messages),
+        "player_count": len(messages),
+        "skipped_track_count": len(skipped_tracks),
+        "skipped_tracks": skipped_tracks,
+        "required_actions": review["required_actions"],
+        "messages": messages,
+        "published_at": datetime.now(UTC),
+    }
+
+
+async def match_tracking_player_person_by_track(
+    db: AsyncSession,
+    run: PerformanceMatchTrackingRun,
+) -> dict[str, UUID]:
+    samples = list(
+        (
+            await db.scalars(
+                select(PerformanceMatchTrackingSample)
+                .where(PerformanceMatchTrackingSample.tracking_run_id == run.id)
+                .where(PerformanceMatchTrackingSample.person_id.is_not(None))
+                .order_by(
+                    PerformanceMatchTrackingSample.track_id.asc(),
+                    PerformanceMatchTrackingSample.timestamp_seconds.desc(),
+                )
+            )
+        ).all()
+    )
+    result: dict[str, UUID] = {}
+    for sample in samples:
+        if sample.person_id is not None and sample.track_id not in result:
+            result[sample.track_id] = sample.person_id
+    return result
+
+
+def match_player_guidance_message_body(
+    guidance: dict[str, object],
+    *,
+    video_asset: OppositionScoutingVideoAsset,
+    run: PerformanceMatchTrackingRun,
+    message_intro: str | None,
+) -> str:
+    lines = [
+        message_intro.strip() if message_intro else "Your coach has reviewed a match-video guidance card for you.",
+        "",
+        f"Match: {video_asset.opponent_name}",
+        f"Clip: {video_asset.clip_label or video_asset.filename}",
+        f"Track: {guidance.get('track_id')}",
+        "",
+        str(guidance.get("headline") or "Player guidance is ready for review."),
+        str(guidance.get("load_summary") or ""),
+        str(guidance.get("tactical_summary") or ""),
+        "",
+        f"Next action: {guidance.get('recommended_next_action') or 'Review the match clip with your coach.'}",
+        f"Evidence: {guidance.get('evidence') or 'Tracking-derived match metrics.'}",
+    ]
+    caution = guidance.get("caution")
+    if caution:
+        lines.extend(["", f"Coach note: {caution}"])
+    lines.extend(
+        [
+            "",
+            f"Tracking run: {run.id}",
+            "Open your AfroLete player portal for the full metric card and follow-up plan options.",
+        ]
+    )
+    return "\n".join(line for line in lines if line is not None)[:8000]
 
 
 async def create_performance_highlight_reel(

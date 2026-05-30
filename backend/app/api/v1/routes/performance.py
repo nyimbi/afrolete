@@ -62,6 +62,8 @@ from app.schemas.performance import (
     PerformanceMetricTrendSeriesRead,
     PerformanceMatchAnalysisReportCreate,
     PerformanceMatchAnalysisReportRead,
+    PerformanceMatchPlayerGuidancePublishCreate,
+    PerformanceMatchPlayerGuidancePublishRead,
     PerformanceMatchPlayerGuidanceReviewRead,
     PerformanceMatchTrackingIdentityReviewCreate,
     PerformanceMatchTrackingIdentityReviewRead,
@@ -183,6 +185,7 @@ from app.services.performance import (
     list_performance_video_annotations,
     list_performance_video_pose_samples,
     process_performance_video_pose_samples,
+    publish_match_tracking_player_guidance,
     list_performance_forecast_validation_runs,
     list_performance_model_extraction_benchmark_datasets,
     list_wearable_provider_connections,
@@ -1170,6 +1173,23 @@ async def review_match_tracking_player_guidance_route(
 ) -> PerformanceMatchPlayerGuidanceReviewRead:
     return PerformanceMatchPlayerGuidanceReviewRead(
         **await review_match_tracking_player_guidance(db, identity, tracking_run_id, authz)
+    )
+
+
+@router.post(
+    "/scouting/tracking-runs/{tracking_run_id}/player-guidance-publish",
+    response_model=PerformanceMatchPlayerGuidancePublishRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def publish_match_tracking_player_guidance_route(
+    tracking_run_id: UUID,
+    payload: PerformanceMatchPlayerGuidancePublishCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceMatchPlayerGuidancePublishRead:
+    return PerformanceMatchPlayerGuidancePublishRead(
+        **await publish_match_tracking_player_guidance(db, identity, tracking_run_id, payload, authz)
     )
 
 

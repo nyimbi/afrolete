@@ -378,6 +378,7 @@ import type {
   PerformanceMetricTrendRead,
   PerformanceMetricTrendSeriesRead,
   PerformanceMatchAnalysisReportRead,
+  PerformanceMatchPlayerGuidancePublishRead,
   PerformanceMatchPlayerGuidanceReviewRead,
   PerformanceMatchPitchCalibrationRead,
   PerformanceMatchTrackingProviderIngestEventRead,
@@ -1854,6 +1855,8 @@ export default function HomePage() {
     useState<PerformanceMatchAnalysisReportRead | null>(null);
   const [performanceMatchPlayerGuidanceReview, setPerformanceMatchPlayerGuidanceReview] =
     useState<PerformanceMatchPlayerGuidanceReviewRead | null>(null);
+  const [performanceMatchPlayerGuidancePublish, setPerformanceMatchPlayerGuidancePublish] =
+    useState<PerformanceMatchPlayerGuidancePublishRead | null>(null);
   const [performanceMatchPitchCalibrations, setPerformanceMatchPitchCalibrations] =
     useState<PerformanceMatchPitchCalibrationRead[]>([]);
   const [performanceMatchPitchCalibration, setPerformanceMatchPitchCalibration] =
@@ -1881,6 +1884,9 @@ export default function HomePage() {
 
   useEffect(() => {
     setPerformanceMatchPlayerGuidanceReview((current) =>
+      current?.tracking_run_id === performanceMatchTrackingRun?.id ? current : null
+    );
+    setPerformanceMatchPlayerGuidancePublish((current) =>
       current?.tracking_run_id === performanceMatchTrackingRun?.id ? current : null
     );
   }, [performanceMatchTrackingRun?.id]);
@@ -5105,6 +5111,7 @@ export default function HomePage() {
       setPerformanceMatchAnalysisReports([]);
       setPerformanceMatchAnalysisReport(null);
       setPerformanceMatchPlayerGuidanceReview(null);
+      setPerformanceMatchPlayerGuidancePublish(null);
       setPerformanceMatchPitchCalibrations([]);
       setPerformanceMatchPitchCalibration(null);
       setPerformanceHighlightReels([]);
@@ -10575,6 +10582,39 @@ export default function HomePage() {
             ? "Player guidance is ready for coach-approved sharing"
             : `${review.required_actions.length} player guidance review action(s) remain`,
           review.publishable ? "good" : "neutral"
+        );
+      }
+    );
+  };
+
+  const publishPerformanceMatchPlayerGuidance = () => {
+    if (!selectedOrganizationId || !performanceMatchTrackingRun) {
+      addLog("Track a match before publishing player guidance", "bad");
+      return;
+    }
+    runAction(
+      `publish-player-guidance-${performanceMatchTrackingRun.id}`,
+      () =>
+        apiRequest<PerformanceMatchPlayerGuidancePublishRead>(
+          `/performance/scouting/tracking-runs/${performanceMatchTrackingRun.id}/player-guidance-publish`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              include_guardians: true,
+              require_publishable: true,
+              subject_prefix: "Coach-reviewed match guidance",
+              message_intro: "Your coach has cleared this match-video guidance card for review."
+            }
+          }
+        ),
+      (published) => {
+        setPerformanceMatchPlayerGuidancePublish(published);
+        addLog(
+          `${published.message_count} player guidance message(s) sent to ${published.recipient_count} recipient(s)`,
+          "good"
         );
       }
     );
@@ -25755,6 +25795,7 @@ export default function HomePage() {
                   <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track video</button>
                   <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Player guidance</button>
                   <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review share</button>
+                  <button type="button" onClick={publishPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Publish</button>
                   <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>
                 </div>
               </div>
@@ -25892,6 +25933,15 @@ export default function HomePage() {
                     {performanceMatchPlayerGuidanceReview
                       ? `${performanceMatchPlayerGuidanceReview.player_card_count} card(s) · ${performanceMatchPlayerGuidanceReview.required_actions.length} action(s)`
                       : "Review player-facing guidance before sending metric cards outside the coaching team."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Published cards</span>
+                  <strong>{performanceMatchPlayerGuidancePublish?.message_count ?? 0} message(s)</strong>
+                  <p>
+                    {performanceMatchPlayerGuidancePublish
+                      ? `${performanceMatchPlayerGuidancePublish.recipient_count} inbox recipient(s) · ${performanceMatchPlayerGuidancePublish.skipped_track_count} skipped`
+                      : "Publish reviewed guidance as private player/guardian inbox messages."}
                   </p>
                 </article>
               </div>
@@ -26048,6 +26098,7 @@ export default function HomePage() {
                     <span>
                       <button type="button" onClick={createPerformanceMatchAnalysisReport} disabled={busyAction !== null}>Generate</button>
                       <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review</button>
+                      <button type="button" onClick={publishPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Publish</button>
                       {performanceMatchAnalysisReport?.tracking_run_id === performanceMatchTrackingRun.id ? (
                         <button type="button" onClick={() => downloadPerformanceMatchAnalysisReport(performanceMatchAnalysisReport)} disabled={busyAction !== null}>Download</button>
                       ) : null}
@@ -26068,6 +26119,21 @@ export default function HomePage() {
                           {performanceMatchPlayerGuidanceReview.required_actions[0]
                             ?? performanceMatchPlayerGuidanceReview.review_notes[0]
                             ?? "Guidance review complete."}
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
+                  {performanceMatchPlayerGuidancePublish ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>Published player guidance</strong>
+                        <span>
+                          {performanceMatchPlayerGuidancePublish.message_count} message(s) ·{" "}
+                          {performanceMatchPlayerGuidancePublish.recipient_count} recipient(s)
+                        </span>
+                        <small>
+                          {performanceMatchPlayerGuidancePublish.messages[0]?.subject
+                            ?? "Private inbox messages created for confirmed player tracks."}
                         </small>
                       </div>
                     </article>

@@ -941,6 +941,41 @@ class PerformanceMatchPlayerGuidanceReviewRead(BaseModel):
     generated_at: datetime
 
 
+class PerformanceMatchPlayerGuidancePublishCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    include_guardians: bool = True
+    require_publishable: bool = True
+    subject_prefix: str = Field(default="Match video guidance", min_length=2, max_length=120)
+    message_intro: str | None = Field(default=None, max_length=1000)
+
+
+class PerformanceMatchPlayerGuidancePublishMessageRead(BaseModel):
+    message_id: UUID
+    player_person_id: UUID
+    recipient_person_ids: list[UUID]
+    track_id: str
+    player_label: str
+    subject: str
+    channel: CommunicationChannel
+
+
+class PerformanceMatchPlayerGuidancePublishRead(BaseModel):
+    tracking_run_id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    publishable: bool
+    guidance_status: str
+    message_count: int
+    recipient_count: int
+    player_count: int
+    skipped_track_count: int
+    skipped_tracks: list[str]
+    required_actions: list[str]
+    messages: list[PerformanceMatchPlayerGuidancePublishMessageRead]
+    published_at: datetime
+
+
 class PerformanceHardwareKitCreate(BaseModel):
     organization_id: UUID
     name: str = Field(min_length=2, max_length=180)

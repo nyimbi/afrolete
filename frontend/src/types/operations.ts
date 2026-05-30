@@ -7290,6 +7290,32 @@ export type PerformanceMatchPlayerGuidanceReviewRead = {
   generated_at: string;
 };
 
+export type PerformanceMatchPlayerGuidancePublishMessageRead = {
+  message_id: UUID;
+  player_person_id: UUID;
+  recipient_person_ids: UUID[];
+  track_id: string;
+  player_label: string;
+  subject: string;
+  channel: CommunicationChannel;
+};
+
+export type PerformanceMatchPlayerGuidancePublishRead = {
+  tracking_run_id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  publishable: boolean;
+  guidance_status: string;
+  message_count: number;
+  recipient_count: number;
+  player_count: number;
+  skipped_track_count: number;
+  skipped_tracks: string[];
+  required_actions: string[];
+  messages: PerformanceMatchPlayerGuidancePublishMessageRead[];
+  published_at: string;
+};
+
 export type PerformanceHardwareKitRead = {
   id: UUID;
   organization_id: UUID;
