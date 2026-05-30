@@ -28086,7 +28086,7 @@ export default function HomePage() {
                       <div>
                         <strong>{performanceMatchTrainingFollowup.title}</strong>
                         <span>
-                          {performanceMatchTrainingFollowup.item_count} block(s) · {performanceMatchTrainingFollowup.focus_area} · {performanceMatchTrainingFollowup.agent_task_status ?? "agent queued"}
+                          {performanceMatchTrainingFollowup.item_count} block(s) · {performanceMatchTrainingFollowup.session_plan_ids.length} session(s) · {performanceMatchTrainingFollowup.agent_task_status ?? "agent queued"}
                         </span>
                         <small>
                           Plan {performanceMatchTrainingFollowup.plan_id} · {performanceMatchTrainingFollowup.period_start} to {performanceMatchTrainingFollowup.period_end}

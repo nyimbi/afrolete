@@ -336,6 +336,7 @@ windows, recovery recommendations, inferred tactical role profiles with
 role-evidence summaries, set-piece/restart detection with danger scoring and
 outcome cues, team-level training prescriptions with drill/session follow-ups,
 one-click draft team training plans with Training Strategy Agent review,
+scheduled training sessions for each prescription,
 highlights, coach/player reports, and player-portal
 match guidance cards with action-plan drills and one-click training follow-up
 plans for coach-confirmed tracks, including queued Training Strategy Agent

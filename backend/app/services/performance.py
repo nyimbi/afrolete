@@ -7842,7 +7842,13 @@ async def create_match_tracking_training_followup(
     db.add(plan)
     await db.flush()
     items: list[TrainingPlanItem] = []
+    session_plans: list[TrainingSessionPlan] = []
     for index, prescription in enumerate(selected_prescriptions, start=1):
+        duration_minutes = match_training_prescription_duration(str(prescription.get("priority") or "normal"))
+        rpe_target = match_training_prescription_intensity(
+            str(prescription.get("priority") or "normal"),
+            str(prescription.get("intensity") or "moderate"),
+        )
         item = TrainingPlanItem(
             plan_id=plan.id,
             drill_id=None,
@@ -7850,11 +7856,8 @@ async def create_match_tracking_training_followup(
             day_label=f"Prescription {index}",
             title=str(prescription.get("title") or prescription.get("focus_area") or "Match follow-up")[:180],
             focus_area=str(prescription.get("focus_area") or "match_followup").replace("_", " ")[:120],
-            duration_minutes=match_training_prescription_duration(str(prescription.get("priority") or "normal")),
-            intensity=match_training_prescription_intensity(
-                str(prescription.get("priority") or "normal"),
-                str(prescription.get("intensity") or "moderate"),
-            ),
+            duration_minutes=duration_minutes,
+            intensity=rpe_target,
             notes=(
                 f"Session design: {prescription.get('session_design')}\n"
                 f"Drill: {prescription.get('drill_recommendation')}\n"
@@ -7864,10 +7867,35 @@ async def create_match_tracking_training_followup(
         )
         db.add(item)
         items.append(item)
+        if run.team_id is not None:
+            session_plan = TrainingSessionPlan(
+                organization_id=payload.organization_id,
+                team_id=run.team_id,
+                plan_id=plan.id,
+                event_id=run.event_id,
+                title=str(prescription.get("title") or f"Match prescription {index}")[:240],
+                scheduled_for=match_training_followup_session_time(
+                    payload.period_start,
+                    payload.period_end,
+                    index,
+                ),
+                duration_minutes=duration_minutes,
+                rpe_target=rpe_target,
+                load_score=float(duration_minutes * rpe_target),
+                objectives=(
+                    f"{prescription.get('session_design')}\n"
+                    f"Drill: {prescription.get('drill_recommendation')}\n"
+                    f"Evidence: {prescription.get('evidence')}"
+                )[:4000],
+            )
+            db.add(session_plan)
+            session_plans.append(session_plan)
     await db.commit()
     await db.refresh(plan)
     for item in items:
         await db.refresh(item)
+    for session_plan in session_plans:
+        await db.refresh(session_plan)
     agent_task = await queue_match_training_followup_agent_review(
         db,
         identity,
@@ -7885,6 +7913,7 @@ async def create_match_tracking_training_followup(
         "team_id": run.team_id,
         "plan_id": plan.id,
         "item_ids": [item.id for item in items],
+        "session_plan_ids": [session_plan.id for session_plan in session_plans],
         "title": plan.title,
         "focus_area": plan.focus_area,
         "period_start": plan.period_start,
@@ -7926,6 +7955,20 @@ def match_training_prescription_intensity(priority: str, intensity: str) -> int:
     if priority.lower() == "high" or intensity.lower() == "high":
         return 7
     return 6
+
+
+def match_training_followup_session_time(period_start: date, period_end: date, index: int) -> datetime:
+    scheduled_date = period_start + timedelta(days=max(index - 1, 0) * 2)
+    if scheduled_date > period_end:
+        scheduled_date = period_end
+    return datetime(
+        scheduled_date.year,
+        scheduled_date.month,
+        scheduled_date.day,
+        15,
+        0,
+        tzinfo=UTC,
+    )
 
 
 async def player_match_guidance_publish_audit(

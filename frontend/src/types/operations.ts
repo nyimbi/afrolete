@@ -8609,6 +8609,7 @@ export type PerformanceMatchTrainingFollowupRead = {
   team_id: UUID | null;
   plan_id: UUID;
   item_ids: UUID[];
+  session_plan_ids: UUID[];
   title: string;
   focus_area: string;
   period_start: string;

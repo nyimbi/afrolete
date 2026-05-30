@@ -2411,6 +2411,7 @@ class PerformanceMatchTrainingFollowupRead(BaseModel):
     team_id: UUID | None = None
     plan_id: UUID
     item_ids: list[UUID]
+    session_plan_ids: list[UUID] = Field(default_factory=list)
     title: str
     focus_area: str
     period_start: date

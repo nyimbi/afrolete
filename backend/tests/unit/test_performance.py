@@ -3771,6 +3771,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert team_followup["tracking_run_id"] == revised_tracking["id"]
     assert team_followup["team_id"] == team["id"]
     assert team_followup["item_count"] >= 1
+    assert len(team_followup["session_plan_ids"]) == team_followup["item_count"]
     assert team_followup["training_prescriptions"][0]["drill_recommendation"]
     assert team_followup["agent_task_id"] is not None
     plan_response = client.get(
@@ -3783,6 +3784,19 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert items_response.status_code == 200
     assert len(items_response.json()) == team_followup["item_count"]
     assert "Session design:" in items_response.json()[0]["notes"]
+    sessions_response = client.get(
+        f"/api/v1/training/sessions?organization_id={organization['id']}&team_id={team['id']}",
+        headers=identity_headers,
+    )
+    assert sessions_response.status_code == 200
+    followup_sessions = [
+        session
+        for session in sessions_response.json()
+        if session["id"] in set(team_followup["session_plan_ids"])
+    ]
+    assert len(followup_sessions) == team_followup["item_count"]
+    assert all(session["plan_id"] == team_followup["plan_id"] for session in followup_sessions)
+    assert all(session["load_score"] > 0 for session in followup_sessions)
     agent_tasks_response = client.get(
         f"/api/v1/agents/tasks?organization_id={organization['id']}",
         headers=identity_headers,
