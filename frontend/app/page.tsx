@@ -25699,6 +25699,28 @@ export default function HomePage() {
                       </small>
                     </div>
                   </article>
+                  {oppositionScoutingReport.tracking_evidence.length > 0 ? (
+                    <>
+                      <article className="task-card">
+                        <div>
+                          <strong>Tracking-backed evidence</strong>
+                          <span>
+                            {oppositionScoutingReport.tracking_evidence.length} match-tracking signal(s) are shaping this report.
+                          </span>
+                          <small>Possession, pass quality, pressure, shape, defensive actions, and chance quality.</small>
+                        </div>
+                      </article>
+                      {oppositionScoutingReport.tracking_evidence.slice(0, 4).map((finding, index) => (
+                        <article key={`tracking-${finding.category}-${finding.title}-${index}`} className="task-card">
+                          <div>
+                            <strong>{finding.title} · {finding.severity}</strong>
+                            <span>{finding.category.replaceAll("_", " ")} · {finding.evidence}</span>
+                            <small>{finding.recommendation}</small>
+                          </div>
+                        </article>
+                      ))}
+                    </>
+                  ) : null}
                   {[
                     ...oppositionScoutingReport.weaknesses,
                     ...oppositionScoutingReport.threats,

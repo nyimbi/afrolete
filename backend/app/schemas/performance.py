@@ -273,6 +273,7 @@ class OppositionScoutingReportRead(BaseModel):
     threats: list[OppositionScoutingFindingRead]
     recommendations: list[OppositionScoutingFindingRead]
     set_pieces: list[OppositionScoutingFindingRead]
+    tracking_evidence: list[OppositionScoutingFindingRead] = Field(default_factory=list)
     status: str
     generated_at: datetime
 

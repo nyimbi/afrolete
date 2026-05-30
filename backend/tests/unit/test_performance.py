@@ -2904,6 +2904,87 @@ def test_opposition_scouting_video_generates_tactical_report(client, identity_he
     assert video_asset["opponent_name"] == "Pressing City"
     assert video_asset["status"] == "uploaded"
 
+    tracking_response = client.post(
+        f"/api/v1/performance/scouting/videos/{video_asset['id']}/tracking-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "source_provider": "provider_tracking_import",
+            "replace_existing": True,
+            "samples": [
+                {
+                    "track_id": "home-8",
+                    "team_label": "Pressing City",
+                    "player_label": "Pressing City 8",
+                    "timestamp_seconds": 0,
+                    "x_percent": 40,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "home-9",
+                    "team_label": "Pressing City",
+                    "player_label": "Pressing City 9",
+                    "timestamp_seconds": 1,
+                    "x_percent": 70,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "home-9",
+                    "team_label": "Pressing City",
+                    "player_label": "Pressing City 9",
+                    "timestamp_seconds": 2,
+                    "x_percent": 98,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "away-5",
+                    "team_label": "AfroLete",
+                    "player_label": "AfroLete 5",
+                    "timestamp_seconds": 3,
+                    "x_percent": 60,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "ball",
+                    "team_label": "ball",
+                    "player_label": "Ball",
+                    "timestamp_seconds": 0,
+                    "x_percent": 40,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "ball",
+                    "team_label": "ball",
+                    "player_label": "Ball",
+                    "timestamp_seconds": 1,
+                    "x_percent": 70,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "ball",
+                    "team_label": "ball",
+                    "player_label": "Ball",
+                    "timestamp_seconds": 2,
+                    "x_percent": 98,
+                    "y_percent": 50,
+                },
+                {
+                    "track_id": "ball",
+                    "team_label": "ball",
+                    "player_label": "Ball",
+                    "timestamp_seconds": 3,
+                    "x_percent": 60,
+                    "y_percent": 50,
+                },
+            ],
+        },
+    )
+    assert tracking_response.status_code == 201
+    tracking = tracking_response.json()
+    assert tracking["ball_tracking_metrics"]["pass_attempt_count"] == 2
+    assert tracking["ball_tracking_metrics"]["shot_count"] == 1
+    assert tracking["ball_tracking_metrics"]["interception_count"] == 1
+
     report_response = client.post(
         f"/api/v1/performance/scouting/videos/{video_asset['id']}/reports",
         headers=identity_headers,
@@ -2919,11 +3000,17 @@ def test_opposition_scouting_video_generates_tactical_report(client, identity_he
     )
     assert report_response.status_code == 201
     report = report_response.json()
-    assert report["model_policy"] == "afrolete-opposition-scout-v1"
+    assert report["model_policy"] == "afrolete-opposition-scout-v2"
     assert report["formation_detected"] == "4-2-3-1"
-    assert report["confidence"] >= 0.8
+    assert report["confidence"] >= 0.9
+    assert "Tracking evidence adds" in report["tactical_summary"]
     assert any(finding["category"] == "set_piece" for finding in report["weaknesses"])
     assert any("weak-side" in finding["title"].lower() for finding in report["recommendations"])
+    tracking_categories = {finding["category"] for finding in report["tracking_evidence"]}
+    assert "tracking_evidence" in tracking_categories
+    assert "passing_weakness" in tracking_categories
+    assert "chance_profile" in tracking_categories
+    assert "defensive_profile" in tracking_categories
 
     videos = client.get(
         f"/api/v1/performance/scouting/videos?organization_id={organization['id']}",

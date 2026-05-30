@@ -316,7 +316,9 @@ extract OpenCV player motion tracks plus a best-effort ball contour track, and
 create tracking runs that feed distance, speed, heatmaps, estimated possession,
 pass/turnover cues, pass-type accuracy, defensive ball-win labels, pass
 networks, shot/xG estimates, tactical shape, highlights, and coach/player
-reports.
+reports. Opposition scouting reports automatically incorporate the latest
+tracking run for the same video so tactical findings can cite possession,
+passing, chance-quality, defensive-action, shape, and pressure evidence.
 
 Object storage can run in local mode for demos or S3-compatible mode for MinIO.
 The same storage adapter supports retention policy enforcement: local mode

@@ -656,6 +656,8 @@ async def create_opposition_scouting_report(
         payload.competition_id or video_asset.competition_id,
         payload.event_id or video_asset.event_id,
     )
+    tracking_run = await latest_match_tracking_run(db, video_asset.id)
+    tracking_summary = await match_tracking_run_read(db, tracking_run) if tracking_run is not None else None
     analysis = deterministic_opposition_scouting_analysis(
         opponent_name=video_asset.opponent_name,
         sport=video_asset.sport,
@@ -663,6 +665,7 @@ async def create_opposition_scouting_report(
         match_context=payload.match_context or video_asset.match_context,
         analysis_focus=payload.analysis_focus or video_asset.analysis_focus,
         evidence_text=payload.evidence_text,
+        tracking_summary=tracking_summary,
     )
     now = datetime.now(UTC)
     report = OppositionScoutingReport(
@@ -676,7 +679,7 @@ async def create_opposition_scouting_report(
         sport=video_asset.sport,
         match_context=payload.match_context or video_asset.match_context,
         analysis_focus=payload.analysis_focus or video_asset.analysis_focus,
-        model_policy="afrolete-opposition-scout-v1",
+        model_policy="afrolete-opposition-scout-v2" if tracking_summary is not None else "afrolete-opposition-scout-v1",
         confidence=float(analysis["confidence"]),
         formation_detected=str(analysis["formation_detected"]),
         tactical_summary=str(analysis["tactical_summary"]),
@@ -7611,6 +7614,7 @@ def deterministic_opposition_scouting_analysis(
     match_context: str | None,
     analysis_focus: str | None,
     evidence_text: str | None,
+    tracking_summary: dict[str, object] | None = None,
 ) -> dict[str, object]:
     corpus = " ".join(
         part.lower()
@@ -7702,24 +7706,163 @@ def deterministic_opposition_scouting_analysis(
             "Send the strongest aerial player to the back post while a decoy run screens the near-post zone.",
         )
     ]
+    tracking_notes = scouting_findings_from_match_tracking(tracking_summary, opponent_name=opponent_name)
+    weaknesses.extend(tracking_notes["weaknesses"])
+    threats.extend(tracking_notes["threats"])
+    recommendations.extend(tracking_notes["recommendations"])
+    set_pieces.extend(tracking_notes["set_pieces"])
     confidence = 0.74
     if evidence_text and len(evidence_text) > 80:
         confidence += 0.08
     if formation:
         confidence += 0.06
+    if tracking_summary is not None:
+        confidence += 0.06
     confidence = min(confidence, 0.92)
+    tracking_summary_sentence = tracking_notes.get("summary_sentence") or ""
     return {
         "formation_detected": formation_detected,
         "tactical_summary": (
             f"{opponent_name} profiles as a {formation_detected} opponent with transition threat, "
             "recoverable weak-side space, and set-piece second-phase risk. The match plan should "
-            "pull pressure to one side, switch quickly, and keep rest-defense protection central."
+            f"pull pressure to one side, switch quickly, and keep rest-defense protection central.{tracking_summary_sentence}"
         ),
         "weaknesses": weaknesses,
         "threats": threats,
         "recommendations": recommendations,
         "set_pieces": set_pieces,
         "confidence": round(confidence, 2),
+    }
+
+
+def scouting_findings_from_match_tracking(
+    tracking: dict[str, object] | None,
+    *,
+    opponent_name: str,
+) -> dict[str, object]:
+    if tracking is None:
+        return {
+            "weaknesses": [],
+            "threats": [],
+            "recommendations": [],
+            "set_pieces": [],
+            "summary_sentence": "",
+        }
+    ball_metrics = tracking.get("ball_tracking_metrics") if isinstance(tracking.get("ball_tracking_metrics"), dict) else {}
+    chance_metrics = tracking.get("chance_creation_metrics") if isinstance(tracking.get("chance_creation_metrics"), dict) else {}
+    possession = [item for item in tracking.get("possession_estimates", []) if isinstance(item, dict)]
+    pass_types = [item for item in tracking.get("pass_type_metrics", []) if isinstance(item, dict)]
+    team_phase = [item for item in tracking.get("team_phase_metrics", []) if isinstance(item, dict)]
+    team_shape = [item for item in tracking.get("team_shape_metrics", []) if isinstance(item, dict)]
+    pressure_events = [item for item in tracking.get("pressure_events", []) if isinstance(item, dict)]
+    weaknesses: list[dict[str, str]] = []
+    threats: list[dict[str, str]] = []
+    recommendations: list[dict[str, str]] = []
+    set_pieces: list[dict[str, str]] = []
+    if possession:
+        leader = possession[0]
+        threats.append(
+            scouting_finding(
+                "tracking_evidence",
+                "Possession control profile",
+                "high" if float(leader.get("possession_percent") or 0.0) >= 58 else "medium",
+                f"Tracking estimates {leader.get('team_label', 'opponent')} held {leader.get('possession_percent', 0)}% possession across {leader.get('sample_count', 0)} ball samples.",
+                "Prepare compact mid-block spells and rehearse transition outlets for long periods without the ball.",
+            )
+        )
+    if int(ball_metrics.get("pass_attempt_count") or 0) > 0:
+        recommendations.append(
+            scouting_finding(
+                "passing_profile",
+                "Pass accuracy by risk type",
+                "high" if float(ball_metrics.get("pass_accuracy_percent") or 0.0) < 65 else "medium",
+                f"Tracking produced {ball_metrics.get('pass_count', 0)}/{ball_metrics.get('pass_attempt_count', 0)} completed pass attempts ({ball_metrics.get('pass_accuracy_percent', 0)}%).",
+                "Force the lowest-accuracy pass type and press immediately after backward or square trigger passes.",
+            )
+        )
+    if pass_types:
+        risky_pass = min(pass_types, key=lambda item: float(item.get("accuracy_percent") or 0.0))
+        weaknesses.append(
+            scouting_finding(
+                "passing_weakness",
+                f"{str(risky_pass.get('pass_type') or 'pass').replace('_', ' ').title()} vulnerability",
+                "high" if float(risky_pass.get("accuracy_percent") or 0.0) < 50 else "medium",
+                f"{risky_pass.get('team_label', 'Opponent')} completed {risky_pass.get('completed_count', 0)}/{risky_pass.get('attempt_count', 0)} {str(risky_pass.get('pass_type') or 'pass').replace('_', ' ')} attempts.",
+                "Set traps that invite this pass, then attack the second ball and nearest counter-press lane.",
+            )
+        )
+    if int(ball_metrics.get("interception_count") or 0) + int(ball_metrics.get("tackle_count") or 0) > 0:
+        threats.append(
+            scouting_finding(
+                "defensive_profile",
+                "Ball-win pressure threat",
+                "high",
+                f"Tracking labelled {ball_metrics.get('interception_count', 0)} interceptions and {ball_metrics.get('tackle_count', 0)} tackles from turnovers.",
+                "Coach first-touch security, body shape before receiving, and immediate support angles in contested zones.",
+            )
+        )
+    if int(ball_metrics.get("shot_count") or 0) > 0:
+        weaknesses.append(
+            scouting_finding(
+                "chance_profile",
+                "Shot quality concession",
+                "high" if float(ball_metrics.get("expected_goals") or 0.0) >= 0.5 else "medium",
+                f"Ball tracking derived {ball_metrics.get('shot_count', 0)} shot(s), {ball_metrics.get('shot_on_target_count', 0)} on target, and {ball_metrics.get('expected_goals', 0)} xG.",
+                "Use cutback and central final-third actions if the opponent allows similar shot locations.",
+            )
+        )
+    compact_shape = next((item for item in team_shape if str(item.get("shape_hint") or "") == "stretched_shape"), None)
+    if compact_shape is not None:
+        weaknesses.append(
+            scouting_finding(
+                "shape_weakness",
+                "Stretched team shape",
+                "medium",
+                f"{compact_shape.get('team_label', opponent_name)} averaged {compact_shape.get('average_width_percent', 0)}% width and {compact_shape.get('average_depth_percent', 0)}% depth.",
+                "Switch quickly after circulation and attack the gaps between stretched lines.",
+            )
+        )
+    active_phase = next((item for item in team_phase if int(item.get("pressure_event_count") or 0) > 0), None)
+    if active_phase is not None or pressure_events:
+        threats.append(
+            scouting_finding(
+                "pressing_profile",
+                "Pressing trigger evidence",
+                "medium",
+                f"Tracking captured {len(pressure_events)} pressure event(s) and {active_phase.get('pressure_event_count', 0) if active_phase else 0} team-phase pressure count(s).",
+                "Use third-player outlets and diagonal support before receiving under pressure.",
+            )
+        )
+    if int(chance_metrics.get("key_pass_count") or 0) > 0:
+        recommendations.append(
+            scouting_finding(
+                "match_plan",
+                "Block the key-pass lane",
+                "high",
+                f"Tracking found {chance_metrics.get('key_pass_count', 0)} key pass(es) leading to {chance_metrics.get('expected_goals', 0)} xG.",
+                "Assign a screening midfielder to deny the most productive final-action passing lane.",
+            )
+        )
+    if int(ball_metrics.get("shot_count") or 0) > 0 and int(ball_metrics.get("shot_on_target_count") or 0) == 0:
+        set_pieces.append(
+            scouting_finding(
+                "set_piece",
+                "Low shot accuracy from dead-ball-like deliveries",
+                "low",
+                "Tracking found shot attempts without on-target outcomes.",
+                "Concede low-value wide deliveries rather than central free shots.",
+            )
+        )
+    summary_sentence = (
+        f" Tracking evidence adds {ball_metrics.get('pass_count', 0)}/{ball_metrics.get('pass_attempt_count', 0)} passing, "
+        f"{ball_metrics.get('turnover_count', 0)} turnovers, and {ball_metrics.get('expected_goals', 0)} xG to the scouting model."
+    )
+    return {
+        "weaknesses": weaknesses,
+        "threats": threats,
+        "recommendations": recommendations,
+        "set_pieces": set_pieces,
+        "summary_sentence": summary_sentence,
     }
 
 

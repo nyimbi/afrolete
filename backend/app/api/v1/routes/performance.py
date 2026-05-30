@@ -449,6 +449,36 @@ def to_opposition_scouting_video_read(video_asset) -> OppositionScoutingVideoAss
 
 
 def to_opposition_scouting_report_read(report) -> OppositionScoutingReportRead:
+    weaknesses = [
+        OppositionScoutingFindingRead(**finding)
+        for finding in decode_scouting_findings(report.weaknesses_json)
+    ]
+    threats = [
+        OppositionScoutingFindingRead(**finding)
+        for finding in decode_scouting_findings(report.threats_json)
+    ]
+    recommendations = [
+        OppositionScoutingFindingRead(**finding)
+        for finding in decode_scouting_findings(report.recommendations_json)
+    ]
+    set_pieces = [
+        OppositionScoutingFindingRead(**finding)
+        for finding in decode_scouting_findings(report.set_pieces_json)
+    ]
+    tracking_categories = {
+        "tracking_evidence",
+        "passing_profile",
+        "passing_weakness",
+        "defensive_profile",
+        "chance_profile",
+        "shape_weakness",
+        "pressing_profile",
+    }
+    tracking_evidence = [
+        finding
+        for finding in [*weaknesses, *threats, *recommendations, *set_pieces]
+        if finding.category in tracking_categories
+    ]
     return OppositionScoutingReportRead(
         id=report.id,
         organization_id=report.organization_id,
@@ -465,22 +495,11 @@ def to_opposition_scouting_report_read(report) -> OppositionScoutingReportRead:
         confidence=report.confidence,
         formation_detected=report.formation_detected,
         tactical_summary=report.tactical_summary,
-        weaknesses=[
-            OppositionScoutingFindingRead(**finding)
-            for finding in decode_scouting_findings(report.weaknesses_json)
-        ],
-        threats=[
-            OppositionScoutingFindingRead(**finding)
-            for finding in decode_scouting_findings(report.threats_json)
-        ],
-        recommendations=[
-            OppositionScoutingFindingRead(**finding)
-            for finding in decode_scouting_findings(report.recommendations_json)
-        ],
-        set_pieces=[
-            OppositionScoutingFindingRead(**finding)
-            for finding in decode_scouting_findings(report.set_pieces_json)
-        ],
+        weaknesses=weaknesses,
+        threats=threats,
+        recommendations=recommendations,
+        set_pieces=set_pieces,
+        tracking_evidence=tracking_evidence,
         status=report.status,
         generated_at=report.generated_at,
     )

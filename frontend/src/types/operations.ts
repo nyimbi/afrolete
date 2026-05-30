@@ -6838,6 +6838,7 @@ export type OppositionScoutingReportRead = {
   threats: OppositionScoutingFindingRead[];
   recommendations: OppositionScoutingFindingRead[];
   set_pieces: OppositionScoutingFindingRead[];
+  tracking_evidence: OppositionScoutingFindingRead[];
   status: string;
   generated_at: string;
 };
