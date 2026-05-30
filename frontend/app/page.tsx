@@ -929,6 +929,164 @@ function ReportingChartCard({ chart }: { chart: ReportChartRead }) {
   );
 }
 
+const matchReplayPalette = ["#1f7a8c", "#d94f30", "#6a4c93", "#2f9e44", "#c77d00", "#1971c2"];
+
+function MatchTrackingPitchReplay({ run }: { run: PerformanceMatchTrackingRunRead }) {
+  const [cursorPercent, setCursorPercent] = useState(100);
+  const sortedSamples = useMemo(
+    () => [...run.samples].sort((left, right) => left.timestamp_seconds - right.timestamp_seconds),
+    [run.samples]
+  );
+  const timeBounds = useMemo(() => {
+    if (sortedSamples.length === 0) {
+      return { min: 0, max: 0 };
+    }
+    return {
+      min: sortedSamples[0]?.timestamp_seconds ?? 0,
+      max: sortedSamples[sortedSamples.length - 1]?.timestamp_seconds ?? 0
+    };
+  }, [sortedSamples]);
+  const selectedTime = timeBounds.min + ((timeBounds.max - timeBounds.min) * cursorPercent) / 100;
+  const teamLabels = useMemo(
+    () => Array.from(new Set(
+      run.samples
+        .filter((sample) => sample.track_id !== "ball" && sample.team_label)
+        .map((sample) => String(sample.team_label))
+    )),
+    [run.samples]
+  );
+  const teamColor = (teamLabel: string | null, trackIndex: number) => {
+    if (!teamLabel) {
+      return matchReplayPalette[trackIndex % matchReplayPalette.length];
+    }
+    const index = teamLabels.indexOf(teamLabel);
+    return matchReplayPalette[(index >= 0 ? index : trackIndex) % matchReplayPalette.length];
+  };
+  const tracks = useMemo(() => {
+    const grouped = new Map<string, typeof run.samples>();
+    for (const sample of sortedSamples) {
+      if (sample.timestamp_seconds > selectedTime) {
+        continue;
+      }
+      const existing = grouped.get(sample.track_id) ?? [];
+      existing.push(sample);
+      grouped.set(sample.track_id, existing);
+    }
+    return Array.from(grouped.entries())
+      .map(([trackId, samples]) => ({ trackId, samples, latest: samples[samples.length - 1] }))
+      .filter((track) => track.latest)
+      .sort((left, right) => {
+        if (left.trackId === "ball") {
+          return 1;
+        }
+        if (right.trackId === "ball") {
+          return -1;
+        }
+        return left.trackId.localeCompare(right.trackId);
+      });
+  }, [selectedTime, sortedSamples]);
+  const activePlayerCount = tracks.filter((track) => track.trackId !== "ball").length;
+  const selectedPhase = run.match_phase_snapshots.find(
+    (snapshot) => Math.abs(Number(snapshot.timestamp_seconds ?? 0) - selectedTime) <= 1
+  );
+
+  return (
+    <article className="match-replay-card">
+      <div className="match-replay-header">
+        <div>
+          <strong>Tracking replay</strong>
+          <span>
+            {selectedTime.toFixed(1)}s · {activePlayerCount} player track(s) · {run.samples.length} stored sample(s)
+          </span>
+        </div>
+        <div className="match-replay-clock">
+          <span>{timeBounds.min.toFixed(1)}s</span>
+          <input
+            aria-label="Match tracking replay time"
+            type="range"
+            min="0"
+            max="100"
+            value={cursorPercent}
+            onChange={(event) => setCursorPercent(Number(event.target.value))}
+          />
+          <span>{timeBounds.max.toFixed(1)}s</span>
+        </div>
+      </div>
+      <div className="match-replay-pitch" role="img" aria-label="Football pitch tracking replay">
+        <div className="pitch-halfway" />
+        <div className="pitch-center-circle" />
+        <div className="pitch-box pitch-box-left" />
+        <div className="pitch-box pitch-box-right" />
+        <svg className="match-replay-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {tracks.map((track, trackIndex) => {
+            const trail = track.samples.slice(-14);
+            const latest = track.latest;
+            const isBall = track.trackId === "ball";
+            const color = isBall ? "#f6f7fb" : teamColor(latest?.team_label ?? null, trackIndex);
+            const points = trail.map((sample) => `${sample.x_percent},${sample.y_percent}`).join(" ");
+            return (
+              <g key={track.trackId}>
+                {trail.length > 1 ? (
+                  <polyline
+                    points={points}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={isBall ? 0.6 : 0.45}
+                    strokeOpacity={isBall ? 0.9 : 0.62}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ) : null}
+                <circle
+                  cx={latest?.x_percent ?? 0}
+                  cy={latest?.y_percent ?? 0}
+                  r={isBall ? 1.35 : 2.2}
+                  fill={color}
+                  stroke={isBall ? "#1e293b" : "#f8fafc"}
+                  strokeWidth={isBall ? 0.45 : 0.35}
+                />
+              </g>
+            );
+          })}
+        </svg>
+        <div className="match-replay-labels">
+          {tracks.slice(0, 18).map((track, trackIndex) => {
+            const latest = track.latest;
+            if (!latest) {
+              return null;
+            }
+            const isBall = track.trackId === "ball";
+            const color = isBall ? "#f6f7fb" : teamColor(latest.team_label, trackIndex);
+            return (
+              <span
+                key={`label-${track.trackId}`}
+                className={`match-replay-dot ${isBall ? "ball" : ""}`}
+                style={{
+                  left: `${Math.min(Math.max(latest.x_percent, 2), 98)}%`,
+                  top: `${Math.min(Math.max(latest.y_percent, 4), 96)}%`,
+                  borderColor: color
+                }}
+              >
+                {isBall ? "Ball" : latest.jersey_number || latest.player_label || latest.track_id}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+      <div className="match-replay-legend">
+        {teamLabels.slice(0, 4).map((label, index) => (
+          <span key={label}>
+            <i style={{ backgroundColor: matchReplayPalette[index % matchReplayPalette.length] }} />
+            {label}
+          </span>
+        ))}
+        <span><i className="ball-swatch" /> Ball</span>
+        {selectedPhase ? <span>{String(selectedPhase.phase_hint ?? "phase").replaceAll("_", " ")}</span> : null}
+      </div>
+    </article>
+  );
+}
+
 function ArtifactAccessTrendCard({ summary }: { summary: AgentScorecardArtifactAccessSummaryRead }) {
   const buckets = [...summary.daily_trend].reverse();
   const max = Math.max(...buckets.map((bucket) => bucket.total_count), 1);
@@ -25257,6 +25415,9 @@ export default function HomePage() {
                       <button type="button" onClick={autoTrackOppositionMatchVideo} disabled={busyAction !== null}>Auto-track</button>
                     </span>
                   </article>
+                  {performanceMatchTrackingRun.samples.length > 0 ? (
+                    <MatchTrackingPitchReplay key={performanceMatchTrackingRun.id} run={performanceMatchTrackingRun} />
+                  ) : null}
                   <article className="task-card">
                     <div>
                       <strong>Shareable player guidance</strong>

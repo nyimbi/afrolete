@@ -548,6 +548,158 @@ textarea:focus {
   background: var(--wash);
 }
 
+.match-replay-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fbf8;
+}
+
+.match-replay-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.7fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.match-replay-header strong,
+.match-replay-header span {
+  display: block;
+}
+
+.match-replay-header span,
+.match-replay-legend {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.match-replay-clock {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.match-replay-clock input {
+  width: 100%;
+}
+
+.match-replay-pitch {
+  position: relative;
+  min-height: 360px;
+  overflow: hidden;
+  border: 2px solid rgba(248, 250, 252, 0.88);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 49.8%, rgba(255, 255, 255, 0.38) 50%, rgba(255, 255, 255, 0.08) 50.2%),
+    repeating-linear-gradient(90deg, #246f45 0 10%, #1e653f 10% 20%);
+  box-shadow: inset 0 0 0 1px rgba(18, 30, 24, 0.26);
+}
+
+.pitch-halfway,
+.pitch-center-circle,
+.pitch-box {
+  position: absolute;
+  pointer-events: none;
+  border-color: rgba(248, 250, 252, 0.72);
+}
+
+.pitch-halfway {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  border-left: 1px solid rgba(248, 250, 252, 0.78);
+}
+
+.pitch-center-circle {
+  top: 35%;
+  left: 42%;
+  width: 16%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(248, 250, 252, 0.72);
+  border-radius: 999px;
+}
+
+.pitch-box {
+  top: 24%;
+  width: 15%;
+  height: 52%;
+  border: 1px solid rgba(248, 250, 252, 0.72);
+}
+
+.pitch-box-left {
+  left: 0;
+  border-left: 0;
+}
+
+.pitch-box-right {
+  right: 0;
+  border-right: 0;
+}
+
+.match-replay-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.match-replay-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.match-replay-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  max-width: 72px;
+  padding: 2px 5px;
+  border: 1px solid;
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.92);
+  color: #17231d;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.match-replay-dot.ball {
+  background: #f6f7fb;
+  color: #111827;
+}
+
+.match-replay-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.match-replay-legend span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  margin: 0;
+}
+
+.match-replay-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.match-replay-legend .ball-swatch {
+  border: 1px solid #1e293b;
+  background: #f6f7fb;
+}
+
 .log-line {
   border-left: 3px solid var(--blue);
   margin: 0;
@@ -5114,6 +5266,14 @@ textarea:focus {
 
   .admission-card-head {
     display: grid;
+  }
+
+  .match-replay-header {
+    grid-template-columns: 1fr;
+  }
+
+  .match-replay-pitch {
+    min-height: 260px;
   }
 }
 
