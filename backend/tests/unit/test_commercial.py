@@ -206,11 +206,36 @@ def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboa
     assert signage_playlist["items"][0]["rights_status"] == "cleared"
     assert signage_playlist["items"][0]["asset_url"] == "https://assets.example/acme-scoreboard.png"
 
+    playback = client.post(
+        "/api/v1/commercial/sponsor-digital-signage-playback",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "placement_id": signage_playlist["items"][0]["placement_id"],
+            "content_asset_id": signage_playlist["items"][0]["content_asset_id"],
+            "activation_campaign_id": activation["id"],
+            "screen_name": "Main scoreboard",
+            "device_id": "scoreboard-01",
+            "slot_index": 1,
+            "duration_seconds": 10,
+            "estimated_impressions": 420,
+            "engagements": 17,
+            "evidence_ref": "screen-player://scoreboard-01/playbacks/1",
+        },
+    ).json()
+    assert playback["placement"]["actual_impressions"] == 420
+    assert playback["placement"]["actual_engagements"] == 17
+    assert playback["content_asset"]["impression_count"] == 420
+    assert playback["content_asset"]["engagement_count"] == 17
+    assert playback["activation_campaign"]["impression_count"] == 420
+    assert playback["activation_campaign"]["signup_count"] == 17
+
     content_assets = client.get(
         f"/api/v1/commercial/sponsor-content-assets?organization_id={organization['id']}"
     ).json()
     assert content_assets[0]["usage_count"] == 1
     assert content_assets[0]["approval_status"] == "approved"
+    assert content_assets[0]["impression_count"] == 420
 
     milestone = client.post(
         "/api/v1/commercial/sponsorship-milestones",

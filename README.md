@@ -177,7 +177,7 @@ Major capability areas include:
   carpooling, driver ratings, backup drivers, and route-risk guidance.
 - Finance, sponsorship, fundraising, ticketing, invoices, payments, refunds,
   tax, accounting, payouts, sponsor portals, public support showcases, and
-  venue digital-signage sponsor rotations.
+  venue digital-signage sponsor rotations with playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
   AI insights, and export jobs.

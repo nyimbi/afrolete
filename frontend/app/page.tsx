@@ -437,6 +437,7 @@ import type {
   SponsorContentDashboardRead,
   SponsorCouponRedemptionRead,
   SponsorDigitalSignagePlaylistRead,
+  SponsorDigitalSignagePlaybackRead,
   SponsorInteractionRead,
   SponsorStewardshipDashboardRead,
   SponsorRead,
@@ -2121,6 +2122,7 @@ export default function HomePage() {
   const [sponsorPlacements, setSponsorPlacements] = useState<SponsorActivationPlacementRead[]>([]);
   const [sponsorContentDashboard, setSponsorContentDashboard] = useState<SponsorContentDashboardRead | null>(null);
   const [sponsorDigitalSignagePlaylist, setSponsorDigitalSignagePlaylist] = useState<SponsorDigitalSignagePlaylistRead | null>(null);
+  const [sponsorDigitalSignagePlayback, setSponsorDigitalSignagePlayback] = useState<SponsorDigitalSignagePlaybackRead | null>(null);
   const [sponsorMilestones, setSponsorMilestones] = useState<SponsorshipDeliverableMilestoneRead[]>([]);
   const [sponsorInteractions, setSponsorInteractions] = useState<SponsorInteractionRead[]>([]);
   const [sponsorStewardshipDashboard, setSponsorStewardshipDashboard] = useState<SponsorStewardshipDashboardRead | null>(null);
@@ -16660,6 +16662,60 @@ export default function HomePage() {
     );
   };
 
+  const recordSponsorDigitalSignagePlayback = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const item = sponsorDigitalSignagePlaylist?.items[0];
+    if (!item) {
+      addLog("Generate a signage playlist before recording playback", "bad");
+      return;
+    }
+    runAction(
+      "sponsor-digital-signage-playback",
+      () =>
+        apiRequest<SponsorDigitalSignagePlaybackRead>("/commercial/sponsor-digital-signage-playback", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            placement_id: item.placement_id,
+            content_asset_id: item.content_asset_id,
+            activation_campaign_id: null,
+            screen_name: sponsorDigitalSignagePlaylist.screen_name,
+            device_id: "scoreboard-demo-01",
+            slot_index: item.slot_index,
+            duration_seconds: item.duration_seconds,
+            estimated_impressions: Math.max(25, Math.round(item.expected_impressions / Math.max(sponsorDigitalSignagePlaylist.slot_count, 1))),
+            engagements: item.coupon_code ? 3 : 0,
+            evidence_ref: `screen-player://${sponsorDigitalSignagePlaylist.screen_name.toLowerCase().replaceAll(" ", "-")}/slot-${item.slot_index}`
+          }
+        }),
+      (playback) => {
+        setSponsorDigitalSignagePlayback(playback);
+        setSponsorPlacements((current) => [
+          playback.placement,
+          ...current.filter((placement) => placement.id !== playback.placement.id)
+        ]);
+        if (playback.content_asset) {
+          setSponsorContentAssets((current) => [
+            playback.content_asset as SponsorContentAssetRead,
+            ...current.filter((asset) => asset.id !== playback.content_asset?.id)
+          ]);
+        }
+        if (playback.activation_campaign) {
+          setSponsorActivations((current) => [
+            playback.activation_campaign as SponsorActivationCampaignRead,
+            ...current.filter((activation) => activation.id !== playback.activation_campaign?.id)
+          ]);
+        }
+        addLog(playback.message, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createSponsorStewardshipWorkflow = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -22046,6 +22102,7 @@ export default function HomePage() {
                 <button type="button" onClick={recordSponsorCouponRedemption} disabled={busyAction !== null}>Redeem</button>
                 <button type="button" onClick={createSponsorContentWorkflow} disabled={busyAction !== null}>Content</button>
                 <button type="button" onClick={refreshSponsorDigitalSignagePlaylist} disabled={busyAction !== null}>Signage</button>
+                <button type="button" onClick={recordSponsorDigitalSignagePlayback} disabled={busyAction !== null}>Log play</button>
                 <button type="button" onClick={createSponsorStewardshipWorkflow} disabled={busyAction !== null}>Steward</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
@@ -22324,6 +22381,17 @@ export default function HomePage() {
                   </div>
                 </article>
               ))}
+              {sponsorDigitalSignagePlayback ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Screen playback · {sponsorDigitalSignagePlayback.screen_name}</strong>
+                    <span>
+                      {sponsorDigitalSignagePlayback.estimated_impressions} impressions · {sponsorDigitalSignagePlayback.engagements} engagements · slot {sponsorDigitalSignagePlayback.slot_index}
+                    </span>
+                    <small>{sponsorDigitalSignagePlayback.evidence_ref ?? sponsorDigitalSignagePlayback.playback_status}</small>
+                  </div>
+                </article>
+              ) : null}
               {sponsorStewardshipDashboard ? (
                 <article className="task-card">
                   <div>

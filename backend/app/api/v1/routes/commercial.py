@@ -58,6 +58,8 @@ from app.schemas.commercial import (
     SponsorCouponRedemptionCreate,
     SponsorCouponRedemptionRead,
     SponsorDigitalSignagePlaylistRead,
+    SponsorDigitalSignagePlaybackCreate,
+    SponsorDigitalSignagePlaybackRead,
     SponsorInteractionCreate,
     SponsorInteractionRead,
     SponsorPortalRead,
@@ -145,6 +147,7 @@ from app.services.commercial import (
     record_donation,
     review_sponsor_content_asset,
     record_sponsor_coupon_redemption,
+    record_sponsor_digital_signage_playback,
     record_payment,
     reconcile_commercial_settlement_payout_callback,
     refund_invoice,
@@ -485,6 +488,20 @@ async def sponsor_digital_signage_playlist_route(
         slot_count=slot_count,
         slot_seconds=slot_seconds,
     )
+
+
+@router.post(
+    "/sponsor-digital-signage-playback",
+    response_model=SponsorDigitalSignagePlaybackRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_sponsor_digital_signage_playback_route(
+    payload: SponsorDigitalSignagePlaybackCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> SponsorDigitalSignagePlaybackRead:
+    return await record_sponsor_digital_signage_playback(db, identity, payload, authz)
 
 
 @router.post("/campaigns", response_model=FundraisingCampaignRead, status_code=status.HTTP_201_CREATED)

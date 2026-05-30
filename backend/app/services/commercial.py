@@ -97,6 +97,8 @@ from app.schemas.commercial import (
     SponsorCouponRedemptionRead,
     SponsorDigitalSignagePlaylistItemRead,
     SponsorDigitalSignagePlaylistRead,
+    SponsorDigitalSignagePlaybackCreate,
+    SponsorDigitalSignagePlaybackRead,
     SponsorInteractionCreate,
     SponsorInteractionRead,
     SponsorRenewalForecastRead,
@@ -640,6 +642,73 @@ async def sponsor_digital_signage_playlist(
         rotation_policy="expected-impressions-priority-cyclic",
         items=items,
         warnings=playlist_warnings,
+    )
+
+
+async def record_sponsor_digital_signage_playback(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: SponsorDigitalSignagePlaybackCreate,
+    authz: AuthorizationService,
+) -> SponsorDigitalSignagePlaybackRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    placement = await get_sponsor_activation_placement_for_organization(
+        db,
+        payload.placement_id,
+        payload.organization_id,
+    )
+    if payload.content_asset_id is not None and payload.content_asset_id != placement.content_asset_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Playback content asset does not match placement")
+    if payload.activation_campaign_id is not None and payload.activation_campaign_id != placement.activation_campaign_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Playback campaign does not match placement")
+    asset = await db.get(SponsorContentAsset, placement.content_asset_id) if placement.content_asset_id else None
+    campaign = (
+        await db.get(SponsorActivationCampaign, placement.activation_campaign_id)
+        if placement.activation_campaign_id
+        else None
+    )
+    played_at = payload.played_at or datetime.now(UTC)
+    impressions = payload.estimated_impressions if payload.playback_status == "played" else 0
+    engagements = payload.engagements if payload.playback_status == "played" else 0
+    placement.actual_impressions += impressions
+    placement.actual_engagements += engagements
+    placement.status = "active" if payload.playback_status == "played" else payload.playback_status
+    if payload.evidence_ref:
+        placement.notes = append_commercial_note(
+            placement.notes,
+            f"{played_at.date()}: signage playback {payload.screen_name} slot {payload.slot_index}; "
+            f"{impressions} impressions, {engagements} engagements; evidence {payload.evidence_ref}.",
+        )
+    if asset is not None:
+        asset.impression_count += impressions
+        asset.engagement_count += engagements
+    if campaign is not None:
+        campaign.impression_count += impressions
+        campaign.signup_count += engagements
+    await db.commit()
+    await db.refresh(placement)
+    if asset is not None:
+        await db.refresh(asset)
+    if campaign is not None:
+        await db.refresh(campaign)
+    return SponsorDigitalSignagePlaybackRead(
+        organization_id=payload.organization_id,
+        placement=await sponsor_activation_placement_read(db, placement),
+        content_asset=await sponsor_content_asset_read(db, asset) if asset is not None else None,
+        activation_campaign=await sponsor_activation_campaign_read(db, campaign) if campaign is not None else None,
+        screen_name=payload.screen_name,
+        device_id=payload.device_id,
+        slot_index=payload.slot_index,
+        played_at=played_at,
+        duration_seconds=payload.duration_seconds,
+        estimated_impressions=impressions,
+        engagements=engagements,
+        playback_status=payload.playback_status,
+        evidence_ref=payload.evidence_ref,
+        message=(
+            f"Recorded {impressions} signage impression(s) and {engagements} engagement(s) "
+            f"for {placement.placement_name}."
+        ),
     )
 
 
@@ -2660,6 +2729,17 @@ async def get_sponsor_content_asset_for_organization(
     return asset
 
 
+async def get_sponsor_activation_placement_for_organization(
+    db: AsyncSession,
+    placement_id: UUID,
+    organization_id: UUID,
+) -> SponsorActivationPlacement:
+    placement = await db.get(SponsorActivationPlacement, placement_id)
+    if placement is None or placement.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor placement not found")
+    return placement
+
+
 async def get_sponsorship_milestone_for_organization(
     db: AsyncSession,
     milestone_id: UUID,
@@ -3969,3 +4049,9 @@ def sponsor_digital_signage_warnings(
     if items and sum(item.expected_impressions for item in items) == 0:
         warnings.append("Expected impressions are missing; add venue estimates before sponsor ROI reporting.")
     return warnings[:5]
+
+
+def append_commercial_note(existing: str | None, note: str) -> str:
+    if not existing:
+        return note[:4000]
+    return f"{existing}\n{note}"[-4000:]

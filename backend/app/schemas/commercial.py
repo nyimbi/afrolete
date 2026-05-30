@@ -302,6 +302,39 @@ class SponsorDigitalSignagePlaylistRead(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class SponsorDigitalSignagePlaybackCreate(BaseModel):
+    organization_id: UUID
+    placement_id: UUID
+    content_asset_id: UUID | None = None
+    activation_campaign_id: UUID | None = None
+    screen_name: str = Field(default="Main scoreboard", min_length=2, max_length=120)
+    device_id: str | None = Field(default=None, max_length=160)
+    slot_index: int = Field(default=1, ge=1, le=10000)
+    played_at: datetime | None = None
+    duration_seconds: int = Field(default=12, ge=1, le=3600)
+    estimated_impressions: int = Field(default=0, ge=0, le=1_000_000)
+    engagements: int = Field(default=0, ge=0, le=1_000_000)
+    playback_status: str = Field(default="played", min_length=2, max_length=40)
+    evidence_ref: str | None = Field(default=None, max_length=500)
+
+
+class SponsorDigitalSignagePlaybackRead(BaseModel):
+    organization_id: UUID
+    placement: SponsorActivationPlacementRead
+    content_asset: SponsorContentAssetRead | None = None
+    activation_campaign: SponsorActivationCampaignRead | None = None
+    screen_name: str
+    device_id: str | None = None
+    slot_index: int
+    played_at: datetime
+    duration_seconds: int
+    estimated_impressions: int
+    engagements: int
+    playback_status: str
+    evidence_ref: str | None = None
+    message: str
+
+
 class SponsorContentDashboardRead(BaseModel):
     organization_id: UUID
     asset_count: int

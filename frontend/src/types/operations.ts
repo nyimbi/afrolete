@@ -3687,6 +3687,23 @@ export type SponsorDigitalSignagePlaylistRead = {
   warnings: string[];
 };
 
+export type SponsorDigitalSignagePlaybackRead = {
+  organization_id: UUID;
+  placement: SponsorActivationPlacementRead;
+  content_asset: SponsorContentAssetRead | null;
+  activation_campaign: SponsorActivationCampaignRead | null;
+  screen_name: string;
+  device_id: string | null;
+  slot_index: number;
+  played_at: string;
+  duration_seconds: number;
+  estimated_impressions: number;
+  engagements: number;
+  playback_status: string;
+  evidence_ref: string | null;
+  message: string;
+};
+
 export type SponsorContentDashboardRead = {
   organization_id: UUID;
   asset_count: number;
