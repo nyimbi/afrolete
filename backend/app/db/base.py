@@ -97,6 +97,12 @@ from app.models.development import (  # noqa: F401,E402
     AthleteScholarshipApplication,
     AthleteWellnessCheckIn,
 )
+from app.models.nutrition import (  # noqa: F401,E402
+    AthleteMealLog,
+    AthleteMealPlan,
+    AthleteNutritionProfile,
+    NutritionEducationAssignment,
+)
 from app.models.communication import (  # noqa: F401,E402
     CommunicationMessage,
     CommunicationTemplate,

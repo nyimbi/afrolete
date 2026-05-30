@@ -10,6 +10,7 @@ from app.api.v1.routes import competitions
 from app.api.v1.routes import developers
 from app.api.v1.routes import development
 from app.api.v1.routes import events
+from app.api.v1.routes import nutrition
 from app.api.v1.routes import organizations
 from app.api.v1.routes import platform
 from app.api.v1.routes import performance
@@ -32,6 +33,7 @@ api_router.include_router(competitions.router)
 api_router.include_router(developers.router)
 api_router.include_router(development.router)
 api_router.include_router(events.router)
+api_router.include_router(nutrition.router)
 api_router.include_router(organizations.router)
 api_router.include_router(performance.router)
 api_router.include_router(reporting.router)

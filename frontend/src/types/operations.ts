@@ -6579,6 +6579,107 @@ export type AthleteDevelopmentDashboardRead = {
   actions: AthleteDevelopmentActionRead[];
 };
 
+export type AthleteNutritionProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  recorded_by_person_id: UUID | null;
+  dietary_pattern: string;
+  allergies: string | null;
+  medical_notes: string | null;
+  hydration_target_liters: number;
+  daily_calorie_target: number;
+  protein_target_grams: number;
+  carbohydrate_target_grams: number;
+  fat_target_grams: number;
+  supplement_policy: string | null;
+  travel_food_risk: string;
+  consent_to_share_with_caterers: boolean;
+  status: string;
+  created_at: string;
+};
+
+export type AthleteMealPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  created_by_person_id: UUID | null;
+  title: string;
+  plan_type: string;
+  period_start: string;
+  period_end: string;
+  daily_calorie_target: number;
+  hydration_target_liters: number;
+  menu_summary: string;
+  shopping_list: string | null;
+  caterer_notes: string | null;
+  risk_flags: string | null;
+  ai_generated: boolean;
+  status: string;
+  created_at: string;
+};
+
+export type AthleteMealLogRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  meal_plan_id: UUID | null;
+  logged_by_person_id: UUID | null;
+  logged_at: string;
+  meal_type: string;
+  calories: number;
+  protein_grams: number;
+  carbohydrate_grams: number;
+  fat_grams: number;
+  hydration_liters: number;
+  perceived_energy_score: number;
+  gut_comfort_score: number;
+  compliance_status: string;
+  notes: string | null;
+  created_at: string;
+};
+
+export type NutritionEducationAssignmentRead = {
+  id: UUID;
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  assigned_by_person_id: UUID | null;
+  module_code: string;
+  title: string;
+  category: string;
+  status: string;
+  progress_percent: number;
+  due_on: string | null;
+  completed_at: string | null;
+  evidence_notes: string | null;
+  created_at: string;
+};
+
+export type AthleteNutritionActionRead = {
+  key: string;
+  priority: string;
+  title: string;
+  detail: string;
+  owner: string;
+};
+
+export type AthleteNutritionDashboardRead = {
+  organization_id: UUID;
+  athlete_profile_id: UUID;
+  athlete_name: string;
+  generated_at: string;
+  nutrition_score: number;
+  risk_band: string;
+  hydration_adherence_percent: number;
+  fueling_adherence_percent: number;
+  education_progress_percent: number;
+  profile: AthleteNutritionProfileRead | null;
+  active_plan: AthleteMealPlanRead | null;
+  recent_logs: AthleteMealLogRead[];
+  education_assignments: NutritionEducationAssignmentRead[];
+  actions: AthleteNutritionActionRead[];
+};
+
 export type PerformanceForecastValidationMetricRead = {
   athlete_profile_id: UUID;
   metric_definition_id: UUID;

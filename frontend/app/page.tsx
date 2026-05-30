@@ -82,6 +82,10 @@ import type {
   AthleteAcademicRecordRead,
   AthleteDevelopmentDashboardRead,
   AthleteLifeSkillAssignmentRead,
+  AthleteMealLogRead,
+  AthleteMealPlanRead,
+  AthleteNutritionDashboardRead,
+  AthleteNutritionProfileRead,
   AthletePathwayProjectionRead,
   AthletePerformanceSummaryRead,
   AthleteScholarshipApplicationRead,
@@ -140,6 +144,7 @@ import type {
   FanPollVoteRead,
   MentorshipMatchRead,
   MentorshipProgramRead,
+  NutritionEducationAssignmentRead,
   AthleteTransferRead,
   CompetitionAdvancementRead,
   CompetitionBracketRead,
@@ -1658,6 +1663,11 @@ export default function HomePage() {
   const [academicRecords, setAcademicRecords] = useState<AthleteAcademicRecordRead[]>([]);
   const [lifeSkillAssignments, setLifeSkillAssignments] = useState<AthleteLifeSkillAssignmentRead[]>([]);
   const [scholarshipApplications, setScholarshipApplications] = useState<AthleteScholarshipApplicationRead[]>([]);
+  const [nutritionDashboard, setNutritionDashboard] = useState<AthleteNutritionDashboardRead | null>(null);
+  const [nutritionProfile, setNutritionProfile] = useState<AthleteNutritionProfileRead | null>(null);
+  const [mealPlans, setMealPlans] = useState<AthleteMealPlanRead[]>([]);
+  const [mealLogs, setMealLogs] = useState<AthleteMealLogRead[]>([]);
+  const [nutritionEducationAssignments, setNutritionEducationAssignments] = useState<NutritionEducationAssignmentRead[]>([]);
   const [performanceForecastValidationRun, setPerformanceForecastValidationRun] =
     useState<PerformanceForecastValidationRunRead | null>(null);
   const [performanceForecastValidationRuns, setPerformanceForecastValidationRuns] =
@@ -2315,6 +2325,52 @@ export default function HomePage() {
     submitted_on: "2026-06-01",
     amount_awarded: 1000,
     notes: "Family needs partial fee support and donor impact story."
+  });
+  const [nutritionProfileForm, setNutritionProfileForm] = useState({
+    dietary_pattern: "balanced_high_carbohydrate",
+    allergies: "Peanuts; shellfish",
+    medical_notes: "Exercise-induced reflux when meals are too close to kickoff.",
+    hydration_target_liters: 3,
+    daily_calorie_target: 2800,
+    protein_target_grams: 120,
+    carbohydrate_target_grams: 390,
+    fat_target_grams: 80,
+    supplement_policy: "No supplements without guardian and medical officer approval.",
+    travel_food_risk: "high",
+    consent_to_share_with_caterers: true
+  });
+  const [mealPlanForm, setMealPlanForm] = useState({
+    title: "Tournament Travel Fueling Plan",
+    plan_type: "travel_matchday",
+    period_start: "2026-07-01",
+    period_end: "2026-07-05",
+    daily_calorie_target: 2800,
+    hydration_target_liters: 3,
+    menu_summary: "Breakfast oats, banana, eggs; lunch rice and chicken; pre-match fruit; recovery milk.",
+    shopping_list: "Oats, bananas, rice, chicken, oral rehydration sachets.",
+    caterer_notes: "Peanut-free prep area and sealed recovery snacks.",
+    risk_flags: "High travel-food risk due allergy and tournament heat.",
+    ai_generated: true
+  });
+  const [mealLogForm, setMealLogForm] = useState({
+    meal_type: "pre_match_lunch",
+    calories: 2550,
+    protein_grams: 105,
+    carbohydrate_grams: 350,
+    fat_grams: 65,
+    hydration_liters: 2.6,
+    perceived_energy_score: 8,
+    gut_comfort_score: 8,
+    compliance_status: "on_plan",
+    notes: "Tolerated travel meal well."
+  });
+  const [nutritionEducationForm, setNutritionEducationForm] = useState({
+    module_code: "travel-fueling-101",
+    title: "Travel Fueling 101",
+    category: "travel_nutrition",
+    due_on: "2026-07-04",
+    progress_percent: 75,
+    evidence_notes: "Completed allergy label-reading module."
   });
   const [assessmentForm, setAssessmentForm] = useState({
     physical_score: 70,
@@ -3562,6 +3618,42 @@ export default function HomePage() {
     setScholarshipApplications(scholarshipData);
   }, [identity]);
 
+  const loadAthleteNutrition = useCallback(async (organizationId: string, athleteProfileId: string) => {
+    const [
+      dashboardData,
+      profileData,
+      planData,
+      logData,
+      educationData
+    ] = await Promise.all([
+      apiRequest<AthleteNutritionDashboardRead>(
+        `/nutrition/athletes/${athleteProfileId}/dashboard?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AthleteNutritionProfileRead | null>(
+        `/nutrition/athletes/${athleteProfileId}/profile?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AthleteMealPlanRead[]>(
+        `/nutrition/athletes/${athleteProfileId}/meal-plans?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<AthleteMealLogRead[]>(
+        `/nutrition/athletes/${athleteProfileId}/meal-logs?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<NutritionEducationAssignmentRead[]>(
+        `/nutrition/athletes/${athleteProfileId}/education-assignments?organization_id=${organizationId}`,
+        { identity }
+      )
+    ]);
+    setNutritionDashboard(dashboardData);
+    setNutritionProfile(profileData);
+    setMealPlans(planData);
+    setMealLogs(logData);
+    setNutritionEducationAssignments(educationData);
+  }, [identity]);
+
   const loadTraining = useCallback(async (organizationId: string, teamId?: string) => {
     const teamQuery = teamId ? `&team_id=${teamId}` : "";
     const [drills, plans, sessions, commandCenter] = await Promise.all([
@@ -4308,6 +4400,11 @@ export default function HomePage() {
       setAcademicRecords([]);
       setLifeSkillAssignments([]);
       setScholarshipApplications([]);
+      setNutritionDashboard(null);
+      setNutritionProfile(null);
+      setMealPlans([]);
+      setMealLogs([]);
+      setNutritionEducationAssignments([]);
       setPerformanceWebhookIngest(null);
       setWearableConnections([]);
       setWearableSyncRun(null);
@@ -4763,6 +4860,11 @@ export default function HomePage() {
       setAcademicRecords([]);
       setLifeSkillAssignments([]);
       setScholarshipApplications([]);
+      setNutritionDashboard(null);
+      setNutritionProfile(null);
+      setMealPlans([]);
+      setMealLogs([]);
+      setNutritionEducationAssignments([]);
       setPerformanceForecastValidationRun(null);
       setPerformanceForecastValidationRuns([]);
       setPerformanceForecastValidationAlert(null);
@@ -4781,6 +4883,7 @@ export default function HomePage() {
         await Promise.all([
           loadAthletePerformance(selectedOrganizationId, selectedAthlete.athleteProfileId),
           loadAthleteDevelopment(selectedOrganizationId, selectedAthlete.athleteProfileId),
+          loadAthleteNutrition(selectedOrganizationId, selectedAthlete.athleteProfileId),
           loadMovementReferenceProfiles(selectedOrganizationId, videoCoachingForm.sport)
         ]);
       },
@@ -4790,6 +4893,7 @@ export default function HomePage() {
     selectedAthlete,
     selectedOrganizationId,
     loadAthleteDevelopment,
+    loadAthleteNutrition,
     loadAthletePerformance,
     loadMovementReferenceProfiles,
     runAction,
@@ -10188,6 +10292,154 @@ export default function HomePage() {
     );
   };
 
+  const upsertNutritionProfile = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before recording nutrition profile", "bad");
+      return;
+    }
+    runAction(
+      "upsert-nutrition-profile",
+      () =>
+        apiRequest<AthleteNutritionProfileRead>(
+          `/nutrition/athletes/${selectedAthlete.athleteProfileId}/profile`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              ...nutritionProfileForm
+            }
+          }
+        ),
+      (profile) => {
+        setNutritionProfile(profile);
+        addLog(`Nutrition profile updated: ${profile.dietary_pattern.replaceAll("_", " ")}`, "good");
+        void loadAthleteNutrition(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const createMealPlan = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before creating a meal plan", "bad");
+      return;
+    }
+    runAction(
+      "create-meal-plan",
+      () =>
+        apiRequest<AthleteMealPlanRead>(
+          `/nutrition/athletes/${selectedAthlete.athleteProfileId}/meal-plans`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              ...mealPlanForm
+            }
+          }
+        ),
+      (plan) => {
+        setMealPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        addLog(`Meal plan created: ${plan.title}`, "good");
+        void loadAthleteNutrition(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const recordMealLog = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before logging meals", "bad");
+      return;
+    }
+    runAction(
+      "record-meal-log",
+      () =>
+        apiRequest<AthleteMealLogRead>(
+          `/nutrition/athletes/${selectedAthlete.athleteProfileId}/meal-logs`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              meal_plan_id: mealPlans[0]?.id ?? null,
+              ...mealLogForm
+            }
+          }
+        ),
+      (log) => {
+        setMealLogs((current) => [log, ...current.filter((item) => item.id !== log.id)]);
+        addLog(`Meal logged: ${log.meal_type.replaceAll("_", " ")}`, "good");
+        void loadAthleteNutrition(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const assignNutritionEducation = () => {
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
+      addLog("Select an athlete before assigning nutrition education", "bad");
+      return;
+    }
+    runAction(
+      "assign-nutrition-education",
+      () =>
+        apiRequest<NutritionEducationAssignmentRead>(
+          `/nutrition/athletes/${selectedAthlete.athleteProfileId}/education-assignments`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              module_code: nutritionEducationForm.module_code,
+              title: nutritionEducationForm.title,
+              category: nutritionEducationForm.category,
+              due_on: nutritionEducationForm.due_on || null,
+              evidence_notes: nutritionEducationForm.evidence_notes || null
+            }
+          }
+        ),
+      (assignment) => {
+        setNutritionEducationAssignments((current) => [
+          assignment,
+          ...current.filter((item) => item.id !== assignment.id)
+        ]);
+        addLog(`Nutrition module assigned: ${assignment.title}`, "good");
+        void loadAthleteNutrition(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
+  const updateFirstNutritionEducationProgress = () => {
+    const assignment = nutritionEducationAssignments[0];
+    if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId || !assignment) {
+      addLog("Assign nutrition education before updating progress", "bad");
+      return;
+    }
+    runAction(
+      "update-nutrition-education-progress",
+      () =>
+        apiRequest<NutritionEducationAssignmentRead>(
+          `/nutrition/education-assignments/${assignment.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status: nutritionEducationForm.progress_percent >= 100 ? "completed" : "in_progress",
+              progress_percent: nutritionEducationForm.progress_percent,
+              evidence_notes: nutritionEducationForm.evidence_notes
+            }
+          }
+        ),
+      (updated) => {
+        setNutritionEducationAssignments((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.title} is ${updated.progress_percent}% complete`, "good");
+        void loadAthleteNutrition(selectedOrganizationId, selectedAthlete.athleteProfileId);
+      }
+    );
+  };
+
   const evaluatePerformanceAchievements = () => {
     if (!selectedOrganizationId || !selectedAthlete?.athleteProfileId) {
       addLog("Select an athlete first", "bad");
@@ -15497,6 +15749,7 @@ export default function HomePage() {
           <a href="#communications">Comms</a>
           <a href="#performance">Performance</a>
           <a href="#development">Development</a>
+          <a href="#nutrition">Nutrition</a>
           <a href="#training">Training</a>
           <a href="#agents">Agents</a>
           <a href="#safeguarding">Safeguarding</a>
@@ -21934,6 +22187,195 @@ export default function HomePage() {
                       {application.amount_awarded !== null ? ` · awarded ${application.amount_awarded}` : ""}
                     </span>
                     <small>{application.committee_recommendation}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="work-grid" id="nutrition">
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Nutrition</p>
+                <h2>Fueling, hydration, allergies</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={upsertNutritionProfile} disabled={busyAction !== null}>Profile</button>
+                <button type="button" onClick={createMealPlan} disabled={busyAction !== null}>Meal plan</button>
+                <button type="button" onClick={recordMealLog} disabled={busyAction !== null}>Meal log</button>
+                <button type="button" onClick={assignNutritionEducation} disabled={busyAction !== null}>Module</button>
+                <button type="button" onClick={updateFirstNutritionEducationProgress} disabled={busyAction !== null}>Progress</button>
+              </div>
+            </div>
+            {nutritionDashboard ? (
+              <div className="score-summary">
+                <strong>{nutritionDashboard.nutrition_score}</strong>
+                <span>{nutritionDashboard.risk_band.replaceAll("_", " ")} nutrition</span>
+                <small>
+                  hydration {nutritionDashboard.hydration_adherence_percent}% · fueling{" "}
+                  {nutritionDashboard.fueling_adherence_percent}% · education{" "}
+                  {nutritionDashboard.education_progress_percent}%
+                </small>
+              </div>
+            ) : null}
+            <div className="form-grid">
+              <label>
+                Dietary pattern
+                <input value={nutritionProfileForm.dietary_pattern} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, dietary_pattern: event.target.value })} />
+              </label>
+              <label>
+                Travel risk
+                <input value={nutritionProfileForm.travel_food_risk} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, travel_food_risk: event.target.value })} />
+              </label>
+              <label>
+                Hydration target
+                <input type="number" min="0.5" max="12" step="0.1" value={nutritionProfileForm.hydration_target_liters} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, hydration_target_liters: Number(event.target.value) })} />
+              </label>
+              <label>
+                Calories
+                <input type="number" min="800" max="9000" value={nutritionProfileForm.daily_calorie_target} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, daily_calorie_target: Number(event.target.value) })} />
+              </label>
+              <label>
+                Protein
+                <input type="number" min="10" max="400" value={nutritionProfileForm.protein_target_grams} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, protein_target_grams: Number(event.target.value) })} />
+              </label>
+              <label>
+                Carbs
+                <input type="number" min="20" max="1000" value={nutritionProfileForm.carbohydrate_target_grams} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, carbohydrate_target_grams: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Allergies
+                <input value={nutritionProfileForm.allergies} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, allergies: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Medical notes
+                <input value={nutritionProfileForm.medical_notes} onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, medical_notes: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Caterer sharing
+                <span className="check-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={nutritionProfileForm.consent_to_share_with_caterers}
+                      onChange={(event) => setNutritionProfileForm({ ...nutritionProfileForm, consent_to_share_with_caterers: event.target.checked })}
+                    />
+                    Share allergy notes with caterers
+                  </label>
+                </span>
+              </label>
+              <label>
+                Plan title
+                <input value={mealPlanForm.title} onChange={(event) => setMealPlanForm({ ...mealPlanForm, title: event.target.value })} />
+              </label>
+              <label>
+                Plan type
+                <input value={mealPlanForm.plan_type} onChange={(event) => setMealPlanForm({ ...mealPlanForm, plan_type: event.target.value })} />
+              </label>
+              <label>
+                Plan start
+                <input type="date" value={mealPlanForm.period_start} onChange={(event) => setMealPlanForm({ ...mealPlanForm, period_start: event.target.value })} />
+              </label>
+              <label>
+                Plan end
+                <input type="date" value={mealPlanForm.period_end} onChange={(event) => setMealPlanForm({ ...mealPlanForm, period_end: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Menu summary
+                <input value={mealPlanForm.menu_summary} onChange={(event) => setMealPlanForm({ ...mealPlanForm, menu_summary: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Caterer notes
+                <input value={mealPlanForm.caterer_notes} onChange={(event) => setMealPlanForm({ ...mealPlanForm, caterer_notes: event.target.value })} />
+              </label>
+              <label>
+                Meal type
+                <input value={mealLogForm.meal_type} onChange={(event) => setMealLogForm({ ...mealLogForm, meal_type: event.target.value })} />
+              </label>
+              <label>
+                Logged calories
+                <input type="number" min="0" value={mealLogForm.calories} onChange={(event) => setMealLogForm({ ...mealLogForm, calories: Number(event.target.value) })} />
+              </label>
+              <label>
+                Logged hydration
+                <input type="number" min="0" max="12" step="0.1" value={mealLogForm.hydration_liters} onChange={(event) => setMealLogForm({ ...mealLogForm, hydration_liters: Number(event.target.value) })} />
+              </label>
+              <label>
+                Energy
+                <input type="number" min="1" max="10" value={mealLogForm.perceived_energy_score} onChange={(event) => setMealLogForm({ ...mealLogForm, perceived_energy_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Gut comfort
+                <input type="number" min="1" max="10" value={mealLogForm.gut_comfort_score} onChange={(event) => setMealLogForm({ ...mealLogForm, gut_comfort_score: Number(event.target.value) })} />
+              </label>
+              <label>
+                Compliance
+                <input value={mealLogForm.compliance_status} onChange={(event) => setMealLogForm({ ...mealLogForm, compliance_status: event.target.value })} />
+              </label>
+              <label>
+                Module
+                <input value={nutritionEducationForm.title} onChange={(event) => setNutritionEducationForm({ ...nutritionEducationForm, title: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <input value={nutritionEducationForm.category} onChange={(event) => setNutritionEducationForm({ ...nutritionEducationForm, category: event.target.value })} />
+              </label>
+              <label>
+                Progress
+                <input type="number" min="0" max="100" value={nutritionEducationForm.progress_percent} onChange={(event) => setNutritionEducationForm({ ...nutritionEducationForm, progress_percent: Number(event.target.value) })} />
+              </label>
+              <label className="wide-field">
+                Education notes
+                <input value={nutritionEducationForm.evidence_notes} onChange={(event) => setNutritionEducationForm({ ...nutritionEducationForm, evidence_notes: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {nutritionDashboard?.actions.map((action) => (
+                <article key={action.key} className="task-card">
+                  <div>
+                    <strong>{action.title} · {action.priority}</strong>
+                    <span>{action.owner}</span>
+                    <small>{action.detail}</small>
+                  </div>
+                </article>
+              ))}
+              {nutritionProfile ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{nutritionProfile.dietary_pattern.replaceAll("_", " ")}</strong>
+                    <span>
+                      {nutritionProfile.daily_calorie_target} kcal · {nutritionProfile.hydration_target_liters}L · {nutritionProfile.travel_food_risk} travel risk
+                    </span>
+                    <small>{nutritionProfile.allergies ?? "No allergy notes"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {mealPlans.slice(0, 2).map((plan) => (
+                <article key={plan.id} className="task-card">
+                  <div>
+                    <strong>{plan.title} · {plan.status}</strong>
+                    <span>{plan.plan_type.replaceAll("_", " ")} · {plan.daily_calorie_target} kcal · {plan.hydration_target_liters}L</span>
+                    <small>{plan.risk_flags ?? plan.menu_summary}</small>
+                  </div>
+                </article>
+              ))}
+              {mealLogs.slice(0, 3).map((log) => (
+                <article key={log.id} className="task-card">
+                  <div>
+                    <strong>{log.meal_type.replaceAll("_", " ")} · {log.compliance_status}</strong>
+                    <span>{log.calories} kcal · {log.hydration_liters}L · energy {log.perceived_energy_score}/10</span>
+                    <small>{log.notes ?? "Meal log recorded"}</small>
+                  </div>
+                </article>
+              ))}
+              {nutritionEducationAssignments.slice(0, 3).map((assignment) => (
+                <article key={assignment.id} className="task-card">
+                  <div>
+                    <strong>{assignment.title} · {assignment.progress_percent}%</strong>
+                    <span>{assignment.category.replaceAll("_", " ")} · {assignment.status.replaceAll("_", " ")}</span>
+                    <small>{assignment.evidence_notes ?? "Nutrition education module"}</small>
                   </div>
                 </article>
               ))}
