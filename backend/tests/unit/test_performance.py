@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 import json
 from types import SimpleNamespace
 
+import numpy as np
+
 from app.services import performance as performance_service
 
 
@@ -3648,6 +3650,62 @@ def test_match_tracking_contour_classifier_separates_ball_and_player_candidates(
         [(100, 100, 0.8), (220, 220, 0.9)],
         previous_ball=(105, 104),
     ) == (100, 100, 0.8)
+
+
+def test_match_tracking_assigns_team_labels_from_jersey_color_clusters() -> None:
+    frame = np.zeros((140, 100, 3), dtype=np.uint8)
+    frame[28:68, 35:65] = (20, 35, 220)
+
+    color = performance_service.match_tracking_jersey_color_signature(frame, 20, 20, 60, 100)
+    assert color is not None
+    assert color[0] > 180
+
+    samples = [
+        {
+            "track_id": "blue-1",
+            "team_label": None,
+            "player_label": "Track blue-1",
+            "timestamp_seconds": 0,
+            "x_percent": 10,
+            "y_percent": 40,
+            "jersey_color_rgb": (20, 70, 220),
+        },
+        {
+            "track_id": "blue-2",
+            "team_label": None,
+            "player_label": "Track blue-2",
+            "timestamp_seconds": 0,
+            "x_percent": 12,
+            "y_percent": 50,
+            "jersey_color_rgb": (25, 80, 210),
+        },
+        {
+            "track_id": "red-1",
+            "team_label": None,
+            "player_label": "Track red-1",
+            "timestamp_seconds": 0,
+            "x_percent": 60,
+            "y_percent": 40,
+            "jersey_color_rgb": (220, 45, 25),
+        },
+        {
+            "track_id": "ball",
+            "team_label": "ball",
+            "player_label": "Ball",
+            "timestamp_seconds": 0,
+            "x_percent": 30,
+            "y_percent": 45,
+        },
+    ]
+
+    labelled = performance_service.assign_match_tracking_team_labels(samples)
+    labels = {sample["track_id"]: sample["team_label"] for sample in labelled}
+
+    assert labels["blue-1"] == labels["blue-2"]
+    assert labels["blue-1"] != labels["red-1"]
+    assert {labels["blue-1"], labels["red-1"]} == {"Team A", "Team B"}
+    assert labels["ball"] == "ball"
+    assert next(sample for sample in labelled if sample["track_id"] == "blue-1")["player_label"].startswith("Team ")
 
 
 def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers, monkeypatch) -> None:

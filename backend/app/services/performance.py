@@ -11061,7 +11061,7 @@ def extract_match_tracking_samples_from_video_content(
             mask = subtractor.apply(frame)
             mask = cv2.medianBlur(mask, 5)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            detections: list[tuple[float, float, float]] = []
+            detections: list[dict[str, object]] = []
             ball_candidates: list[tuple[float, float, float]] = []
             frame_area = max(width * height, 1.0)
             for contour in contours:
@@ -11082,7 +11082,14 @@ def extract_match_tracking_samples_from_video_content(
                 if kind == "ball":
                     ball_candidates.append((x + w / 2, y + h / 2, confidence))
                 else:
-                    detections.append((x + w / 2, y + h, confidence))
+                    detections.append(
+                        {
+                            "x": x + w / 2,
+                            "y": y + h,
+                            "confidence": confidence,
+                            "jersey_color_rgb": match_tracking_jersey_color_signature(frame, x, y, w, h),
+                        }
+                    )
             selected_ball = select_match_ball_candidate(ball_candidates, ball_track)
             if selected_ball is not None:
                 ball_track = (selected_ball[0], selected_ball[1])
@@ -11101,10 +11108,12 @@ def extract_match_tracking_samples_from_video_content(
                     }
                 )
             for detection in detections[:22]:
-                track_id = nearest_match_track_id(tracks, detection[0], detection[1])
-                tracks[track_id] = (detection[0], detection[1])
-                x_percent = detection[0] / width * 100
-                y_percent = detection[1] / height * 100
+                detection_x = float(detection["x"])
+                detection_y = float(detection["y"])
+                track_id = nearest_match_track_id(tracks, detection_x, detection_y)
+                tracks[track_id] = (detection_x, detection_y)
+                x_percent = detection_x / width * 100
+                y_percent = detection_y / height * 100
                 samples.append(
                     {
                         "track_id": track_id,
@@ -11115,22 +11124,36 @@ def extract_match_tracking_samples_from_video_content(
                         "timestamp_seconds": frame_index / fps,
                         "x_percent": x_percent,
                         "y_percent": y_percent,
-                        "confidence": detection[2],
+                        "confidence": detection["confidence"],
                         "source": "opencv_motion_tracker",
+                        "jersey_color_rgb": detection.get("jersey_color_rgb"),
                     }
                 )
             processed_frames += 1
             frame_index += 1
+    samples = assign_match_tracking_team_labels(samples)
+    team_labels = sorted(
+        {
+            str(sample["team_label"])
+            for sample in samples
+            if sample.get("team_label") not in {None, "ball"}
+        }
+    )
+    warnings = [
+        "No pitch homography calibration applied; coordinates are frame-normalized estimates.",
+        "Ball tracks are best-effort OpenCV contour estimates and require coach review.",
+    ]
+    if team_labels:
+        warnings.append(
+            "Team labels are jersey-color cluster estimates and should be confirmed with identity review."
+        )
     return {
         "samples": samples,
         "decoded_frame_count": decoded_frames,
         "processed_frame_count": processed_frames,
         "source_provider": "opencv_motion_tracker",
-        "model_policy": "opencv-background-subtraction-match-tracker-v2",
-        "warnings": [
-            "No pitch homography calibration applied; coordinates are frame-normalized estimates.",
-            "Ball tracks are best-effort OpenCV contour estimates and require coach review.",
-        ],
+        "model_policy": "opencv-background-subtraction-match-tracker-v3",
+        "warnings": warnings,
     }
 
 
@@ -11141,6 +11164,90 @@ def nearest_match_track_id(tracks: dict[str, tuple[float, float]], x: float, y: 
     if math.dist(tracks[nearest_id], (x, y)) <= 80:
         return nearest_id
     return str(len(tracks) + 1)
+
+
+def match_tracking_jersey_color_signature(
+    frame: object,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> tuple[int, int, int] | None:
+    if width <= 0 or height <= 0:
+        return None
+    frame_height = int(getattr(frame, "shape", [0, 0])[0] or 0)
+    frame_width = int(getattr(frame, "shape", [0, 0])[1] or 0)
+    if frame_height <= 0 or frame_width <= 0:
+        return None
+    x0 = max(0, min(frame_width, int(x + width * 0.25)))
+    x1 = max(0, min(frame_width, int(x + width * 0.75)))
+    y0 = max(0, min(frame_height, int(y + height * 0.18)))
+    y1 = max(0, min(frame_height, int(y + height * 0.58)))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    crop = frame[y0:y1, x0:x1]
+    if getattr(crop, "size", 0) == 0:
+        return None
+    try:
+        pixels = crop.reshape(-1, 3)
+        bright_pixels = pixels[pixels.sum(axis=1) > 60]
+        if getattr(bright_pixels, "size", 0) > 0:
+            pixels = bright_pixels
+        bgr_mean = pixels.mean(axis=0)
+    except (AttributeError, ValueError):
+        return None
+    return (
+        int(round(float(bgr_mean[2]))),
+        int(round(float(bgr_mean[1]))),
+        int(round(float(bgr_mean[0]))),
+    )
+
+
+def assign_match_tracking_team_labels(samples: list[dict[str, object]]) -> list[dict[str, object]]:
+    track_colors: dict[str, list[tuple[float, float, float]]] = {}
+    for sample in samples:
+        if is_match_ball_tracking_row(sample):
+            continue
+        color = sample.get("jersey_color_rgb")
+        if not isinstance(color, (list, tuple)) or len(color) != 3:
+            continue
+        try:
+            rgb = (float(color[0]), float(color[1]), float(color[2]))
+        except (TypeError, ValueError):
+            continue
+        track_colors.setdefault(str(sample.get("track_id")), []).append(rgb)
+    if len(track_colors) < 2:
+        return samples
+    profiles = {
+        track_id: (
+            sum(color[0] for color in colors) / len(colors),
+            sum(color[1] for color in colors) / len(colors),
+            sum(color[2] for color in colors) / len(colors),
+        )
+        for track_id, colors in track_colors.items()
+        if colors
+    }
+    if len(profiles) < 2:
+        return samples
+    track_ids = sorted(profiles)
+    seed_a, seed_b = max(
+        ((left, right) for index, left in enumerate(track_ids) for right in track_ids[index + 1 :]),
+        key=lambda pair: math.dist(profiles[pair[0]], profiles[pair[1]]),
+    )
+    if math.dist(profiles[seed_a], profiles[seed_b]) < 45:
+        return samples
+    labels_by_track: dict[str, str] = {}
+    for track_id, color in profiles.items():
+        distance_a = math.dist(color, profiles[seed_a])
+        distance_b = math.dist(color, profiles[seed_b])
+        labels_by_track[track_id] = "Team A" if distance_a <= distance_b else "Team B"
+    for sample in samples:
+        track_id = str(sample.get("track_id"))
+        team_label = labels_by_track.get(track_id)
+        if team_label and not sample.get("team_label"):
+            sample["team_label"] = team_label
+            sample["player_label"] = f"{team_label} Track {track_id}"
+    return samples
 
 
 def match_tracking_contour_kind(

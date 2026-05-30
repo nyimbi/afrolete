@@ -325,11 +325,12 @@ video-pose-worker`; the worker can also target one stored clip with
 
 Football opposition videos can also run through the match-tracking worker. The
 Docker `match-tracking` profile asks the backend to decode stored match video,
-extract OpenCV player motion tracks plus a best-effort ball contour track, and
-create tracking runs that feed distance, speed, heatmaps, estimated possession,
-pass/turnover cues, pass-type accuracy, defensive ball-win labels, pass
-networks, shot/xG estimates, tactical shape, highlights, and coach/player
-reports. Manual pitch calibration now prefers an OpenCV perspective homography
+extract OpenCV player motion tracks, estimate team labels from jersey-color
+clusters, add a best-effort ball contour track, and create tracking runs that
+feed distance, speed, heatmaps, estimated possession, pass/turnover cues,
+pass-type accuracy, defensive ball-win labels, pass networks, shot/xG estimates,
+tactical shape, highlights, and coach/player reports. Manual pitch calibration
+now prefers an OpenCV perspective homography
 from field control points, with residual/error metadata and a linear fallback,
 so trapezoid broadcast camera views produce more trustworthy pitch-meter
 coordinates for distance and speed estimates. The tracking summary also
