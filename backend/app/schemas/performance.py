@@ -814,6 +814,8 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     pass_type_metrics: list[dict[str, Any]] = Field(default_factory=list)
     defensive_action_events: list[dict[str, Any]] = Field(default_factory=list)
     chance_creation_metrics: dict[str, Any] = Field(default_factory=dict)
+    set_piece_events: list[dict[str, Any]] = Field(default_factory=list)
+    set_piece_metrics: dict[str, Any] = Field(default_factory=dict)
     formation_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     tactical_role_metrics: list[dict[str, Any]] = Field(default_factory=list)
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]

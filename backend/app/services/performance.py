@@ -11543,8 +11543,12 @@ def build_match_analysis_report_artifact(
     pass_network = [item for item in tracking.get("pass_network", []) if isinstance(item, dict)]
     pass_type_metrics = [item for item in tracking.get("pass_type_metrics", []) if isinstance(item, dict)]
     defensive_action_events = [item for item in tracking.get("defensive_action_events", []) if isinstance(item, dict)]
+    set_piece_events = [item for item in tracking.get("set_piece_events", []) if isinstance(item, dict)]
     chance_creation_metrics = (
         tracking.get("chance_creation_metrics") if isinstance(tracking.get("chance_creation_metrics"), dict) else {}
+    )
+    set_piece_metrics = (
+        tracking.get("set_piece_metrics") if isinstance(tracking.get("set_piece_metrics"), dict) else {}
     )
     ball_tracking_metrics = tracking.get("ball_tracking_metrics") if isinstance(tracking.get("ball_tracking_metrics"), dict) else {}
     summary = {
@@ -11575,6 +11579,8 @@ def build_match_analysis_report_artifact(
         "shot_count": int(ball_tracking_metrics.get("shot_count") or 0),
         "shot_on_target_count": int(ball_tracking_metrics.get("shot_on_target_count") or 0),
         "expected_goals": round(float(ball_tracking_metrics.get("expected_goals") or 0.0), 3),
+        "set_piece_count": int(set_piece_metrics.get("set_piece_count") or 0),
+        "set_piece_highest_danger_score": round(float(set_piece_metrics.get("highest_danger_score") or 0.0), 3),
     }
     recommendations = match_analysis_report_recommendations(tracking, player_cards, team_shape, team_phase)
     report_title = title.strip() if title and title.strip() else f"{video_asset.opponent_name} match analysis"
@@ -11594,7 +11600,9 @@ def build_match_analysis_report_artifact(
         pass_network=pass_network,
         pass_type_metrics=pass_type_metrics,
         defensive_action_events=defensive_action_events,
+        set_piece_events=set_piece_events,
         chance_creation_metrics=chance_creation_metrics,
+        set_piece_metrics=set_piece_metrics,
         ball_tracking_metrics=ball_tracking_metrics,
         quality_warnings=[str(item) for item in (tracking.get("quality_warnings") or [])],
         notes=notes,
@@ -11608,6 +11616,7 @@ def build_match_analysis_report_artifact(
         "summary": summary,
         "player_cards": player_cards,
         "team_shape": team_shape,
+        "set_piece_events": set_piece_events,
         "recommendations": recommendations,
     }
 
@@ -11659,6 +11668,11 @@ def match_analysis_report_recommendations(
         recommendations.append("Use pass-type accuracy to separate technical execution problems from risky decision-making.")
     if int(ball_metrics.get("interception_count") or 0) > 0:
         recommendations.append("Review interceptions and tackles to coach scanning, body shape, and counter-press reactions.")
+    set_piece_metrics = tracking.get("set_piece_metrics") if isinstance(tracking.get("set_piece_metrics"), dict) else {}
+    if int(set_piece_metrics.get("set_piece_count") or 0) > 0:
+        recommendations.append("Review restart clips for delivery quality, marking assignments, second-ball reactions, and transition protection.")
+    if float(set_piece_metrics.get("highest_danger_score") or 0.0) >= 0.70:
+        recommendations.append("Prioritize high-danger set pieces in the team walkthrough before the next match.")
     if not recommendations:
         recommendations.append("Capture a calibrated tracking run before issuing individualized player guidance.")
     return list(dict.fromkeys(recommendations))[:12]
@@ -11681,7 +11695,9 @@ def match_analysis_report_markdown(
     pass_network: list[dict[str, object]],
     pass_type_metrics: list[dict[str, object]],
     defensive_action_events: list[dict[str, object]],
+    set_piece_events: list[dict[str, object]],
     chance_creation_metrics: dict[str, object],
+    set_piece_metrics: dict[str, object],
     ball_tracking_metrics: dict[str, object],
     quality_warnings: list[str],
     notes: str | None,
@@ -11708,6 +11724,8 @@ def match_analysis_report_markdown(
         f"- Defensive ball wins: {summary['interception_count']} interceptions, {summary['tackle_count']} tackles",
         f"- Shots detected: {summary['shot_count']}",
         f"- Expected goals: {summary['expected_goals']}",
+        f"- Set pieces/restarts: {summary['set_piece_count']}",
+        f"- Highest restart danger: {summary['set_piece_highest_danger_score']}",
         f"- Tracking quality: {round(float(summary['tracking_quality_score']) * 100)}%",
         f"- Identity continuity: {round(float(summary['identity_continuity_score']) * 100)}%",
         "",
@@ -11806,6 +11824,21 @@ def match_analysis_report_markdown(
         lines.append(
             f"- Chance quality: {chance_creation_metrics.get('expected_goals', 0)} xG from {chance_creation_metrics.get('shot_count', 0)} shot(s), {chance_creation_metrics.get('key_pass_count', 0)} key pass(es)."
         )
+    lines.extend(["", "## Set Pieces And Restarts"])
+    if set_piece_events:
+        lines.append(
+            f"- Restarts detected: {set_piece_metrics.get('set_piece_count', len(set_piece_events))}; highest danger {set_piece_metrics.get('highest_danger_score', 0)}."
+        )
+        for event in set_piece_events[:6]:
+            lines.append(
+                "- "
+                f"{str(event.get('set_piece_type') or 'restart').replace('_', ' ')} at {event.get('timestamp_seconds')}s "
+                f"from {str(event.get('zone') or 'unknown').replace('_', ' ')}; "
+                f"outcome {str(event.get('outcome') or 'review').replace('_', ' ')}, "
+                f"danger {event.get('danger_score', 0)}."
+            )
+    else:
+        lines.append("- No set-piece or restart events were detected from the available ball track.")
     lines.extend(["", "## Data Quality"])
     if quality_warnings:
         lines.extend(f"- {warning}" for warning in quality_warnings)
@@ -12236,6 +12269,8 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "pass_type_metrics": ball_context["pass_type_metrics"],
         "defensive_action_events": ball_context["defensive_action_events"],
         "chance_creation_metrics": ball_context["chance_creation_metrics"],
+        "set_piece_events": ball_context["set_piece_events"],
+        "set_piece_metrics": ball_context["set_piece_metrics"],
         "tactical_role_metrics": role_context["tactical_role_metrics"],
     }
 
@@ -12622,6 +12657,21 @@ def derive_match_ball_context(
             "pass_type_metrics": [],
             "defensive_action_events": [],
             "chance_creation_metrics": {},
+            "set_piece_events": [],
+            "set_piece_metrics": {
+                "set_piece_count": 0,
+                "restart_count": 0,
+                "corner_count": 0,
+                "free_kick_count": 0,
+                "goal_kick_count": 0,
+                "throw_in_count": 0,
+                "shot_after_restart_count": 0,
+                "turnover_after_restart_count": 0,
+                "set_piece_type_counts": [],
+                "average_danger_score": 0.0,
+                "highest_danger_score": 0.0,
+                "review_required": False,
+            },
         }
     metric_by_track = {str(metric["track_id"]): metric for metric in player_metrics}
     player_rows_by_timestamp: dict[float, list[dict[str, object]]] = {}
@@ -12797,6 +12847,7 @@ def derive_match_ball_context(
     ]
     pass_network = derive_match_pass_network(ball_action_events, metric_by_track)
     key_pass_count = sum(int(link.get("key_pass_count") or 0) for link in pass_network)
+    set_piece_context = derive_match_set_piece_context(ball_rows, ball_action_events)
     return {
         "ball_tracking_metrics": {
             "ball_sample_count": len(ball_rows),
@@ -12830,7 +12881,243 @@ def derive_match_ball_context(
             "key_pass_count": key_pass_count,
             "shot_accuracy_percent": round(shot_on_target_count / shot_count * 100, 2) if shot_count else 0.0,
         },
+        "set_piece_events": set_piece_context["set_piece_events"],
+        "set_piece_metrics": set_piece_context["set_piece_metrics"],
     }
+
+
+def derive_match_set_piece_context(
+    ball_rows: list[dict[str, object]],
+    ball_action_events: list[dict[str, object]],
+) -> dict[str, object]:
+    events: list[dict[str, object]] = []
+    previous_event_timestamp: float | None = None
+    for index, ball in enumerate(ball_rows):
+        if len(events) >= 40:
+            break
+        set_piece_type = match_tracking_set_piece_type(ball)
+        if set_piece_type is None:
+            continue
+        timestamp = float(ball["timestamp_seconds"])
+        if previous_event_timestamp is not None and timestamp - previous_event_timestamp < 8.0:
+            continue
+        previous_ball = ball_rows[index - 1] if index > 0 else None
+        next_ball = ball_rows[index + 1] if index + 1 < len(ball_rows) else None
+        previous_distance = (
+            math.dist(
+                (float(previous_ball["x_meters"]), float(previous_ball["y_meters"])),
+                (float(ball["x_meters"]), float(ball["y_meters"])),
+            )
+            if previous_ball is not None
+            else 0.0
+        )
+        next_distance = (
+            math.dist(
+                (float(ball["x_meters"]), float(ball["y_meters"])),
+                (float(next_ball["x_meters"]), float(next_ball["y_meters"])),
+            )
+            if next_ball is not None
+            else 0.0
+        )
+        if previous_ball is None and set_piece_type in {"wide_free_kick", "central_free_kick"}:
+            continue
+        if previous_ball is not None and previous_distance > 2.5 and set_piece_type in {
+            "wide_free_kick",
+            "central_free_kick",
+        }:
+            continue
+        if index > 0 and previous_distance > 2.5 and next_distance < 3.0:
+            continue
+        linked_action = match_tracking_linked_restart_action(timestamp, ball_action_events)
+        zone = match_tracking_set_piece_zone(float(ball["x_percent"]), float(ball["y_percent"]))
+        danger_score = match_tracking_set_piece_danger_score(set_piece_type, zone, linked_action)
+        outcome = match_tracking_set_piece_outcome(linked_action)
+        team_label = (
+            str(linked_action.get("from_team_label") or linked_action.get("shooter_team_label") or "unknown")
+            if linked_action
+            else "unknown"
+        )
+        primary_track_id = (
+            str(linked_action.get("from_track_id") or linked_action.get("shooter_track_id") or "unknown")
+            if linked_action
+            else "unknown"
+        )
+        events.append(
+            {
+                "event_type": "set_piece_restart",
+                "set_piece_type": set_piece_type,
+                "timestamp_seconds": round(timestamp, 2),
+                "team_label": team_label,
+                "primary_track_id": primary_track_id,
+                "zone": zone,
+                "x_percent": round(float(ball["x_percent"]), 2),
+                "y_percent": round(float(ball["y_percent"]), 2),
+                "release_distance_m": round(next_distance, 2),
+                "linked_action_type": linked_action.get("event_type") if linked_action else None,
+                "linked_action_timestamp_seconds": linked_action.get("timestamp_seconds") if linked_action else None,
+                "outcome": outcome,
+                "danger_score": danger_score,
+                "evidence": match_tracking_set_piece_evidence(set_piece_type, zone, next_distance, linked_action),
+                "coaching_cue": match_tracking_set_piece_coaching_cue(set_piece_type, outcome, danger_score),
+            }
+        )
+        previous_event_timestamp = timestamp
+    type_counts: dict[str, int] = {}
+    danger_total = 0.0
+    shot_after_restart_count = 0
+    turnover_after_restart_count = 0
+    for event in events:
+        set_piece_type = str(event["set_piece_type"])
+        type_counts[set_piece_type] = type_counts.get(set_piece_type, 0) + 1
+        danger_total += float(event["danger_score"])
+        if event.get("linked_action_type") == "shot":
+            shot_after_restart_count += 1
+        if event.get("outcome") == "turnover":
+            turnover_after_restart_count += 1
+    highest_danger = max((float(event["danger_score"]) for event in events), default=0.0)
+    return {
+        "set_piece_events": events,
+        "set_piece_metrics": {
+            "set_piece_count": len(events),
+            "restart_count": len(events),
+            "corner_count": type_counts.get("corner", 0),
+            "free_kick_count": type_counts.get("wide_free_kick", 0) + type_counts.get("central_free_kick", 0),
+            "goal_kick_count": type_counts.get("goal_kick", 0),
+            "throw_in_count": type_counts.get("throw_in", 0),
+            "shot_after_restart_count": shot_after_restart_count,
+            "turnover_after_restart_count": turnover_after_restart_count,
+            "set_piece_type_counts": [
+                {"set_piece_type": key, "count": value}
+                for key, value in sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "average_danger_score": round(danger_total / len(events), 3) if events else 0.0,
+            "highest_danger_score": round(highest_danger, 3),
+            "review_required": bool(events),
+        },
+    }
+
+
+def match_tracking_linked_restart_action(
+    timestamp_seconds: float,
+    ball_action_events: list[dict[str, object]],
+) -> dict[str, object] | None:
+    candidates = [
+        event
+        for event in ball_action_events
+        if 0 <= float(event.get("timestamp_seconds") or 0.0) - timestamp_seconds <= 8.0
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda event: float(event.get("timestamp_seconds") or 0.0) - timestamp_seconds)
+
+
+def match_tracking_set_piece_type(ball: dict[str, object]) -> str | None:
+    x = float(ball["x_percent"])
+    y = float(ball["y_percent"])
+    near_goal_line = x <= 8.0 or x >= 92.0
+    near_touchline = y <= 8.0 or y >= 92.0
+    central_channel = 32.0 <= y <= 68.0
+    if near_goal_line and near_touchline:
+        return "corner"
+    if near_touchline and 12.0 <= x <= 88.0:
+        return "throw_in"
+    if near_goal_line and central_channel:
+        return "goal_kick"
+    if 16.0 <= x <= 84.0 and (y <= 18.0 or y >= 82.0):
+        return "wide_free_kick"
+    if 22.0 <= x <= 78.0 and 32.0 <= y <= 68.0:
+        return "central_free_kick"
+    return None
+
+
+def match_tracking_set_piece_zone(x_percent: float, y_percent: float) -> str:
+    if x_percent <= 8.0 and y_percent <= 12.0:
+        return "left_defensive_corner"
+    if x_percent <= 8.0 and y_percent >= 88.0:
+        return "right_defensive_corner"
+    if x_percent >= 92.0 and y_percent <= 12.0:
+        return "left_attacking_corner"
+    if x_percent >= 92.0 and y_percent >= 88.0:
+        return "right_attacking_corner"
+    if x_percent <= 12.0:
+        return "defensive_restart_zone"
+    if x_percent >= 88.0:
+        return "attacking_restart_zone"
+    if y_percent <= 18.0:
+        return "left_wide_restart"
+    if y_percent >= 82.0:
+        return "right_wide_restart"
+    return "central_restart"
+
+
+def match_tracking_set_piece_danger_score(
+    set_piece_type: str,
+    zone: str,
+    linked_action: dict[str, object] | None,
+) -> float:
+    score = {
+        "corner": 0.66,
+        "wide_free_kick": 0.58,
+        "central_free_kick": 0.54,
+        "throw_in": 0.36,
+        "goal_kick": 0.24,
+    }.get(set_piece_type, 0.30)
+    if "attacking" in zone:
+        score += 0.18
+    if "defensive" in zone:
+        score -= 0.08
+    if linked_action:
+        action_type = str(linked_action.get("event_type") or "")
+        if action_type == "shot":
+            score += 0.22 + min(float(linked_action.get("expected_goals") or 0.0), 0.25)
+        elif action_type == "pass" and linked_action.get("outcome") == "completed":
+            score += 0.08
+        elif action_type == "turnover":
+            score -= 0.10
+    return round(max(0.05, min(score, 0.97)), 3)
+
+
+def match_tracking_set_piece_outcome(linked_action: dict[str, object] | None) -> str:
+    if not linked_action:
+        return "delivery_unconfirmed"
+    event_type = str(linked_action.get("event_type") or "")
+    if event_type == "shot":
+        return "shot_created"
+    if event_type == "pass" and linked_action.get("outcome") == "completed":
+        return "delivery_completed"
+    if event_type == "turnover":
+        return "turnover"
+    return "delivery_review"
+
+
+def match_tracking_set_piece_evidence(
+    set_piece_type: str,
+    zone: str,
+    release_distance_m: float,
+    linked_action: dict[str, object] | None,
+) -> str:
+    linked = "no linked ball action"
+    if linked_action:
+        linked = (
+            f"{linked_action.get('event_type')} at "
+            f"{linked_action.get('timestamp_seconds')}s over {linked_action.get('ball_distance_m', 0)}m"
+        )
+    return (
+        f"{set_piece_type.replace('_', ' ')} detected from {zone.replace('_', ' ')}; "
+        f"restart release travelled {release_distance_m:.1f}m with {linked}."
+    )
+
+
+def match_tracking_set_piece_coaching_cue(set_piece_type: str, outcome: str, danger_score: float) -> str:
+    if outcome == "turnover":
+        return "Review restart spacing, first touch, and protection against transition after the delivery."
+    if outcome == "shot_created" or danger_score >= 0.74:
+        return "Tag the run pattern, screen, second-ball reaction, and defensive marking assignment."
+    if set_piece_type == "goal_kick":
+        return "Review build-out shape, short option availability, and second-ball coverage."
+    if set_piece_type == "throw_in":
+        return "Review receiver movement, support triangles, and immediate counter-press coverage."
+    return "Review delivery target, blocking movement, and second-phase positioning."
 
 
 def nearest_ball_holder(
@@ -14535,6 +14822,8 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "pass_type_metrics": summary.get("pass_type_metrics", []),
         "defensive_action_events": summary.get("defensive_action_events", []),
         "chance_creation_metrics": summary.get("chance_creation_metrics", {}),
+        "set_piece_events": summary.get("set_piece_events", []),
+        "set_piece_metrics": summary.get("set_piece_metrics", {}),
         "formation_snapshots": summary.get("formation_snapshots", []),
         "tactical_role_metrics": summary.get("tactical_role_metrics", []),
         "player_metrics": summary.get("player_metrics", []),

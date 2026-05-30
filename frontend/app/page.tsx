@@ -27355,6 +27355,15 @@ export default function HomePage() {
                   </p>
                 </article>
                 <article className="mini-card">
+                  <span className="muted">Set pieces</span>
+                  <strong>{Number(performanceMatchTrackingRun?.set_piece_metrics.set_piece_count ?? 0)} restart(s)</strong>
+                  <p>
+                    {performanceMatchTrackingRun?.set_piece_events[0]
+                      ? `${String(performanceMatchTrackingRun.set_piece_events[0].set_piece_type ?? "restart").replaceAll("_", " ")} · danger ${Math.round(Number(performanceMatchTrackingRun.set_piece_events[0].danger_score ?? 0) * 100)}%`
+                      : "Corners, goal kicks, throw-ins, free kicks, restart danger, and outcomes appear from ball-track cues."}
+                  </p>
+                </article>
+                <article className="mini-card">
                   <span className="muted">Chance quality</span>
                   <strong>{Number(performanceMatchTrackingRun?.ball_tracking_metrics.shot_count ?? 0)} shot(s)</strong>
                   <p>
@@ -27993,6 +28002,21 @@ export default function HomePage() {
                           {Math.round(Number(estimate.possession_percent ?? 0))}% · {Number(estimate.sample_count ?? 0)} ball sample(s)
                         </span>
                         <small>{String(estimate.phase_hint ?? "shared_possession").replaceAll("_", " ")}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {performanceMatchTrackingRun.set_piece_events.slice(0, 5).map((event, index) => (
+                    <article key={`set-piece-event-${index}`} className="task-card">
+                      <div>
+                        <strong>
+                          {String(event.set_piece_type ?? "restart").replaceAll("_", " ")} · {String(event.outcome ?? "review").replaceAll("_", " ")}
+                        </strong>
+                        <span>
+                          {String(event.team_label ?? "team")} from {String(event.zone ?? "restart zone").replaceAll("_", " ")} · danger {Math.round(Number(event.danger_score ?? 0) * 100)}%
+                        </span>
+                        <small>
+                          {Number(event.timestamp_seconds ?? 0).toFixed(1)}s · {String(event.coaching_cue ?? event.evidence ?? "Review delivery and transition coverage.")}
+                        </small>
                       </div>
                     </article>
                   ))}

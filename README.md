@@ -333,7 +333,8 @@ feed distance, speed, heatmaps, estimated possession, pass/turnover cues,
 pass-type accuracy, defensive ball-win labels, pass networks, shot/xG estimates,
 tactical shape, tracking-derived load bands, fatigue-risk scores, substitution
 windows, recovery recommendations, inferred tactical role profiles with
-role-evidence summaries, highlights, coach/player reports, and player-portal
+role-evidence summaries, set-piece/restart detection with danger scoring and
+outcome cues, highlights, coach/player reports, and player-portal
 match guidance cards with action-plan drills and one-click training follow-up
 plans for coach-confirmed tracks, including queued Training Strategy Agent
 review status for the generated follow-up plan. The same match analysis pipeline

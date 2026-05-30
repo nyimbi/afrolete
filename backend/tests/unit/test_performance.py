@@ -3617,6 +3617,10 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["ball_tracking_metrics"]["turnover_count"] == 1
     assert tracking["possession_estimates"][0]["team_label"] == "Home"
     assert tracking["possession_estimates"][0]["possession_percent"] > 60
+    assert tracking["set_piece_metrics"]["set_piece_count"] >= 1
+    assert tracking["set_piece_metrics"]["goal_kick_count"] >= 1
+    assert tracking["set_piece_events"][0]["set_piece_type"] == "goal_kick"
+    assert "restart" in tracking["set_piece_events"][0]["coaching_cue"].lower() or "shape" in tracking["set_piece_events"][0]["coaching_cue"].lower()
     assert {event["event_type"] for event in tracking["ball_action_events"]} == {"pass", "turnover"}
     recognized_actions = {event["action_type"] for event in tracking["recognized_action_events"]}
     assert {"pass_completion", "tackle", "pressure", "high_speed_run"} <= recognized_actions
@@ -3702,6 +3706,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert report["summary"]["pressure_event_count"] >= 1
     assert report["summary"]["pass_count"] == 0
     assert report["summary"]["turnover_count"] == 2
+    assert report["summary"]["set_piece_count"] >= 1
+    assert report["summary"]["set_piece_highest_danger_score"] > 0
     assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
     assert report["player_cards"][0]["inferred_role"] != "unknown"
     assert report["player_cards"][0]["role_evidence"]
@@ -3737,6 +3743,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert "## Tactical Shape" in report_text
     assert "## Team Phase And Pressure" in report_text
     assert "## Possession And Ball Actions" in report_text
+    assert "## Set Pieces And Restarts" in report_text
     assert "## Data Quality" in report_text
 
     guidance_review_response = client.get(
@@ -4222,6 +4229,7 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     assert len(exported["samples"]) == tracking["sample_count"]
     assert exported["summary"]["player_metrics"]
     assert exported["summary"]["tactical_role_metrics"]
+    assert "set_piece_metrics" in exported["summary"]
 
     report_response = client.post(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/analysis-reports",
