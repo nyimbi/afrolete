@@ -386,6 +386,56 @@ class FacilityLeaseAgreement(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilityAccessCredential(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_access_credentials"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    booking_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facility_bookings.id"), index=True)
+    lease_agreement_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("facility_lease_agreements.id"), index=True
+    )
+    person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    guest_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    guest_email: Mapped[str | None] = mapped_column(String(255), index=True)
+    credential_type: Mapped[str] = mapped_column(String(40), default="qr_code", nullable=False, index=True)
+    access_code: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    access_level: Mapped[str] = mapped_column(String(80), default="standard", nullable=False, index=True)
+    zones: Mapped[str | None] = mapped_column(Text)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    max_uses: Mapped[int | None] = mapped_column(Integer)
+    uses_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    issued_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class FacilityAccessEvent(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_access_events"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    credential_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facility_access_credentials.id"), index=True)
+    booking_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facility_bookings.id"), index=True)
+    lease_agreement_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("facility_lease_agreements.id"), index=True
+    )
+    access_code: Mapped[str | None] = mapped_column(String(120), index=True)
+    reader_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    reader_location: Mapped[str | None] = mapped_column(String(240), index=True)
+    subject_summary: Mapped[str | None] = mapped_column(String(240))
+    decision: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FacilityBooking(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_bookings"
 

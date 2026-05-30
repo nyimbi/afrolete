@@ -880,6 +880,126 @@ def test_facility_lease_agreement_generates_rent_invoice(client, identity_header
     assert returned_deposit.json()["deposit_status"] == "returned"
 
 
+def test_facility_access_credentials_scan_and_dashboard(client, identity_headers) -> None:
+    organization, team, _, _ = create_assets_context(client, identity_headers, "Access Control Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Access Main Gate",
+            "facility_type": "clubhouse",
+            "capacity": 100,
+        },
+    ).json()
+    booking = client.post(
+        "/api/v1/assets/bookings",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "team_id": team["id"],
+            "title": "Clubhouse awards evening",
+            "starts_at": "2026-06-20T18:00:00Z",
+            "ends_at": "2026-06-20T21:00:00Z",
+            "requester_name": "Events Manager",
+            "requester_email": "events@example.com",
+            "access_code": "BOOK-ACCESS-1",
+        },
+    ).json()
+
+    credential_response = client.post(
+        "/api/v1/assets/access-credentials",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "booking_id": booking["id"],
+            "guest_name": "Sarah Johnson",
+            "guest_email": "sarah@example.com",
+            "credential_type": "qr_code",
+            "access_code": "GUEST-QR-001",
+            "access_level": "guest",
+            "zones": "main entrance, clubhouse hall",
+            "max_uses": 1,
+            "notes": "Temporary guest access for awards evening.",
+        },
+    )
+    assert credential_response.status_code == 201
+    credential = credential_response.json()
+    assert credential["booking_id"] == booking["id"]
+    assert credential["valid_from"].startswith("2026-06-20T17:45:00")
+    assert credential["valid_until"].startswith("2026-06-20T21:15:00")
+
+    granted = client.post(
+        "/api/v1/assets/access-scans",
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "access_code": "GUEST-QR-001",
+            "reader_id": "main-gate-reader",
+            "reader_location": "Main Entrance",
+            "occurred_at": "2026-06-20T18:10:00Z",
+        },
+    )
+    assert granted.status_code == 200
+    assert granted.json()["decision"] == "granted"
+    assert granted.json()["subject_summary"] == "Sarah Johnson"
+
+    denied_reuse = client.post(
+        "/api/v1/assets/access-scans",
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "access_code": "GUEST-QR-001",
+            "reader_id": "main-gate-reader",
+            "reader_location": "Main Entrance",
+            "occurred_at": "2026-06-20T18:20:00Z",
+        },
+    )
+    assert denied_reuse.status_code == 200
+    assert denied_reuse.json()["decision"] == "denied"
+    assert "use limit" in denied_reuse.json()["reason"]
+
+    denied_unknown = client.post(
+        "/api/v1/assets/access-scans",
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "access_code": "UNKNOWN",
+            "reader_id": "side-door-reader",
+            "reader_location": "Side Door",
+            "occurred_at": "2026-06-20T18:25:00Z",
+        },
+    )
+    assert denied_unknown.status_code == 200
+    assert denied_unknown.json()["decision"] == "denied"
+
+    dashboard = client.get(
+        f"/api/v1/assets/access-dashboard?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert dashboard.status_code == 200
+    access = dashboard.json()
+    assert access["active_credentials"] == 0
+    assert access["grants_last_24h"] >= 1
+    assert access["denials_last_24h"] >= 2
+    assert access["recent_events"][0]["reader_id"] == "side-door-reader"
+
+    credentials = client.get(
+        f"/api/v1/assets/access-credentials?organization_id={organization['id']}&facility_id={facility['id']}"
+    ).json()
+    assert credentials[0]["guest_name"] == "Sarah Johnson"
+    assert credentials[0]["uses_count"] == 1
+
+    revoked = client.patch(
+        f"/api/v1/assets/access-credentials/{credential['id']}",
+        headers=identity_headers,
+        json={"status": "revoked", "notes": "Guest checked in and pass retired."},
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

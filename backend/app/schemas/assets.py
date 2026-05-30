@@ -823,6 +823,92 @@ class FacilityLeaseInvoiceRead(BaseModel):
     period_label: str
 
 
+class FacilityAccessCredentialCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    booking_id: UUID | None = None
+    lease_agreement_id: UUID | None = None
+    person_id: UUID | None = None
+    guest_name: str | None = Field(default=None, max_length=180)
+    guest_email: str | None = Field(default=None, max_length=255)
+    credential_type: str = Field(default="qr_code", pattern="^(qr_code|mobile_key|rfid|pin|biometric)$")
+    access_code: str | None = Field(default=None, min_length=4, max_length=120)
+    access_level: str = Field(default="standard", min_length=2, max_length=80)
+    zones: str | None = Field(default=None, max_length=2000)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    max_uses: int | None = Field(default=None, ge=1, le=10000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessCredentialUpdate(BaseModel):
+    status: str = Field(pattern="^(active|paused|revoked|expired)$")
+    valid_until: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessCredentialRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    booking_id: UUID | None
+    lease_agreement_id: UUID | None
+    person_id: UUID | None
+    guest_name: str | None
+    guest_email: str | None
+    credential_type: str
+    access_code: str
+    access_level: str
+    zones: str | None
+    valid_from: datetime
+    valid_until: datetime
+    status: str
+    max_uses: int | None
+    uses_count: int
+    last_used_at: datetime | None
+    issued_by_person_id: UUID | None
+    notes: str | None
+
+
+class FacilityAccessScanCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    access_code: str = Field(min_length=1, max_length=120)
+    reader_id: str = Field(min_length=1, max_length=160)
+    reader_location: str | None = Field(default=None, max_length=240)
+    occurred_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityAccessEventRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID
+    credential_id: UUID | None
+    booking_id: UUID | None
+    lease_agreement_id: UUID | None
+    access_code: str | None
+    reader_id: str
+    reader_location: str | None
+    subject_summary: str | None
+    decision: str
+    reason: str
+    occurred_at: datetime
+    notes: str | None
+
+
+class FacilityAccessDashboardRead(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None
+    active_credentials: int
+    guest_credentials: int
+    grants_last_24h: int
+    denials_last_24h: int
+    recent_events: list[FacilityAccessEventRead]
+    expiring_credentials: list[FacilityAccessCredentialRead]
+    recommendation: str
+
+
 class FacilityBookingCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

@@ -2771,6 +2771,58 @@ export type FacilityLeaseInvoiceRead = {
   period_label: string;
 };
 
+export type FacilityAccessCredentialRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  booking_id: UUID | null;
+  lease_agreement_id: UUID | null;
+  person_id: UUID | null;
+  guest_name: string | null;
+  guest_email: string | null;
+  credential_type: "qr_code" | "mobile_key" | "rfid" | "pin" | "biometric";
+  access_code: string;
+  access_level: string;
+  zones: string | null;
+  valid_from: string;
+  valid_until: string;
+  status: "active" | "paused" | "revoked" | "expired";
+  max_uses: number | null;
+  uses_count: number;
+  last_used_at: string | null;
+  issued_by_person_id: UUID | null;
+  notes: string | null;
+};
+
+export type FacilityAccessEventRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  credential_id: UUID | null;
+  booking_id: UUID | null;
+  lease_agreement_id: UUID | null;
+  access_code: string | null;
+  reader_id: string;
+  reader_location: string | null;
+  subject_summary: string | null;
+  decision: "granted" | "denied";
+  reason: string;
+  occurred_at: string;
+  notes: string | null;
+};
+
+export type FacilityAccessDashboardRead = {
+  organization_id: UUID;
+  facility_id: UUID | null;
+  active_credentials: number;
+  guest_credentials: number;
+  grants_last_24h: number;
+  denials_last_24h: number;
+  recent_events: FacilityAccessEventRead[];
+  expiring_credentials: FacilityAccessCredentialRead[];
+  recommendation: string;
+};
+
 export type FacilityBookingRead = {
   id: UUID;
   organization_id: UUID;

@@ -30,6 +30,8 @@ from app.models.assets import (
     EquipmentReader,
     EquipmentScanEvent,
     Facility,
+    FacilityAccessCredential,
+    FacilityAccessEvent,
     FacilityBooking,
     FacilityBookingRule,
     FacilityBookingWaitlistEntry,
@@ -104,6 +106,12 @@ from app.schemas.assets import (
     FacilityBookingWaitlistRead,
     FacilityBookingWaitlistUpdate,
     FacilityCreate,
+    FacilityAccessCredentialCreate,
+    FacilityAccessCredentialRead,
+    FacilityAccessCredentialUpdate,
+    FacilityAccessDashboardRead,
+    FacilityAccessEventRead,
+    FacilityAccessScanCreate,
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
     FacilityHireHostedCheckoutRead,
@@ -1459,6 +1467,183 @@ async def generate_facility_lease_invoice(
         lease=facility_lease_agreement_read(lease),
         invoice=finance_invoice_read(invoice),
         period_label=f"{payload.period_start.isoformat()} to {payload.period_end.isoformat()}",
+    )
+
+
+async def create_facility_access_credential(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityAccessCredentialCreate,
+    authz: AuthorizationService,
+) -> FacilityAccessCredentialRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    booking: FacilityBooking | None = None
+    lease: FacilityLeaseAgreement | None = None
+    if payload.booking_id is not None:
+        booking = await get_facility_booking(db, payload.booking_id)
+        if booking.organization_id != payload.organization_id or booking.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility booking not found")
+    if payload.lease_agreement_id is not None:
+        lease = await get_facility_lease_agreement(db, payload.lease_agreement_id)
+        if lease.organization_id != payload.organization_id or lease.facility_id != payload.facility_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility lease agreement not found")
+    if payload.person_id is not None:
+        await get_person_member_for_organization(db, payload.person_id, payload.organization_id)
+
+    valid_from, valid_until = facility_access_window(payload, booking, lease)
+    credential = FacilityAccessCredential(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        booking_id=payload.booking_id,
+        lease_agreement_id=payload.lease_agreement_id,
+        person_id=payload.person_id,
+        guest_name=payload.guest_name,
+        guest_email=payload.guest_email,
+        credential_type=payload.credential_type,
+        access_code=payload.access_code or f"ACCESS-{token_urlsafe(6).upper()}",
+        access_level=payload.access_level,
+        zones=payload.zones,
+        valid_from=valid_from,
+        valid_until=valid_until,
+        max_uses=payload.max_uses,
+        issued_by_person_id=identity.person_id,
+        notes=payload.notes,
+    )
+    db.add(credential)
+    await db.commit()
+    await db.refresh(credential)
+    return facility_access_credential_read(credential)
+
+
+async def list_facility_access_credentials(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[FacilityAccessCredentialRead]:
+    await get_organization(db, organization_id)
+    statement = select(FacilityAccessCredential).where(FacilityAccessCredential.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityAccessCredential.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(FacilityAccessCredential.status == status_filter)
+    rows = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    FacilityAccessCredential.status.asc(),
+                    FacilityAccessCredential.valid_until.asc(),
+                )
+            )
+        ).all()
+    )
+    return [facility_access_credential_read(row) for row in rows]
+
+
+async def update_facility_access_credential(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    credential_id: UUID,
+    payload: FacilityAccessCredentialUpdate,
+    authz: AuthorizationService,
+) -> FacilityAccessCredentialRead:
+    credential = await get_facility_access_credential(db, credential_id)
+    await ensure_manage_assets(authz, identity, credential.organization_id)
+    credential.status = payload.status
+    if payload.valid_until is not None:
+        credential.valid_until = payload.valid_until
+    if payload.notes:
+        credential.notes = append_note(credential.notes, payload.notes)
+    await db.commit()
+    await db.refresh(credential)
+    return facility_access_credential_read(credential)
+
+
+async def record_facility_access_scan(
+    db: AsyncSession,
+    payload: FacilityAccessScanCreate,
+) -> FacilityAccessEventRead:
+    await get_organization(db, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    occurred_at = payload.occurred_at or datetime.now(UTC)
+    credential = await db.scalar(
+        select(FacilityAccessCredential)
+        .where(FacilityAccessCredential.organization_id == payload.organization_id)
+        .where(FacilityAccessCredential.facility_id == payload.facility_id)
+        .where(FacilityAccessCredential.access_code == payload.access_code)
+        .order_by(FacilityAccessCredential.created_at.desc())
+    )
+    decision, reason = facility_access_decision(credential, occurred_at)
+    if credential is not None and decision == "granted":
+        credential.uses_count += 1
+        credential.last_used_at = occurred_at
+    event = FacilityAccessEvent(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        credential_id=credential.id if credential else None,
+        booking_id=credential.booking_id if credential else None,
+        lease_agreement_id=credential.lease_agreement_id if credential else None,
+        access_code=payload.access_code,
+        reader_id=payload.reader_id,
+        reader_location=payload.reader_location,
+        subject_summary=facility_access_subject(credential),
+        decision=decision,
+        reason=reason,
+        occurred_at=occurred_at,
+        notes=payload.notes,
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return facility_access_event_read(event)
+
+
+async def facility_access_dashboard(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> FacilityAccessDashboardRead:
+    await get_organization(db, organization_id)
+    now = datetime.now(UTC)
+    since = now - timedelta(hours=24)
+    credential_statement = select(FacilityAccessCredential).where(
+        FacilityAccessCredential.organization_id == organization_id
+    )
+    event_statement = select(FacilityAccessEvent).where(FacilityAccessEvent.organization_id == organization_id)
+    if facility_id is not None:
+        credential_statement = credential_statement.where(FacilityAccessCredential.facility_id == facility_id)
+        event_statement = event_statement.where(FacilityAccessEvent.facility_id == facility_id)
+    credentials = list((await db.scalars(credential_statement)).all())
+    events = list((await db.scalars(event_statement.order_by(FacilityAccessEvent.occurred_at.desc()).limit(25))).all())
+    recent_events = [event for event in events if normalize_datetime(event.occurred_at) >= since]
+    active_credentials = [
+        credential
+        for credential in credentials
+        if credential.status == "active"
+        and normalize_datetime(credential.valid_from) <= now <= normalize_datetime(credential.valid_until)
+    ]
+    expiring = sorted(
+        [
+            credential
+            for credential in active_credentials
+            if normalize_datetime(credential.valid_until) <= now + timedelta(days=7)
+        ],
+        key=lambda item: item.valid_until,
+    )[:8]
+    denials = len([event for event in recent_events if event.decision == "denied"])
+    grants = len([event for event in recent_events if event.decision == "granted"])
+    return FacilityAccessDashboardRead(
+        organization_id=organization_id,
+        facility_id=facility_id,
+        active_credentials=len(active_credentials),
+        guest_credentials=len([credential for credential in active_credentials if credential.guest_name]),
+        grants_last_24h=grants,
+        denials_last_24h=denials,
+        recent_events=[facility_access_event_read(event) for event in events[:10]],
+        expiring_credentials=[facility_access_credential_read(credential) for credential in expiring],
+        recommendation=facility_access_recommendation(denials, expiring),
     )
 
 
@@ -2925,6 +3110,16 @@ async def get_facility_lease_agreement(
     return lease
 
 
+async def get_facility_access_credential(
+    db: AsyncSession,
+    credential_id: UUID,
+) -> FacilityAccessCredential:
+    credential = await db.get(FacilityAccessCredential, credential_id)
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility access credential not found")
+    return credential
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -3383,6 +3578,116 @@ def add_month(value: date) -> date:
     month = 1 if value.month == 12 else value.month + 1
     day = min(value.day, monthrange(year, month)[1])
     return date(year, month, day)
+
+
+def facility_access_credential_read(credential: FacilityAccessCredential) -> FacilityAccessCredentialRead:
+    return FacilityAccessCredentialRead(
+        id=credential.id,
+        organization_id=credential.organization_id,
+        facility_id=credential.facility_id,
+        booking_id=credential.booking_id,
+        lease_agreement_id=credential.lease_agreement_id,
+        person_id=credential.person_id,
+        guest_name=credential.guest_name,
+        guest_email=credential.guest_email,
+        credential_type=credential.credential_type,
+        access_code=credential.access_code,
+        access_level=credential.access_level,
+        zones=credential.zones,
+        valid_from=credential.valid_from,
+        valid_until=credential.valid_until,
+        status=credential.status,
+        max_uses=credential.max_uses,
+        uses_count=credential.uses_count,
+        last_used_at=credential.last_used_at,
+        issued_by_person_id=credential.issued_by_person_id,
+        notes=credential.notes,
+    )
+
+
+def facility_access_event_read(event: FacilityAccessEvent) -> FacilityAccessEventRead:
+    return FacilityAccessEventRead(
+        id=event.id,
+        organization_id=event.organization_id,
+        facility_id=event.facility_id,
+        credential_id=event.credential_id,
+        booking_id=event.booking_id,
+        lease_agreement_id=event.lease_agreement_id,
+        access_code=event.access_code,
+        reader_id=event.reader_id,
+        reader_location=event.reader_location,
+        subject_summary=event.subject_summary,
+        decision=event.decision,
+        reason=event.reason,
+        occurred_at=event.occurred_at,
+        notes=event.notes,
+    )
+
+
+def facility_access_window(
+    payload: FacilityAccessCredentialCreate,
+    booking: FacilityBooking | None,
+    lease: FacilityLeaseAgreement | None,
+) -> tuple[datetime, datetime]:
+    if payload.valid_from is not None and payload.valid_until is not None:
+        if payload.valid_until <= payload.valid_from:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="valid_until must be after valid_from")
+        return payload.valid_from, payload.valid_until
+    if booking is not None:
+        valid_from = booking.access_starts_at or booking.starts_at - timedelta(minutes=15)
+        valid_until = booking.access_ends_at or booking.ends_at + timedelta(minutes=15)
+        return normalize_datetime(valid_from), normalize_datetime(valid_until)
+    if lease is not None:
+        return (
+            datetime.combine(lease.starts_on, datetime.min.time(), tzinfo=UTC),
+            datetime.combine(lease.ends_on, datetime.max.time(), tzinfo=UTC),
+        )
+    now = datetime.now(UTC)
+    return payload.valid_from or now, payload.valid_until or now + timedelta(hours=8)
+
+
+def facility_access_decision(
+    credential: FacilityAccessCredential | None,
+    occurred_at: datetime,
+) -> tuple[str, str]:
+    if credential is None:
+        return "denied", "No matching active credential was found for this facility."
+    now = normalize_datetime(occurred_at)
+    if credential.status != "active":
+        return "denied", f"Credential is {credential.status}."
+    if now < normalize_datetime(credential.valid_from):
+        return "denied", "Credential is not active yet."
+    if now > normalize_datetime(credential.valid_until):
+        credential.status = "expired"
+        return "denied", "Credential has expired."
+    if credential.max_uses is not None and credential.uses_count >= credential.max_uses:
+        return "denied", "Credential use limit has been reached."
+    return "granted", "Access granted."
+
+
+def facility_access_subject(credential: FacilityAccessCredential | None) -> str | None:
+    if credential is None:
+        return None
+    if credential.guest_name:
+        return credential.guest_name
+    if credential.person_id:
+        return f"person:{credential.person_id}"
+    if credential.booking_id:
+        return f"booking:{credential.booking_id}"
+    if credential.lease_agreement_id:
+        return f"lease:{credential.lease_agreement_id}"
+    return credential.access_level
+
+
+def facility_access_recommendation(
+    denials: int,
+    expiring: list[FacilityAccessCredential],
+) -> str:
+    if denials >= 3:
+        return "Review denied scans and reader placement before peak facility use."
+    if expiring:
+        return "Renew or revoke expiring credentials before the next scheduled access window."
+    return "Access control is stable; keep temporary guest credentials time-boxed."
 
 
 def maintenance_work_order_notes(schedule: FacilityMaintenanceSchedule) -> str:

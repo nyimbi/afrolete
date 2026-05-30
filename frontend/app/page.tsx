@@ -235,6 +235,9 @@ import type {
   EquipmentReaderRead,
   EquipmentScanEventRead,
   EquipmentScanRead,
+  FacilityAccessCredentialRead,
+  FacilityAccessDashboardRead,
+  FacilityAccessEventRead,
   FacilityAvailabilityRead,
   FacilityBookingCheckoutRead,
   FacilityBookingRead,
@@ -1795,6 +1798,9 @@ export default function HomePage() {
   const [maintenanceDashboard, setMaintenanceDashboard] = useState<FacilityMaintenanceDashboardRead | null>(null);
   const [facilityLeases, setFacilityLeases] = useState<FacilityLeaseAgreementRead[]>([]);
   const [facilityLeaseInvoice, setFacilityLeaseInvoice] = useState<FacilityLeaseInvoiceRead | null>(null);
+  const [facilityAccessCredentials, setFacilityAccessCredentials] = useState<FacilityAccessCredentialRead[]>([]);
+  const [facilityAccessDashboard, setFacilityAccessDashboard] = useState<FacilityAccessDashboardRead | null>(null);
+  const [facilityAccessEvent, setFacilityAccessEvent] = useState<FacilityAccessEventRead | null>(null);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2674,6 +2680,19 @@ export default function HomePage() {
     compliance_status: "compliant" as FacilityLeaseAgreementRead["compliance_status"],
     compliance_notes: "Insurance certificate and school board approval on file.",
     document_url: "https://docs.example.test/leases/main-field.pdf"
+  });
+  const [facilityAccessForm, setFacilityAccessForm] = useState({
+    guest_name: "Sarah Johnson",
+    guest_email: "sarah@example.com",
+    credential_type: "qr_code" as FacilityAccessCredentialRead["credential_type"],
+    access_code: "GUEST-QR-001",
+    access_level: "guest",
+    zones: "main entrance, clubhouse hall",
+    valid_from: "2026-06-20T17:45",
+    valid_until: "2026-06-20T21:15",
+    max_uses: 3,
+    reader_id: "main-gate-reader",
+    reader_location: "Main Entrance"
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -3961,6 +3980,8 @@ export default function HomePage() {
       maintenanceScheduleData,
       maintenanceDashboardData,
       facilityLeaseData,
+      accessCredentialData,
+      accessDashboardData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -3984,6 +4005,8 @@ export default function HomePage() {
       apiRequest<FacilityMaintenanceScheduleRead[]>(`/assets/maintenance-schedules?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityMaintenanceDashboardRead>(`/assets/maintenance-dashboard?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityLeaseAgreementRead[]>(`/assets/facility-leases?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilityAccessCredentialRead[]>(`/assets/access-credentials?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilityAccessDashboardRead>(`/assets/access-dashboard?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -4031,6 +4054,8 @@ export default function HomePage() {
     setMaintenanceSchedules(maintenanceScheduleData);
     setMaintenanceDashboard(maintenanceDashboardData);
     setFacilityLeases(facilityLeaseData);
+    setFacilityAccessCredentials(accessCredentialData);
+    setFacilityAccessDashboard(accessDashboardData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -13218,6 +13243,100 @@ export default function HomePage() {
     );
   };
 
+  const issueFacilityAccessCredential = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before issuing access", "bad");
+      return;
+    }
+    const booking = facilityBookings[0];
+    const lease = facilityLeases[0];
+    runAction(
+      "issue-facility-access",
+      () =>
+        apiRequest<FacilityAccessCredentialRead>("/assets/access-credentials", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            booking_id: booking?.id ?? null,
+            lease_agreement_id: booking ? null : lease?.id ?? null,
+            guest_name: facilityAccessForm.guest_name,
+            guest_email: facilityAccessForm.guest_email,
+            credential_type: facilityAccessForm.credential_type,
+            access_code: facilityAccessForm.access_code,
+            access_level: facilityAccessForm.access_level,
+            zones: facilityAccessForm.zones,
+            valid_from: booking || lease ? null : new Date(facilityAccessForm.valid_from).toISOString(),
+            valid_until: booking || lease ? null : new Date(facilityAccessForm.valid_until).toISOString(),
+            max_uses: facilityAccessForm.max_uses,
+            notes: "Issued from operations access console."
+          }
+        }),
+      (credential) => {
+        setFacilityAccessCredentials((current) => [
+          credential,
+          ...current.filter((item) => item.id !== credential.id)
+        ]);
+        addLog(`${credential.access_level} access issued for ${credential.guest_name ?? credential.access_code}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const scanFacilityAccessCredential = (accessCode = facilityAccessForm.access_code) => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before scanning access", "bad");
+      return;
+    }
+    runAction(
+      "scan-facility-access",
+      () =>
+        apiRequest<FacilityAccessEventRead>("/assets/access-scans", {
+          method: "POST",
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            access_code: accessCode,
+            reader_id: facilityAccessForm.reader_id,
+            reader_location: facilityAccessForm.reader_location,
+            notes: "Reader scan from operations console."
+          }
+        }),
+      (event) => {
+        setFacilityAccessEvent(event);
+        addLog(`${event.reader_id} ${event.decision}: ${event.reason}`, event.decision === "granted" ? "good" : "bad");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const revokeFacilityAccessCredential = (credential: FacilityAccessCredentialRead) => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "revoke-facility-access",
+      () =>
+        apiRequest<FacilityAccessCredentialRead>(`/assets/access-credentials/${credential.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: credential.status === "active" ? "revoked" : "active",
+            notes: credential.status === "active" ? "Revoked from operations console." : "Reactivated from operations console."
+          }
+        }),
+      (updated) => {
+        setFacilityAccessCredentials((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.access_code} ${updated.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const updateWorkOrderStatus = (workOrderId: string, status: WorkOrderStatus) => {
     if (!selectedOrganizationId) {
       return;
@@ -18525,6 +18644,8 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={createMaintenanceSchedule} disabled={busyAction !== null}>Schedule</button>
                 <button type="button" onClick={createFacilityLease} disabled={busyAction !== null}>Lease</button>
+                <button type="button" onClick={issueFacilityAccessCredential} disabled={busyAction !== null}>Access</button>
+                <button type="button" onClick={() => scanFacilityAccessCredential()} disabled={busyAction !== null}>Scan</button>
                 <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
               </div>
             </div>
@@ -18548,6 +18669,16 @@ export default function HomePage() {
                 <span className="muted">Budget left</span>
                 <strong>{maintenanceDashboard?.budget_remaining ?? "n/a"}</strong>
                 <span className="muted">{maintenanceDashboard?.recommendation ?? "No maintenance recommendation"}</span>
+              </div>
+              <div>
+                <span className="muted">Active access</span>
+                <strong>{facilityAccessDashboard?.active_credentials ?? 0}</strong>
+                <span className="muted">{facilityAccessDashboard?.guest_credentials ?? 0} guests</span>
+              </div>
+              <div>
+                <span className="muted">Gate scans</span>
+                <strong>{facilityAccessDashboard?.grants_last_24h ?? 0}</strong>
+                <span className="muted">{facilityAccessDashboard?.denials_last_24h ?? 0} denied</span>
               </div>
             </div>
             <div className="form-grid">
@@ -18649,6 +18780,50 @@ export default function HomePage() {
             </div>
             <div className="form-grid">
               <label>
+                Access guest
+                <input value={facilityAccessForm.guest_name} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, guest_name: event.target.value })} />
+              </label>
+              <label>
+                Guest email
+                <input value={facilityAccessForm.guest_email} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, guest_email: event.target.value })} />
+              </label>
+              <label>
+                Credential
+                <select value={facilityAccessForm.credential_type} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, credential_type: event.target.value as FacilityAccessCredentialRead["credential_type"] })}>
+                  <option value="qr_code">QR code</option>
+                  <option value="mobile_key">Mobile key</option>
+                  <option value="rfid">RFID</option>
+                  <option value="pin">PIN</option>
+                  <option value="biometric">Biometric</option>
+                </select>
+              </label>
+              <label>
+                Access code
+                <input value={facilityAccessForm.access_code} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, access_code: event.target.value })} />
+              </label>
+              <label>
+                Level
+                <input value={facilityAccessForm.access_level} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, access_level: event.target.value })} />
+              </label>
+              <label>
+                Max uses
+                <input type="number" min="1" value={facilityAccessForm.max_uses} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, max_uses: Number(event.target.value) })} />
+              </label>
+              <label>
+                Reader
+                <input value={facilityAccessForm.reader_id} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, reader_id: event.target.value })} />
+              </label>
+              <label>
+                Reader location
+                <input value={facilityAccessForm.reader_location} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, reader_location: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Zones
+                <input value={facilityAccessForm.zones} onChange={(event) => setFacilityAccessForm({ ...facilityAccessForm, zones: event.target.value })} />
+              </label>
+            </div>
+            <div className="form-grid">
+              <label>
                 Title
                 <input value={workOrderForm.title} onChange={(event) => setWorkOrderForm({ ...workOrderForm, title: event.target.value })} />
               </label>
@@ -18723,6 +18898,39 @@ export default function HomePage() {
                     <button type="button" onClick={() => generateFacilityLeaseInvoice(lease)}>Invoice</button>
                     <button type="button" onClick={() => updateFacilityLeaseStatus(lease, "active")}>Activate</button>
                     <button type="button" onClick={() => updateFacilityLeaseStatus(lease, "completed", "returned")}>Complete</button>
+                  </div>
+                </article>
+              ))}
+              {facilityAccessEvent ? (
+                <article className={`task-card ${facilityAccessEvent.decision === "granted" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{facilityAccessEvent.decision.toUpperCase()} · {facilityAccessEvent.reader_id}</strong>
+                    <span>{facilityAccessEvent.subject_summary ?? facilityAccessEvent.access_code} · {new Date(facilityAccessEvent.occurred_at).toLocaleString()}</span>
+                    <span>{facilityAccessEvent.reason}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityAccessCredentials.slice(0, 4).map((credential) => (
+                <article key={credential.id} className="task-card">
+                  <div>
+                    <strong>{credential.guest_name ?? credential.access_code}</strong>
+                    <span>{credential.credential_type} · {credential.status} · {credential.access_level}</span>
+                    <span>{credential.uses_count}/{credential.max_uses ?? "unlimited"} uses · valid until {new Date(credential.valid_until).toLocaleString()}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => scanFacilityAccessCredential(credential.access_code)}>Scan</button>
+                    <button type="button" onClick={() => revokeFacilityAccessCredential(credential)}>
+                      {credential.status === "active" ? "Revoke" : "Activate"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {facilityAccessDashboard?.recent_events.slice(0, 3).map((event) => (
+                <article key={event.id} className="task-card">
+                  <div>
+                    <strong>{event.decision} · {event.reader_location ?? event.reader_id}</strong>
+                    <span>{event.subject_summary ?? event.access_code ?? "unknown credential"} · {new Date(event.occurred_at).toLocaleString()}</span>
+                    <span>{event.reason}</span>
                   </div>
                 </article>
               ))}

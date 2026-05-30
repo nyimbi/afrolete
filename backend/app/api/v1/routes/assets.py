@@ -43,6 +43,12 @@ from app.schemas.assets import (
     EquipmentScanEventCreate,
     EquipmentScanEventRead,
     EquipmentScanRead,
+    FacilityAccessCredentialCreate,
+    FacilityAccessCredentialRead,
+    FacilityAccessCredentialUpdate,
+    FacilityAccessDashboardRead,
+    FacilityAccessEventRead,
+    FacilityAccessScanCreate,
     FacilityAvailabilityRead,
     FacilityBookingCheckoutRead,
     FacilityBookingCreate,
@@ -90,6 +96,7 @@ from app.services.assets import (
     asset_accounting_export,
     asset_summary,
     checkout_equipment,
+    create_facility_access_credential,
     create_emergency_action_plan,
     create_incident_from_emergency_activation,
     create_equipment_item,
@@ -108,6 +115,7 @@ from app.services.assets import (
     downloadable_equipment_file,
     equipment_lease_quote,
     ensure_manage_assets,
+    facility_access_dashboard,
     facility_availability,
     facility_maintenance_dashboard,
     facility_utilization,
@@ -125,6 +133,7 @@ from app.services.assets import (
     list_equipment_items,
     list_equipment_lease_schedules,
     list_facilities,
+    list_facility_access_credentials,
     list_facility_bookings,
     list_facility_lease_agreements,
     list_facility_maintenance_schedules,
@@ -133,6 +142,7 @@ from app.services.assets import (
     procurement_recommendations,
     receive_supplier_order,
     reconcile_equipment_lease_payment,
+    record_facility_access_scan,
     record_gateway_equipment_scan,
     record_equipment_scan_event,
     return_equipment,
@@ -142,6 +152,7 @@ from app.services.assets import (
     sync_asset_accounting_export,
     sync_supplier_invoice,
     settle_facility_hire_checkout,
+    update_facility_access_credential,
     update_facility_booking_status,
     update_facility_lease_agreement,
     update_facility_maintenance_schedule,
@@ -1087,6 +1098,59 @@ async def generate_facility_lease_invoice_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> FacilityLeaseInvoiceRead:
     return await generate_facility_lease_invoice(db, identity, lease_id, payload, authz)
+
+
+@router.post("/access-credentials", response_model=FacilityAccessCredentialRead, status_code=status.HTTP_201_CREATED)
+async def create_facility_access_credential_route(
+    payload: FacilityAccessCredentialCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityAccessCredentialRead:
+    return await create_facility_access_credential(db, identity, payload, authz)
+
+
+@router.get("/access-credentials", response_model=list[FacilityAccessCredentialRead])
+async def list_facility_access_credentials_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: AsyncSession = Depends(get_db),
+) -> list[FacilityAccessCredentialRead]:
+    return await list_facility_access_credentials(
+        db,
+        organization_id,
+        facility_id=facility_id,
+        status_filter=status_filter,
+    )
+
+
+@router.patch("/access-credentials/{credential_id}", response_model=FacilityAccessCredentialRead)
+async def update_facility_access_credential_route(
+    credential_id: UUID,
+    payload: FacilityAccessCredentialUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityAccessCredentialRead:
+    return await update_facility_access_credential(db, identity, credential_id, payload, authz)
+
+
+@router.post("/access-scans", response_model=FacilityAccessEventRead)
+async def record_facility_access_scan_route(
+    payload: FacilityAccessScanCreate,
+    db: AsyncSession = Depends(get_db),
+) -> FacilityAccessEventRead:
+    return await record_facility_access_scan(db, payload)
+
+
+@router.get("/access-dashboard", response_model=FacilityAccessDashboardRead)
+async def facility_access_dashboard_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityAccessDashboardRead:
+    return await facility_access_dashboard(db, organization_id, facility_id=facility_id)
 
 
 @router.post("/bookings", response_model=FacilityBookingRead, status_code=status.HTTP_201_CREATED)

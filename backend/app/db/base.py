@@ -26,6 +26,8 @@ from app.models.assets import (  # noqa: F401,E402
     EquipmentReader,
     EquipmentScanEvent,
     Facility,
+    FacilityAccessCredential,
+    FacilityAccessEvent,
     FacilityBooking,
     FacilityBookingRule,
     FacilityBookingWaitlistEntry,
