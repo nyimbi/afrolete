@@ -791,6 +791,95 @@ def test_facility_preventive_maintenance_schedule_dashboard_and_costs(client, id
     assert paused.json()["status"] == "paused"
 
 
+def test_facility_lease_agreement_generates_rent_invoice(client, identity_headers) -> None:
+    organization, _, _, _ = create_assets_context(client, identity_headers, "Lease Program Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Lease Main Field",
+            "facility_type": "field",
+            "hourly_rate": "125.00",
+            "maintenance_budget": "10000.00",
+        },
+    ).json()
+
+    lease_response = client.post(
+        "/api/v1/assets/facility-leases",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "lessor_name": "Lease Program Club",
+            "lessee_name": "City High School Athletics",
+            "lessee_contact_name": "Athletic Director",
+            "lessee_contact_email": "ad@example.edu",
+            "usage_terms": "Tues/Thurs 3-5 PM, Sat 9 AM-12 PM during term.",
+            "included_services": "Field maintenance, goals, lights",
+            "extra_charges": "Custodial services at 200 per use",
+            "starts_on": "2026-09-01",
+            "ends_on": "2027-06-30",
+            "monthly_rent": "1500.00",
+            "security_deposit": "3000.00",
+            "deposit_status": "held",
+            "next_invoice_on": "2026-09-01",
+            "auto_renew": True,
+            "renewal_notice_on": "2027-05-01",
+            "compliance_status": "compliant",
+            "compliance_notes": "Insurance certificate and school board approval on file.",
+            "document_url": "https://docs.example.test/leases/main-field.pdf",
+        },
+    )
+    assert lease_response.status_code == 201
+    lease = lease_response.json()
+    assert lease["status"] == "active"
+    assert lease["deposit_status"] == "held"
+    assert lease["version"] == 1
+
+    invoice_response = client.post(
+        f"/api/v1/assets/facility-leases/{lease['id']}/invoice",
+        headers=identity_headers,
+        json={
+            "period_start": "2026-09-01",
+            "period_end": "2026-09-30",
+            "extra_amount": "200.00",
+            "late_fee": "50.00",
+            "currency": "USD",
+            "due_on": "2026-09-10",
+        },
+    )
+    assert invoice_response.status_code == 200
+    generated = invoice_response.json()
+    assert generated["invoice"]["invoice_number"].startswith("FLEASE-202609-")
+    assert generated["invoice"]["amount_due"] == "1750.00"
+    assert generated["invoice"]["status"] == "draft"
+    assert generated["lease"]["finance_invoice_id"] == generated["invoice"]["id"]
+    assert generated["lease"]["status"] == "invoicing"
+    assert generated["lease"]["next_invoice_on"] == "2026-10-01"
+    assert generated["period_label"] == "2026-09-01 to 2026-09-30"
+
+    leases = client.get(
+        f"/api/v1/assets/facility-leases?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert leases.status_code == 200
+    assert leases.json()[0]["lessee_name"] == "City High School Athletics"
+
+    returned_deposit = client.patch(
+        f"/api/v1/assets/facility-leases/{lease['id']}",
+        headers=identity_headers,
+        json={
+            "status": "completed",
+            "deposit_status": "returned",
+            "compliance_status": "compliant",
+            "notes": "Term completed and deposit returned.",
+        },
+    )
+    assert returned_deposit.status_code == 200
+    assert returned_deposit.json()["status"] == "completed"
+    assert returned_deposit.json()["deposit_status"] == "returned"
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

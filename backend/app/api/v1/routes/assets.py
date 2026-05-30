@@ -58,6 +58,11 @@ from app.schemas.assets import (
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
     FacilityHireHostedCheckoutRead,
+    FacilityLeaseAgreementCreate,
+    FacilityLeaseAgreementRead,
+    FacilityLeaseAgreementUpdate,
+    FacilityLeaseInvoiceCreate,
+    FacilityLeaseInvoiceRead,
     FacilityMaintenanceDashboardRead,
     FacilityMaintenanceScheduleCreate,
     FacilityMaintenanceScheduleRead,
@@ -90,6 +95,7 @@ from app.services.assets import (
     create_equipment_item,
     create_facility,
     create_facility_booking,
+    create_facility_lease_agreement,
     create_facility_maintenance_schedule,
     create_public_facility_waitlist_entry,
     create_recurring_facility_bookings,
@@ -105,6 +111,7 @@ from app.services.assets import (
     facility_availability,
     facility_maintenance_dashboard,
     facility_utilization,
+    generate_facility_lease_invoice,
     create_public_facility_booking,
     get_facility_booking_rule,
     get_facility_hire_hosted_checkout,
@@ -119,6 +126,7 @@ from app.services.assets import (
     list_equipment_lease_schedules,
     list_facilities,
     list_facility_bookings,
+    list_facility_lease_agreements,
     list_facility_maintenance_schedules,
     list_supplier_orders,
     list_work_orders,
@@ -135,6 +143,7 @@ from app.services.assets import (
     sync_supplier_invoice,
     settle_facility_hire_checkout,
     update_facility_booking_status,
+    update_facility_lease_agreement,
     update_facility_maintenance_schedule,
     update_facility_waitlist_entry,
     supplier_scorecard,
@@ -1031,6 +1040,53 @@ async def facility_maintenance_dashboard_route(
     db: AsyncSession = Depends(get_db),
 ) -> FacilityMaintenanceDashboardRead:
     return await facility_maintenance_dashboard(db, organization_id, facility_id=facility_id)
+
+
+@router.post("/facility-leases", response_model=FacilityLeaseAgreementRead, status_code=status.HTTP_201_CREATED)
+async def create_facility_lease_agreement_route(
+    payload: FacilityLeaseAgreementCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityLeaseAgreementRead:
+    return await create_facility_lease_agreement(db, identity, payload, authz)
+
+
+@router.get("/facility-leases", response_model=list[FacilityLeaseAgreementRead])
+async def list_facility_lease_agreements_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: AsyncSession = Depends(get_db),
+) -> list[FacilityLeaseAgreementRead]:
+    return await list_facility_lease_agreements(
+        db,
+        organization_id,
+        facility_id=facility_id,
+        status_filter=status_filter,
+    )
+
+
+@router.patch("/facility-leases/{lease_id}", response_model=FacilityLeaseAgreementRead)
+async def update_facility_lease_agreement_route(
+    lease_id: UUID,
+    payload: FacilityLeaseAgreementUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityLeaseAgreementRead:
+    return await update_facility_lease_agreement(db, identity, lease_id, payload, authz)
+
+
+@router.post("/facility-leases/{lease_id}/invoice", response_model=FacilityLeaseInvoiceRead)
+async def generate_facility_lease_invoice_route(
+    lease_id: UUID,
+    payload: FacilityLeaseInvoiceCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityLeaseInvoiceRead:
+    return await generate_facility_lease_invoice(db, identity, lease_id, payload, authz)
 
 
 @router.post("/bookings", response_model=FacilityBookingRead, status_code=status.HTTP_201_CREATED)

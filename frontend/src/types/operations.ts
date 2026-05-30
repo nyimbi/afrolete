@@ -2735,6 +2735,42 @@ export type FacilityMaintenanceDashboardRead = {
   recommendation: string;
 };
 
+export type FacilityLeaseAgreementRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  finance_invoice_id: UUID | null;
+  lessor_name: string;
+  lessee_name: string;
+  lessee_contact_name: string | null;
+  lessee_contact_email: string | null;
+  usage_terms: string;
+  included_services: string | null;
+  extra_charges: string | null;
+  starts_on: string;
+  ends_on: string;
+  monthly_rent: string;
+  security_deposit: string | null;
+  deposit_status: "not_required" | "due" | "held" | "returned" | "forfeited";
+  next_invoice_on: string | null;
+  auto_renew: boolean;
+  renewal_notice_on: string | null;
+  status: "draft" | "active" | "invoicing" | "completed" | "terminated" | "disputed";
+  compliance_status: "pending" | "compliant" | "review_required" | "breach" | "waived";
+  compliance_notes: string | null;
+  document_url: string | null;
+  signed_at: string | null;
+  terminated_at: string | null;
+  version: number;
+  notes: string | null;
+};
+
+export type FacilityLeaseInvoiceRead = {
+  lease: FacilityLeaseAgreementRead;
+  invoice: FinanceInvoiceRead;
+  period_label: string;
+};
+
 export type FacilityBookingRead = {
   id: UUID;
   organization_id: UUID;

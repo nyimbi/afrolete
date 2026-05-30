@@ -240,6 +240,8 @@ import type {
   FacilityBookingRead,
   FacilityBookingRuleRead,
   FacilityBookingWaitlistRead,
+  FacilityLeaseAgreementRead,
+  FacilityLeaseInvoiceRead,
   FacilityMaintenanceDashboardRead,
   FacilityMaintenanceScheduleRead,
   FacilityMaintenanceScheduleRunRead,
@@ -1791,6 +1793,8 @@ export default function HomePage() {
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [maintenanceSchedules, setMaintenanceSchedules] = useState<FacilityMaintenanceScheduleRead[]>([]);
   const [maintenanceDashboard, setMaintenanceDashboard] = useState<FacilityMaintenanceDashboardRead | null>(null);
+  const [facilityLeases, setFacilityLeases] = useState<FacilityLeaseAgreementRead[]>([]);
+  const [facilityLeaseInvoice, setFacilityLeaseInvoice] = useState<FacilityLeaseInvoiceRead | null>(null);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
   const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
@@ -2650,6 +2654,26 @@ export default function HomePage() {
     condition_threshold: "below 120 Gmax",
     warranty_expires_on: "2027-06-01",
     notes: "Inspect surface, goals, lights, drainage, and emergency access."
+  });
+  const [facilityLeaseForm, setFacilityLeaseForm] = useState({
+    lessor_name: "Riverside FC",
+    lessee_name: "City High School Athletics",
+    lessee_contact_name: "Athletic Director",
+    lessee_contact_email: "ad@example.edu",
+    usage_terms: "Tues/Thurs 3-5 PM, Sat 9 AM-12 PM during term.",
+    included_services: "Field maintenance, goals, lights",
+    extra_charges: "Custodial services at 200 per use",
+    starts_on: "2026-09-01",
+    ends_on: "2027-06-30",
+    monthly_rent: 1500,
+    security_deposit: 3000,
+    deposit_status: "held" as FacilityLeaseAgreementRead["deposit_status"],
+    next_invoice_on: "2026-09-01",
+    auto_renew: true,
+    renewal_notice_on: "2027-05-01",
+    compliance_status: "compliant" as FacilityLeaseAgreementRead["compliance_status"],
+    compliance_notes: "Insurance certificate and school board approval on file.",
+    document_url: "https://docs.example.test/leases/main-field.pdf"
   });
   const [bookingForm, setBookingForm] = useState({
     title: "U16 training block",
@@ -3936,6 +3960,7 @@ export default function HomePage() {
       workOrderData,
       maintenanceScheduleData,
       maintenanceDashboardData,
+      facilityLeaseData,
       bookingData,
       waitlistData,
       bookingRuleData,
@@ -3958,6 +3983,7 @@ export default function HomePage() {
       apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
       apiRequest<FacilityMaintenanceScheduleRead[]>(`/assets/maintenance-schedules?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityMaintenanceDashboardRead>(`/assets/maintenance-dashboard?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilityLeaseAgreementRead[]>(`/assets/facility-leases?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
@@ -4004,6 +4030,7 @@ export default function HomePage() {
     setWorkOrders(workOrderData);
     setMaintenanceSchedules(maintenanceScheduleData);
     setMaintenanceDashboard(maintenanceDashboardData);
+    setFacilityLeases(facilityLeaseData);
     setFacilityBookings(bookingData);
     setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
@@ -13087,6 +13114,110 @@ export default function HomePage() {
     );
   };
 
+  const createFacilityLease = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before creating a lease", "bad");
+      return;
+    }
+    runAction(
+      "create-facility-lease",
+      () =>
+        apiRequest<FacilityLeaseAgreementRead>("/assets/facility-leases", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            ...facilityLeaseForm,
+            monthly_rent: String(facilityLeaseForm.monthly_rent),
+            security_deposit: String(facilityLeaseForm.security_deposit)
+          }
+        }),
+      (lease) => {
+        setFacilityLeases((current) => [
+          lease,
+          ...current.filter((item) => item.id !== lease.id)
+        ]);
+        addLog(`${lease.lessee_name} lease ${lease.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const generateFacilityLeaseInvoice = (lease: FacilityLeaseAgreementRead) => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    const periodStart = lease.next_invoice_on ?? lease.starts_on;
+    const startDate = new Date(`${periodStart}T00:00:00`);
+    const periodEnd = new Date(startDate);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    periodEnd.setDate(periodEnd.getDate() - 1);
+    runAction(
+      "generate-facility-lease-invoice",
+      () =>
+        apiRequest<FacilityLeaseInvoiceRead>(`/assets/facility-leases/${lease.id}/invoice`, {
+          method: "POST",
+          identity,
+          body: {
+            period_start: periodStart,
+            period_end: periodEnd.toISOString().slice(0, 10),
+            extra_amount: "0.00",
+            late_fee: "0.00",
+            currency: "USD",
+            due_on: periodStart,
+            memo: `Lease invoice generated from operations console for ${lease.lessee_name}.`
+          }
+        }),
+      (generated) => {
+        setFacilityLeaseInvoice(generated);
+        setFacilityLeases((current) => [
+          generated.lease,
+          ...current.filter((item) => item.id !== generated.lease.id)
+        ]);
+        setInvoices((current) => [
+          generated.invoice,
+          ...current.filter((item) => item.id !== generated.invoice.id)
+        ]);
+        addLog(`${generated.invoice.invoice_number} created for ${generated.period_label}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const updateFacilityLeaseStatus = (
+    lease: FacilityLeaseAgreementRead,
+    status: FacilityLeaseAgreementRead["status"],
+    depositStatus: FacilityLeaseAgreementRead["deposit_status"] = lease.deposit_status
+  ) => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      `facility-lease-${status}`,
+      () =>
+        apiRequest<FacilityLeaseAgreementRead>(`/assets/facility-leases/${lease.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            deposit_status: depositStatus,
+            compliance_status: lease.compliance_status,
+            notes: `${status} from operations lease console.`
+          }
+        }),
+      (updated) => {
+        setFacilityLeases((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.lessee_name} lease marked ${updated.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const updateWorkOrderStatus = (workOrderId: string, status: WorkOrderStatus) => {
     if (!selectedOrganizationId) {
       return;
@@ -18393,6 +18524,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createMaintenanceSchedule} disabled={busyAction !== null}>Schedule</button>
+                <button type="button" onClick={createFacilityLease} disabled={busyAction !== null}>Lease</button>
                 <button type="button" onClick={createWorkOrder} disabled={busyAction !== null}>Work order</button>
               </div>
             </div>
@@ -18469,6 +18601,54 @@ export default function HomePage() {
             </div>
             <div className="form-grid">
               <label>
+                Lessee
+                <input value={facilityLeaseForm.lessee_name} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, lessee_name: event.target.value })} />
+              </label>
+              <label>
+                Contact email
+                <input value={facilityLeaseForm.lessee_contact_email} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, lessee_contact_email: event.target.value })} />
+              </label>
+              <label>
+                Starts
+                <input type="date" value={facilityLeaseForm.starts_on} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, starts_on: event.target.value })} />
+              </label>
+              <label>
+                Ends
+                <input type="date" value={facilityLeaseForm.ends_on} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, ends_on: event.target.value })} />
+              </label>
+              <label>
+                Monthly rent
+                <input type="number" min="0" value={facilityLeaseForm.monthly_rent} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, monthly_rent: Number(event.target.value) })} />
+              </label>
+              <label>
+                Security deposit
+                <input type="number" min="0" value={facilityLeaseForm.security_deposit} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, security_deposit: Number(event.target.value) })} />
+              </label>
+              <label>
+                Deposit
+                <select value={facilityLeaseForm.deposit_status} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, deposit_status: event.target.value as FacilityLeaseAgreementRead["deposit_status"] })}>
+                  <option value="due">Due</option>
+                  <option value="held">Held</option>
+                  <option value="returned">Returned</option>
+                  <option value="forfeited">Forfeited</option>
+                  <option value="not_required">Not required</option>
+                </select>
+              </label>
+              <label>
+                Next invoice
+                <input type="date" value={facilityLeaseForm.next_invoice_on} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, next_invoice_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Usage terms
+                <input value={facilityLeaseForm.usage_terms} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, usage_terms: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Included services
+                <input value={facilityLeaseForm.included_services} onChange={(event) => setFacilityLeaseForm({ ...facilityLeaseForm, included_services: event.target.value })} />
+              </label>
+            </div>
+            <div className="form-grid">
+              <label>
                 Title
                 <input value={workOrderForm.title} onChange={(event) => setWorkOrderForm({ ...workOrderForm, title: event.target.value })} />
               </label>
@@ -18520,6 +18700,29 @@ export default function HomePage() {
                     <strong>{cost.facility_name}</strong>
                     <span>${cost.actual_cost} actual · ${cost.estimated_open_cost} open maintenance</span>
                     <span>Budget {cost.maintenance_budget ?? "not set"} · remaining {cost.net_budget_remaining ?? "n/a"}</span>
+                  </div>
+                </article>
+              ))}
+              {facilityLeaseInvoice ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{facilityLeaseInvoice.invoice.invoice_number}</strong>
+                    <span>{facilityLeaseInvoice.period_label} · ${facilityLeaseInvoice.invoice.amount_due}</span>
+                    <span>{facilityLeaseInvoice.lease.lessee_name} · {facilityLeaseInvoice.invoice.status}</span>
+                  </div>
+                </article>
+              ) : null}
+              {facilityLeases.slice(0, 4).map((lease) => (
+                <article key={lease.id} className="task-card">
+                  <div>
+                    <strong>{lease.lessee_name}</strong>
+                    <span>{lease.status} · deposit {lease.deposit_status} · ${lease.monthly_rent}/mo</span>
+                    <span>{lease.starts_on} to {lease.ends_on} · next invoice {lease.next_invoice_on ?? "not set"}</span>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => generateFacilityLeaseInvoice(lease)}>Invoice</button>
+                    <button type="button" onClick={() => updateFacilityLeaseStatus(lease, "active")}>Activate</button>
+                    <button type="button" onClick={() => updateFacilityLeaseStatus(lease, "completed", "returned")}>Complete</button>
                   </div>
                 </article>
               ))}

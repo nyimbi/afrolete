@@ -747,6 +747,82 @@ class FacilityMaintenanceDashboardRead(BaseModel):
     recommendation: str
 
 
+class FacilityLeaseAgreementCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID
+    lessor_name: str = Field(min_length=2, max_length=180)
+    lessee_name: str = Field(min_length=2, max_length=180)
+    lessee_contact_name: str | None = Field(default=None, max_length=180)
+    lessee_contact_email: str | None = Field(default=None, max_length=255)
+    usage_terms: str = Field(min_length=2, max_length=8000)
+    included_services: str | None = Field(default=None, max_length=4000)
+    extra_charges: str | None = Field(default=None, max_length=4000)
+    starts_on: date
+    ends_on: date
+    monthly_rent: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    security_deposit: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    deposit_status: str = Field(default="held", pattern="^(not_required|due|held|returned|forfeited)$")
+    next_invoice_on: date | None = None
+    auto_renew: bool = False
+    renewal_notice_on: date | None = None
+    compliance_status: str = Field(default="pending", pattern="^(pending|compliant|review_required|breach|waived)$")
+    compliance_notes: str | None = Field(default=None, max_length=4000)
+    document_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_term(self) -> "FacilityLeaseAgreementCreate":
+        if self.ends_on <= self.starts_on:
+            raise ValueError("ends_on must be after starts_on")
+        return self
+
+
+class FacilityLeaseAgreementUpdate(BaseModel):
+    status: str | None = Field(default=None, pattern="^(draft|active|invoicing|completed|terminated|disputed)$")
+    deposit_status: str | None = Field(default=None, pattern="^(not_required|due|held|returned|forfeited)$")
+    compliance_status: str | None = Field(default=None, pattern="^(pending|compliant|review_required|breach|waived)$")
+    next_invoice_on: date | None = None
+    renewal_notice_on: date | None = None
+    signed_at: datetime | None = None
+    terminated_at: datetime | None = None
+    document_url: str | None = Field(default=None, max_length=500)
+    compliance_notes: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilityLeaseInvoiceCreate(BaseModel):
+    period_start: date
+    period_end: date
+    extra_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    late_fee: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    due_on: date | None = None
+    memo: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "FacilityLeaseInvoiceCreate":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be on or after period_start")
+        return self
+
+
+class FacilityLeaseAgreementRead(FacilityLeaseAgreementCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    finance_invoice_id: UUID | None
+    status: str
+    signed_at: datetime | None
+    terminated_at: datetime | None
+    version: int
+
+
+class FacilityLeaseInvoiceRead(BaseModel):
+    lease: FacilityLeaseAgreementRead
+    invoice: FinanceInvoiceRead
+    period_label: str
+
+
 class FacilityBookingCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

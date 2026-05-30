@@ -33,6 +33,7 @@ from app.models.assets import (
     FacilityBooking,
     FacilityBookingRule,
     FacilityBookingWaitlistEntry,
+    FacilityLeaseAgreement,
     FacilityMaintenanceSchedule,
     MaintenanceWorkOrder,
     SupplierOrder,
@@ -106,6 +107,11 @@ from app.schemas.assets import (
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
     FacilityHireHostedCheckoutRead,
+    FacilityLeaseAgreementCreate,
+    FacilityLeaseAgreementRead,
+    FacilityLeaseAgreementUpdate,
+    FacilityLeaseInvoiceCreate,
+    FacilityLeaseInvoiceRead,
     FacilityMaintenanceCostRead,
     FacilityMaintenanceDashboardRead,
     FacilityMaintenanceScheduleCreate,
@@ -1336,6 +1342,123 @@ async def facility_maintenance_dashboard(
         recent_work_orders=[maintenance_work_order_read(order) for order in recent],
         cost_by_facility=cost_by_facility,
         recommendation=facility_maintenance_recommendation(overdue_count, safety_due_count, budget_remaining),
+    )
+
+
+async def create_facility_lease_agreement(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilityLeaseAgreementCreate,
+    authz: AuthorizationService,
+) -> FacilityLeaseAgreementRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    lease = FacilityLeaseAgreement(
+        status="active" if payload.compliance_status == "compliant" else "draft",
+        **payload.model_dump(),
+    )
+    lease.next_invoice_on = lease.next_invoice_on or lease.starts_on
+    db.add(lease)
+    await db.commit()
+    await db.refresh(lease)
+    return facility_lease_agreement_read(lease)
+
+
+async def list_facility_lease_agreements(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[FacilityLeaseAgreementRead]:
+    await get_organization(db, organization_id)
+    statement = select(FacilityLeaseAgreement).where(FacilityLeaseAgreement.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityLeaseAgreement.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(FacilityLeaseAgreement.status == status_filter)
+    rows = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    FacilityLeaseAgreement.status.asc(),
+                    FacilityLeaseAgreement.next_invoice_on.asc(),
+                    FacilityLeaseAgreement.lessee_name.asc(),
+                )
+            )
+        ).all()
+    )
+    return [facility_lease_agreement_read(row) for row in rows]
+
+
+async def update_facility_lease_agreement(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    lease_id: UUID,
+    payload: FacilityLeaseAgreementUpdate,
+    authz: AuthorizationService,
+) -> FacilityLeaseAgreementRead:
+    lease = await get_facility_lease_agreement(db, lease_id)
+    await ensure_manage_assets(authz, identity, lease.organization_id)
+    for field in [
+        "status",
+        "deposit_status",
+        "compliance_status",
+        "next_invoice_on",
+        "renewal_notice_on",
+        "signed_at",
+        "terminated_at",
+        "document_url",
+        "compliance_notes",
+        "notes",
+    ]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(lease, field, value)
+    if payload.status == "active" and lease.signed_at is None:
+        lease.signed_at = datetime.now(UTC)
+    if payload.status == "terminated" and lease.terminated_at is None:
+        lease.terminated_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(lease)
+    return facility_lease_agreement_read(lease)
+
+
+async def generate_facility_lease_invoice(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    lease_id: UUID,
+    payload: FacilityLeaseInvoiceCreate,
+    authz: AuthorizationService,
+) -> FacilityLeaseInvoiceRead:
+    lease = await get_facility_lease_agreement(db, lease_id)
+    await ensure_manage_assets(authz, identity, lease.organization_id)
+    if lease.status not in {"active", "invoicing", "draft"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Facility lease is not invoiceable")
+    amount_due = (lease.monthly_rent + payload.extra_amount + payload.late_fee).quantize(Decimal("0.01"))
+    invoice = FinanceInvoice(
+        organization_id=lease.organization_id,
+        invoice_number=facility_lease_invoice_number(lease, payload.period_start),
+        title=f"Facility lease: {lease.lessee_name}",
+        amount_due=amount_due,
+        amount_paid=Decimal("0"),
+        currency=payload.currency,
+        due_on=payload.due_on or payload.period_start,
+        status=CommercialStatus.DRAFT,
+        memo=payload.memo or facility_lease_invoice_memo(lease, payload),
+    )
+    db.add(invoice)
+    await db.flush()
+    lease.finance_invoice_id = invoice.id
+    lease.status = "invoicing"
+    lease.next_invoice_on = add_month(payload.period_start)
+    await db.commit()
+    await db.refresh(invoice)
+    await db.refresh(lease)
+    return FacilityLeaseInvoiceRead(
+        lease=facility_lease_agreement_read(lease),
+        invoice=finance_invoice_read(invoice),
+        period_label=f"{payload.period_start.isoformat()} to {payload.period_end.isoformat()}",
     )
 
 
@@ -2792,6 +2915,16 @@ async def get_facility_maintenance_schedule(
     return schedule
 
 
+async def get_facility_lease_agreement(
+    db: AsyncSession,
+    lease_id: UUID,
+) -> FacilityLeaseAgreement:
+    lease = await db.get(FacilityLeaseAgreement, lease_id)
+    if lease is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility lease agreement not found")
+    return lease
+
+
 async def get_supplier_order(db: AsyncSession, supplier_order_id: UUID) -> SupplierOrder:
     order = await db.get(SupplierOrder, supplier_order_id)
     if order is None:
@@ -3190,6 +3323,66 @@ def facility_maintenance_schedule_read(schedule: FacilityMaintenanceSchedule) ->
         status=schedule.status,
         notes=schedule.notes,
     )
+
+
+def facility_lease_agreement_read(lease: FacilityLeaseAgreement) -> FacilityLeaseAgreementRead:
+    return FacilityLeaseAgreementRead(
+        id=lease.id,
+        organization_id=lease.organization_id,
+        facility_id=lease.facility_id,
+        finance_invoice_id=lease.finance_invoice_id,
+        lessor_name=lease.lessor_name,
+        lessee_name=lease.lessee_name,
+        lessee_contact_name=lease.lessee_contact_name,
+        lessee_contact_email=lease.lessee_contact_email,
+        usage_terms=lease.usage_terms,
+        included_services=lease.included_services,
+        extra_charges=lease.extra_charges,
+        starts_on=lease.starts_on,
+        ends_on=lease.ends_on,
+        monthly_rent=lease.monthly_rent,
+        security_deposit=lease.security_deposit,
+        deposit_status=lease.deposit_status,
+        next_invoice_on=lease.next_invoice_on,
+        auto_renew=lease.auto_renew,
+        renewal_notice_on=lease.renewal_notice_on,
+        status=lease.status,
+        compliance_status=lease.compliance_status,
+        compliance_notes=lease.compliance_notes,
+        document_url=lease.document_url,
+        signed_at=lease.signed_at,
+        terminated_at=lease.terminated_at,
+        version=lease.version,
+        notes=lease.notes,
+    )
+
+
+def facility_lease_invoice_number(lease: FacilityLeaseAgreement, period_start: date) -> str:
+    return f"FLEASE-{period_start:%Y%m}-{str(lease.id)[:8]}".upper()
+
+
+def facility_lease_invoice_memo(
+    lease: FacilityLeaseAgreement,
+    payload: FacilityLeaseInvoiceCreate,
+) -> str:
+    parts = [
+        f"Lease period {payload.period_start.isoformat()} to {payload.period_end.isoformat()}.",
+        f"Base rent {lease.monthly_rent}.",
+    ]
+    if payload.extra_amount > 0:
+        parts.append(f"Extra charges {payload.extra_amount}: {lease.extra_charges or 'per agreement'}.")
+    if payload.late_fee > 0:
+        parts.append(f"Late fee {payload.late_fee}.")
+    if lease.included_services:
+        parts.append(f"Included services: {lease.included_services}.")
+    return " ".join(parts)
+
+
+def add_month(value: date) -> date:
+    year = value.year + (1 if value.month == 12 else 0)
+    month = 1 if value.month == 12 else value.month + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
 
 
 def maintenance_work_order_notes(schedule: FacilityMaintenanceSchedule) -> str:

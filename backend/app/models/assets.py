@@ -353,6 +353,39 @@ class FacilityMaintenanceSchedule(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilityLeaseAgreement(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_lease_agreements"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    finance_invoice_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("finance_invoices.id"), index=True)
+    lessor_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    lessee_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    lessee_contact_name: Mapped[str | None] = mapped_column(String(180))
+    lessee_contact_email: Mapped[str | None] = mapped_column(String(255), index=True)
+    usage_terms: Mapped[str] = mapped_column(Text, nullable=False)
+    included_services: Mapped[str | None] = mapped_column(Text)
+    extra_charges: Mapped[str | None] = mapped_column(Text)
+    starts_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    ends_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    monthly_rent: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    security_deposit: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    deposit_status: Mapped[str] = mapped_column(String(40), default="held", nullable=False, index=True)
+    next_invoice_on: Mapped[date | None] = mapped_column(Date, index=True)
+    auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    renewal_notice_on: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    compliance_status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    compliance_notes: Mapped[str | None] = mapped_column(Text)
+    document_url: Mapped[str | None] = mapped_column(String(500))
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    terminated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FacilityBooking(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_bookings"
 
