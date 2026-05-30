@@ -731,6 +731,8 @@ class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
     duration_seconds: float
     distance_m: float
     average_speed_mps: float
+    average_x_percent: float | None = None
+    average_y_percent: float | None = None
     max_speed_mps: float
     work_rate_m_per_min: float = 0.0
     high_speed_distance_m: float
@@ -741,6 +743,10 @@ class PerformanceMatchTrackingPlayerMetricRead(BaseModel):
     fatigue_risk_score: float = 0.0
     substitution_window: str | None = None
     recovery_recommendation: str | None = None
+    inferred_role: str = "unknown"
+    role_confidence_score: float = 0.0
+    role_evidence: list[str] = Field(default_factory=list)
+    role_recommendation: str | None = None
     pressure_applied_count: int = 0
     pressure_received_count: int = 0
     average_nearest_opponent_m: float | None = None
@@ -809,6 +815,7 @@ class PerformanceMatchTrackingRunRead(BaseModel):
     defensive_action_events: list[dict[str, Any]] = Field(default_factory=list)
     chance_creation_metrics: dict[str, Any] = Field(default_factory=dict)
     formation_snapshots: list[dict[str, Any]] = Field(default_factory=list)
+    tactical_role_metrics: list[dict[str, Any]] = Field(default_factory=list)
     player_metrics: list[PerformanceMatchTrackingPlayerMetricRead]
     samples: list[PerformanceMatchTrackingSampleRead]
     calibration: PerformanceMatchPitchCalibrationRead | None = None

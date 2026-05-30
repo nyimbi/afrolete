@@ -7081,6 +7081,8 @@ export type PerformanceMatchTrackingPlayerMetricRead = {
   duration_seconds: number;
   distance_m: number;
   average_speed_mps: number;
+  average_x_percent: number | null;
+  average_y_percent: number | null;
   max_speed_mps: number;
   work_rate_m_per_min: number;
   high_speed_distance_m: number;
@@ -7091,6 +7093,10 @@ export type PerformanceMatchTrackingPlayerMetricRead = {
   fatigue_risk_score: number;
   substitution_window: string | null;
   recovery_recommendation: string | null;
+  inferred_role: string;
+  role_confidence_score: number;
+  role_evidence: string[];
+  role_recommendation: string | null;
   pressure_applied_count: number;
   pressure_received_count: number;
   average_nearest_opponent_m: number | null;
@@ -7159,6 +7165,7 @@ export type PerformanceMatchTrackingRunRead = {
   defensive_action_events: Record<string, unknown>[];
   chance_creation_metrics: Record<string, unknown>;
   formation_snapshots: Record<string, unknown>[];
+  tactical_role_metrics: Record<string, unknown>[];
   player_metrics: PerformanceMatchTrackingPlayerMetricRead[];
   samples: PerformanceMatchTrackingSampleRead[];
   calibration: PerformanceMatchPitchCalibrationRead | null;

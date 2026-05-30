@@ -332,11 +332,12 @@ clusters, add a best-effort ball contour track, and create tracking runs that
 feed distance, speed, heatmaps, estimated possession, pass/turnover cues,
 pass-type accuracy, defensive ball-win labels, pass networks, shot/xG estimates,
 tactical shape, tracking-derived load bands, fatigue-risk scores, substitution
-windows, recovery recommendations, highlights, coach/player reports, and
-player-portal match guidance cards with action-plan drills and one-click
-training follow-up plans for coach-confirmed tracks, including queued Training
-Strategy Agent review status for the generated follow-up plan. The same match
-analysis pipeline now
+windows, recovery recommendations, inferred tactical role profiles with
+role-evidence summaries, highlights, coach/player reports, and player-portal
+match guidance cards with action-plan drills and one-click training follow-up
+plans for coach-confirmed tracks, including queued Training Strategy Agent
+review status for the generated follow-up plan. The same match analysis pipeline
+now
 accepts external tracker frame packages from YOLO/ByteTrack-compatible cameras,
 GPS/video providers, or analyst tooling through a provider-neutral import API,
 converting bounding boxes, foot points, ball detections, confidence, model

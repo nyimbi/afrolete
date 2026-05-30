@@ -3586,6 +3586,12 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert any("high-speed load" in guidance for guidance in tracking["coaching_guidance"])
     striker = next(metric for metric in tracking["player_metrics"] if metric["track_id"] == "home-9")
     assert striker["distance_m"] == 20.0
+    assert striker["average_x_percent"] == 10.0
+    assert striker["average_y_percent"] == 60.0
+    assert striker["inferred_role"] != "unknown"
+    assert striker["role_confidence_score"] > 0
+    assert striker["role_evidence"]
+    assert striker["role_recommendation"]
     assert striker["sprint_count"] == 1
     assert striker["work_rate_m_per_min"] == 600.0
     assert striker["load_band"] == "moderate"
@@ -3618,6 +3624,7 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert tracking["action_recognition_metrics"]["event_count"] == len(tracking["recognized_action_events"])
     assert tracking["action_recognition_metrics"]["average_confidence"] > 0
     assert any(snapshot["team_label"] == "Home" for snapshot in tracking["formation_snapshots"])
+    assert tracking["tactical_role_metrics"]
     assert any("Home" in guidance for guidance in tracking["tactical_guidance"])
 
     calibrations = client.get(
@@ -3696,6 +3703,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert report["summary"]["pass_count"] == 0
     assert report["summary"]["turnover_count"] == 2
     assert report["player_cards"][0]["player_label"] == "Confirmed Forward"
+    assert report["player_cards"][0]["inferred_role"] != "unknown"
+    assert report["player_cards"][0]["role_evidence"]
     assert report["player_cards"][0]["high_speed_distance_m"] == 20.0
     assert report["player_cards"][0]["fatigue_risk_score"] >= 0.58
     assert "substitute" in report["player_cards"][0]["substitution_window"].lower()
@@ -3721,6 +3730,8 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     report_text = download_response.text
     assert "# Tracking City player guidance" in report_text
     assert "Confirmed Forward" in report_text
+    assert "Tactical role" in report_text
+    assert "Role recommendation" in report_text
     assert "Fatigue risk" in report_text
     assert "Substitution" in report_text
     assert "## Tactical Shape" in report_text
@@ -3737,8 +3748,9 @@ def test_match_video_tracking_computes_player_distances_and_speed_metrics(client
     assert guidance_review["guidance_status"] == "coach_review_required"
     assert guidance_review["player_card_count"] == len(guidance_review["player_cards"])
     assert guidance_review["player_guidance"][0]["player_label"] == "Confirmed Forward"
+    assert "inferred role" in guidance_review["player_guidance"][0]["tactical_summary"]
     assert "fatigue risk" in guidance_review["player_guidance"][0]["load_summary"]
-    assert "recovery" in guidance_review["player_guidance"][0]["evidence"].lower()
+    assert "review" in guidance_review["player_guidance"][0]["evidence"].lower()
     assert any("longer sample window" in action for action in guidance_review["required_actions"])
     assert any("draft-only" in note for note in guidance_review["review_notes"])
     assert guidance_review["coach_guidance"]
@@ -4170,6 +4182,9 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     forward = next(metric for metric in tracking["player_metrics"] if metric["track_id"] == "home-9")
     assert forward["player_label"] == "Forward"
     assert forward["distance_m"] > 20
+    assert forward["inferred_role"] != "unknown"
+    assert forward["role_confidence_score"] > 0
+    assert forward["role_evidence"]
     assert forward["load_band"] in {"moderate", "high", "extreme"}
     assert forward["fatigue_risk_score"] > 0
     assert forward["substitution_window"]
@@ -4195,6 +4210,7 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     metric_rows = list(csv.DictReader(io.StringIO(metrics_export.text)))
     assert any(row["track_id"] == "home-9" and row["distance_m"] for row in metric_rows)
     assert any(row["track_id"] == "home-9" and row["fatigue_risk_score"] for row in metric_rows)
+    assert any(row["track_id"] == "home-9" and row["inferred_role"] for row in metric_rows)
 
     json_export = client.get(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/export?export_format=analysis_json",
@@ -4205,6 +4221,7 @@ def test_match_tracking_provider_import_frames_feed_player_metrics_and_reports(c
     assert exported["tracking_run"]["id"] == tracking["id"]
     assert len(exported["samples"]) == tracking["sample_count"]
     assert exported["summary"]["player_metrics"]
+    assert exported["summary"]["tactical_role_metrics"]
 
     report_response = client.post(
         f"/api/v1/performance/scouting/tracking-runs/{tracking['id']}/analysis-reports",

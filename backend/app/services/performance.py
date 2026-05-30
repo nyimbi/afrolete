@@ -1337,6 +1337,8 @@ async def downloadable_match_tracking_run_export(
                 "sample_count",
                 "duration_seconds",
                 "distance_m",
+                "average_x_percent",
+                "average_y_percent",
                 "high_speed_distance_m",
                 "max_speed_mps",
                 "average_speed_mps",
@@ -1346,6 +1348,10 @@ async def downloadable_match_tracking_run_export(
                 "fatigue_risk_score",
                 "substitution_window",
                 "recovery_recommendation",
+                "inferred_role",
+                "role_confidence_score",
+                "role_evidence",
+                "role_recommendation",
                 "pressure_applied_count",
                 "pressure_received_count",
                 "pass_completed_count",
@@ -2481,6 +2487,8 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
     fatigue_risk_score = round(float(card.get("fatigue_risk_score") or 0.0) * 100)
     substitution_window = str(card.get("substitution_window") or "").strip()
     recovery_recommendation = str(card.get("recovery_recommendation") or "").strip()
+    inferred_role = str(card.get("inferred_role") or "unknown").replace("_", " ")
+    role_recommendation = str(card.get("role_recommendation") or "").strip()
     actions = [
         str(flag)
         for flag in (card.get("coaching_flags") or [])
@@ -2511,10 +2519,11 @@ def match_player_guidance_card(card: dict[str, object], *, publishable: bool) ->
         ),
         "tactical_summary": (
             f"{pressure} pressure action(s), {received_pressure} pressure received, "
-            f"dominant zone {str(card.get('dominant_zone') or 'unknown').replace('_', ' ')}."
+            f"dominant zone {str(card.get('dominant_zone') or 'unknown').replace('_', ' ')}, "
+            f"inferred role {inferred_role}."
         ),
         "recommended_next_action": next_action,
-        "evidence": recovery_recommendation or actions[0],
+        "evidence": role_recommendation or recovery_recommendation or actions[0],
         "caution": None if publishable else "Coach review required before sharing this guidance with the player.",
     }
 
@@ -11477,6 +11486,8 @@ def build_match_analysis_report_artifact(
                 "team_label": metric.get("team_label"),
                 "jersey_number": metric.get("jersey_number"),
                 "distance_m": round(float(metric.get("distance_m") or 0.0), 2),
+                "average_x_percent": metric.get("average_x_percent"),
+                "average_y_percent": metric.get("average_y_percent"),
                 "high_speed_distance_m": round(float(metric.get("high_speed_distance_m") or 0.0), 2),
                 "max_speed_mps": round(float(metric.get("max_speed_mps") or 0.0), 3),
                 "sprint_count": int(metric.get("sprint_count") or 0),
@@ -11485,6 +11496,10 @@ def build_match_analysis_report_artifact(
                 "fatigue_risk_score": round(float(metric.get("fatigue_risk_score") or 0.0), 3),
                 "substitution_window": metric.get("substitution_window"),
                 "recovery_recommendation": metric.get("recovery_recommendation"),
+                "inferred_role": metric.get("inferred_role") or "unknown",
+                "role_confidence_score": round(float(metric.get("role_confidence_score") or 0.0), 3),
+                "role_evidence": [str(item) for item in (metric.get("role_evidence") or [])],
+                "role_recommendation": metric.get("role_recommendation"),
                 "pressure_applied_count": int(metric.get("pressure_applied_count") or 0),
                 "pressure_received_count": int(metric.get("pressure_received_count") or 0),
                 "off_ball_run_count": int(metric.get("off_ball_run_count") or 0),
@@ -11707,6 +11722,9 @@ def match_analysis_report_markdown(
                     f"### {card.get('player_label') or card.get('track_id')}",
                     f"- Team: {card.get('team_label') or 'unassigned'}"
                     + (f" | Jersey: {card.get('jersey_number')}" if card.get("jersey_number") else ""),
+                    f"- Tactical role: {str(card.get('inferred_role') or 'unknown').replace('_', ' ')} ({round(float(card.get('role_confidence_score') or 0) * 100)}% confidence)",
+                    f"- Role evidence: {'; '.join(card.get('role_evidence') or ['Tracking role evidence is limited.'])}",
+                    f"- Role recommendation: {card.get('role_recommendation') or 'Confirm role with video context.'}",
                     f"- Distance: {card['distance_m']}m | High-speed: {card['high_speed_distance_m']}m",
                     f"- Max speed: {card['max_speed_mps']} m/s | Sprints: {card['sprint_count']}",
                     f"- Load: {str(card.get('load_band') or 'unknown').replace('_', ' ')} | Fatigue risk: {round(float(card.get('fatigue_risk_score') or 0) * 100)}%",
@@ -12126,6 +12144,8 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                 "duration_seconds": round(duration, 3),
                 "distance_m": round(distance, 2),
                 "average_speed_mps": round(distance / duration, 3) if duration > 0 else 0.0,
+                "average_x_percent": round(sum(float(row["x_percent"]) for row in ordered) / len(ordered), 2),
+                "average_y_percent": round(sum(float(row["y_percent"]) for row in ordered) / len(ordered), 2),
                 "max_speed_mps": round(max_speed, 3),
                 "work_rate_m_per_min": round(work_rate, 2),
                 "high_speed_distance_m": round(high_speed_distance, 2),
@@ -12136,6 +12156,10 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
                 "fatigue_risk_score": fatigue_risk_score,
                 "substitution_window": substitution_window,
                 "recovery_recommendation": recovery_recommendation,
+                "inferred_role": "unknown",
+                "role_confidence_score": 0.0,
+                "role_evidence": [],
+                "role_recommendation": None,
                 "pressure_applied_count": 0,
                 "pressure_received_count": 0,
                 "average_nearest_opponent_m": None,
@@ -12180,6 +12204,7 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
     team_shape = derive_match_team_shape(player_samples)
     football_context = derive_match_football_context(player_samples, player_metrics)
     ball_context = derive_match_ball_context(samples, player_metrics)
+    role_context = derive_match_player_role_context(player_metrics)
     action_context = derive_match_action_recognition(
         player_metrics=player_metrics,
         pressure_events=football_context["pressure_events"],
@@ -12211,6 +12236,105 @@ def summarize_match_tracking_samples(samples: list[dict[str, object]]) -> dict[s
         "pass_type_metrics": ball_context["pass_type_metrics"],
         "defensive_action_events": ball_context["defensive_action_events"],
         "chance_creation_metrics": ball_context["chance_creation_metrics"],
+        "tactical_role_metrics": role_context["tactical_role_metrics"],
+    }
+
+
+def derive_match_player_role_context(player_metrics: list[dict[str, object]]) -> dict[str, object]:
+    role_counts: dict[str, int] = {}
+    for metric in player_metrics:
+        role = infer_match_player_tactical_role(metric)
+        metric.update(role)
+        role_label = str(role["inferred_role"])
+        role_counts[role_label] = role_counts.get(role_label, 0) + 1
+    return {
+        "tactical_role_metrics": [
+            {"inferred_role": role, "player_count": count}
+            for role, count in sorted(role_counts.items(), key=lambda item: (-item[1], item[0]))
+        ]
+    }
+
+
+def infer_match_player_tactical_role(metric: dict[str, object]) -> dict[str, object]:
+    average_x = float(metric.get("average_x_percent") or 50.0)
+    average_y = float(metric.get("average_y_percent") or 50.0)
+    sample_count = int(metric.get("sample_count") or 0)
+    tracking_quality = float(metric.get("tracking_quality_score") or 0.0)
+    high_speed = float(metric.get("high_speed_distance_m") or 0.0)
+    distance = float(metric.get("distance_m") or 0.0)
+    pressure = int(metric.get("pressure_applied_count") or 0)
+    received_pressure = int(metric.get("pressure_received_count") or 0)
+    passes = int(metric.get("pass_attempt_count") or 0)
+    completed = int(metric.get("pass_completed_count") or 0)
+    key_passes = int(metric.get("key_pass_count") or 0)
+    shots = int(metric.get("shot_count") or 0)
+    expected_goals = float(metric.get("expected_goals") or 0.0)
+    tackles = int(metric.get("tackle_count") or 0)
+    interceptions = int(metric.get("interception_count") or 0)
+    off_ball_runs = int(metric.get("off_ball_run_count") or 0)
+    advances = int(metric.get("territorial_advance_count") or 0)
+    carry_m = float(metric.get("ball_carry_m") or 0.0)
+
+    channel = "central"
+    if average_y <= 33:
+        channel = "left"
+    elif average_y >= 67:
+        channel = "right"
+
+    evidence: list[str] = []
+    if sample_count:
+        evidence.append(f"{sample_count} tracked sample(s) around {average_x:.0f}% pitch depth and {channel} channel.")
+    if high_speed > 0:
+        evidence.append(f"{round(high_speed)}m high-speed work from {round(distance)}m tracked distance.")
+    if passes:
+        evidence.append(f"{completed}/{passes} pass(es) completed with {key_passes} key-pass signal(s).")
+    if pressure or received_pressure:
+        evidence.append(f"{pressure} pressure action(s) applied and {received_pressure} pressure event(s) received.")
+    if shots or expected_goals:
+        evidence.append(f"{shots} shot(s) and {expected_goals:.2f} xG from ball-tracking context.")
+    if tackles or interceptions:
+        evidence.append(f"{tackles} tackle(s) and {interceptions} interception(s) detected.")
+
+    if shots > 0 or expected_goals >= 0.08:
+        inferred_role = "attacking_finisher"
+        recommendation = "Review finishing decisions, support runs, and first recovery action after shots."
+    elif key_passes > 0 or passes >= 4:
+        inferred_role = "creative_connector"
+        recommendation = "Review scanning, receiving body shape, and third-player support around passing chains."
+    elif tackles + interceptions >= 2 or (average_x <= 34 and pressure >= received_pressure):
+        inferred_role = "defensive_anchor"
+        recommendation = "Review cover distances, ball-win timing, and first pass after regaining possession."
+    elif off_ball_runs > 0 and channel != "central":
+        inferred_role = "wide_runner"
+        recommendation = "Review run timing, overlap/underlap choices, and weak-side recovery positioning."
+    elif pressure >= 2 or (advances > 0 and pressure > 0):
+        inferred_role = "pressing_midfielder"
+        recommendation = "Review pressing triggers, cover shadows, and recovery spacing after pressure actions."
+    elif carry_m >= 8 or advances >= 2:
+        inferred_role = "ball_progressor"
+        recommendation = "Review carry timing, release point, and support angles behind the advancing player."
+    elif average_x >= 66:
+        inferred_role = "advanced_runner"
+        recommendation = "Review forward spacing, offside line timing, and counter-press reaction."
+    elif average_x <= 34:
+        inferred_role = "defensive_support"
+        recommendation = "Review rest-defense shape, outlet angles, and pressure cover."
+    else:
+        inferred_role = "central_connector"
+        recommendation = "Review support angles, scanning frequency, and transition reactions."
+
+    evidence_count = min(len(evidence), 5)
+    confidence = (
+        min(sample_count / 12, 1.0) * 0.34
+        + tracking_quality * 0.30
+        + min(evidence_count / 4, 1.0) * 0.22
+        + (0.14 if passes or pressure or shots or tackles or interceptions or off_ball_runs or carry_m else 0.0)
+    )
+    return {
+        "inferred_role": inferred_role,
+        "role_confidence_score": round(max(0.0, min(confidence, 0.96)), 3),
+        "role_evidence": evidence[:5],
+        "role_recommendation": recommendation,
     }
 
 
@@ -13404,6 +13528,11 @@ def match_tracking_coaching_guidance(summary: dict[str, object], *, readiness_le
         key=lambda item: float(item.get("fatigue_risk_score") or 0.0),
         reverse=True,
     )[:3]
+    role_signals = [
+        item
+        for item in metrics
+        if isinstance(item, dict) and float(item.get("role_confidence_score") or 0.0) >= 0.55
+    ][:4]
     if high_speed_leaders and isinstance(high_speed_leaders[0], dict):
         if float(high_speed_leaders[0].get("high_speed_distance_m") or 0.0) > 0:
             names = ", ".join(match_tracking_metric_label(item) for item in high_speed_leaders)
@@ -13421,6 +13550,12 @@ def match_tracking_coaching_guidance(summary: dict[str, object], *, readiness_le
     if fatigue_leaders and float(fatigue_leaders[0].get("fatigue_risk_score") or 0.0) >= 0.62:
         names = ", ".join(match_tracking_metric_label(item) for item in fatigue_leaders)
         guidance.append(f"Review substitution and recovery timing for {names}; fatigue-risk tracking signals are elevated.")
+    if role_signals:
+        names = ", ".join(
+            f"{match_tracking_metric_label(item)} as {str(item.get('inferred_role') or 'role').replace('_', ' ')}"
+            for item in role_signals
+        )
+        guidance.append(f"Use inferred role evidence to structure video review for {names}.")
     low_quality = [
         match_tracking_metric_label(item)
         for item in metrics
@@ -14401,6 +14536,7 @@ async def match_tracking_run_read(db: AsyncSession, run: PerformanceMatchTrackin
         "defensive_action_events": summary.get("defensive_action_events", []),
         "chance_creation_metrics": summary.get("chance_creation_metrics", {}),
         "formation_snapshots": summary.get("formation_snapshots", []),
+        "tactical_role_metrics": summary.get("tactical_role_metrics", []),
         "player_metrics": summary.get("player_metrics", []),
         "samples": [match_tracking_sample_read(sample) for sample in samples],
         "calibration": match_pitch_calibration_read(calibration) if calibration is not None else None,

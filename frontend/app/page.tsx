@@ -27369,7 +27369,16 @@ export default function HomePage() {
                   <p>
                     {performanceMatchTrackingRun?.recognized_action_events[0]
                       ? `${Number(performanceMatchTrackingRun.action_recognition_metrics.high_confidence_count ?? 0)} high-confidence · ${Math.round(Number(performanceMatchTrackingRun.action_recognition_metrics.average_confidence ?? 0) * 100)}% avg`
-                      : "Passes, shots, pressure, defensive wins, sprints, carries, and off-ball runs appear after tracking."}
+                    : "Passes, shots, pressure, defensive wins, sprints, carries, and off-ball runs appear after tracking."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Player roles</span>
+                  <strong>{performanceMatchTrackingRun?.tactical_role_metrics.length ?? 0} role(s)</strong>
+                  <p>
+                    {performanceMatchTrackingRun?.tactical_role_metrics[0]
+                      ? `${String(performanceMatchTrackingRun.tactical_role_metrics[0].inferred_role ?? "role").replaceAll("_", " ")} · ${Number(performanceMatchTrackingRun.tactical_role_metrics[0].player_count ?? 0)} player(s)`
+                      : "Tracking behavior infers player role evidence for tactical review cards."}
                   </p>
                 </article>
                 <article className="mini-card">
@@ -28061,6 +28070,11 @@ export default function HomePage() {
                           {metric.dominant_zone.replaceAll("_", " ")} · quality {Math.round(metric.tracking_quality_score * 100)}% ·{" "}
                           {metric.coaching_flags[0] ?? `${metric.sample_count} samples`}
                         </small>
+                        <small>
+                          {metric.inferred_role.replaceAll("_", " ")} · role confidence {Math.round(metric.role_confidence_score * 100)}% ·{" "}
+                          {metric.role_recommendation ?? "confirm tactical role with video context"}
+                        </small>
+                        <small>{metric.role_evidence[0] ?? "Role evidence will appear after tracking has enough samples."}</small>
                         <small>
                           {metric.load_band.replaceAll("_", " ")} load · fatigue {Math.round(metric.fatigue_risk_score * 100)}% ·{" "}
                           {metric.substitution_window ?? "substitution review pending"}
