@@ -377,6 +377,7 @@ import type {
   PerformanceHardwareDeviceRead,
   PerformanceHardwareKitRead,
   PerformanceHardwareSyncRunRead,
+  PerformanceHighlightClipRead,
   PerformanceHighlightReelEngagementRead,
   PerformanceHighlightReelExportRead,
   PerformanceHighlightReelRead,
@@ -621,6 +622,55 @@ function wearableWebhookPayload(provider: string): Record<string, unknown> {
     strain: { score: 17.4 },
     created_at: "2026-06-05T06:15:00Z"
   };
+}
+
+function highlightClipCurationLabel(clip: PerformanceHighlightClipRead): string {
+  const status = clip.source_moment_status?.replaceAll("_", " ");
+  if (status === "featured") {
+    return "Coach-featured";
+  }
+  if (status === "approved") {
+    return "Coach-approved";
+  }
+  if (status === "needs review") {
+    return "Needs coach review";
+  }
+  if (status === "detected") {
+    return "AI-detected";
+  }
+  if (status) {
+    return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+  return clip.source_moment_id ? "Moment-backed" : "Tracking/scouting";
+}
+
+function highlightReelCurationLabel(clips: PerformanceHighlightClipRead[]): string {
+  const counts = clips.reduce(
+    (accumulator, clip) => {
+      const status = clip.source_moment_status ?? "unreviewed";
+      accumulator[status] = (accumulator[status] ?? 0) + 1;
+      return accumulator;
+    },
+    {} as Record<string, number>
+  );
+  const curated = (counts.featured ?? 0) + (counts.approved ?? 0);
+  const momentBacked = clips.filter((clip) => clip.source_moment_id).length;
+  return `${curated} curated · ${counts.featured ?? 0} featured · ${counts.approved ?? 0} approved · ${momentBacked} moment-backed`;
+}
+
+function highlightExportCurationLabel(manifest: Record<string, unknown>): string {
+  const summary = manifest.curation_summary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    return "Curation summary pending export refresh.";
+  }
+  const summaryRecord = summary as Record<string, unknown>;
+  if (typeof summaryRecord.summary_label === "string") {
+    return summaryRecord.summary_label;
+  }
+  const featured = Number(summaryRecord.featured_clip_count ?? 0);
+  const approved = Number(summaryRecord.approved_clip_count ?? 0);
+  const curated = Number(summaryRecord.curated_clip_count ?? featured + approved);
+  return `${curated} curated · ${featured} featured · ${approved} approved`;
 }
 
 type TravelManifestLegacyOfflineCache = EventTravelManifestRead & {
@@ -28383,6 +28433,7 @@ export default function HomePage() {
                             : performanceHighlightReel.audience}
                         </span>
                         <small>{String(performanceHighlightReel.distribution.caption ?? performanceHighlightReel.model_policy)}</small>
+                        <small>{highlightReelCurationLabel(performanceHighlightReel.clips)} · rejected moments excluded</small>
                       </div>
                       <span>
                         <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>JSON</button>
@@ -28510,6 +28561,7 @@ export default function HomePage() {
                           {performanceHighlightReelExport.message ?? performanceHighlightReelExport.renderer_policy} ·{" "}
                           checksum {performanceHighlightReelExport.checksum.slice(0, 12)}
                         </small>
+                        <small>{highlightExportCurationLabel(performanceHighlightReelExport.manifest)}</small>
                       </div>
                       <span>
                         {performanceHighlightReelExport.export_format === "mp4_edit_decision_list" ? (
@@ -28540,6 +28592,7 @@ export default function HomePage() {
                           <strong>{artifact.export_format.replaceAll("_", " ")} · {artifact.status}</strong>
                           <span>{artifact.filename} · {Math.round(artifact.size_bytes / 1024)} KB</span>
                           <small>{artifact.message ?? artifact.storage_url}</small>
+                          <small>{highlightExportCurationLabel(artifact.manifest)}</small>
                         </div>
                         <span>
                           {artifact.export_format === "mp4_edit_decision_list" ? (
@@ -28566,6 +28619,7 @@ export default function HomePage() {
                           {clip.start_seconds}s-{clip.end_seconds}s · {Math.round(clip.confidence * 100)}% confidence
                           {clip.player_label ? ` · ${clip.player_label}${clip.jersey_number ? ` #${clip.jersey_number}` : ""}` : ""}
                         </span>
+                        <small>{highlightClipCurationLabel(clip)} · {clip.tags.slice(0, 4).join(", ")}</small>
                         <small>
                           {clip.source_moment_id ? "AI moment-backed clip · " : ""}
                           {clip.moment_category ? `${clip.moment_category.replaceAll("_", " ")} · ` : ""}

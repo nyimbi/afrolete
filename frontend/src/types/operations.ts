@@ -7572,6 +7572,7 @@ export type PerformanceHighlightClipRead = {
   moment_score: number | null;
   moment_category: string | null;
   source_policy: string | null;
+  source_moment_status: string | null;
   source_event: Record<string, unknown>;
 };
 
