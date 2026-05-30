@@ -2579,6 +2579,11 @@ export default function HomePage() {
     evidence_text:
       "Opponent uses a 4-2-3-1 high press, jumps on back passes, leaves weak-side fullback space, and uses zonal corner marking that loses runners on the second phase."
   });
+  const [matchAutoTrackingForm, setMatchAutoTrackingForm] = useState({
+    max_frames: 180,
+    sample_every_seconds: 0.5,
+    min_detection_confidence: 0.35
+  });
   const [performanceHardwareForm, setPerformanceHardwareForm] = useState({
     kit_name: "Football match analysis kit",
     kit_type: "hybrid",
@@ -10417,9 +10422,9 @@ export default function HomePage() {
       pitch_width_m: 68,
       replace_existing: true,
       auto_track: true,
-      max_frames: 180,
-      sample_every_seconds: 0.5,
-      min_detection_confidence: 0.35,
+      max_frames: matchAutoTrackingForm.max_frames,
+      sample_every_seconds: matchAutoTrackingForm.sample_every_seconds,
+      min_detection_confidence: matchAutoTrackingForm.min_detection_confidence,
       samples: []
     };
     runAction(
@@ -25375,6 +25380,38 @@ export default function HomePage() {
               <label className="wide-field">
                 Opponent video
                 <input type="file" accept="video/*" onChange={(event) => setSelectedOppositionScoutingFile(event.target.files?.[0] ?? null)} />
+              </label>
+              <label>
+                Track frames
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={matchAutoTrackingForm.max_frames}
+                  onChange={(event) => setMatchAutoTrackingForm({ ...matchAutoTrackingForm, max_frames: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Sample seconds
+                <input
+                  type="number"
+                  min={0.04}
+                  max={10}
+                  step={0.01}
+                  value={matchAutoTrackingForm.sample_every_seconds}
+                  onChange={(event) => setMatchAutoTrackingForm({ ...matchAutoTrackingForm, sample_every_seconds: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Detection floor
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={matchAutoTrackingForm.min_detection_confidence}
+                  onChange={(event) => setMatchAutoTrackingForm({ ...matchAutoTrackingForm, min_detection_confidence: Number(event.target.value) })}
+                />
               </label>
               <label>
                 Hardware kit
