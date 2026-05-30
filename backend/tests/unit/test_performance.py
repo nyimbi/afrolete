@@ -4925,7 +4925,7 @@ def test_match_tracking_assigns_team_labels_from_jersey_color_clusters() -> None
 
 
 def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, identity_headers, monkeypatch) -> None:
-    organization, team, _, _ = create_rostered_athlete(client, identity_headers)
+    organization, team, member, roster = create_rostered_athlete(client, identity_headers)
     upload_response = client.post(
         "/api/v1/performance/scouting/videos",
         headers=identity_headers,
@@ -5000,6 +5000,7 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
         json={
             "organization_id": organization["id"],
             "tracking_run_id": tracking["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
             "audience": "scout",
             "purpose": "recruiting",
             "target_duration_seconds": 75,
@@ -5036,6 +5037,43 @@ def test_match_video_highlight_reel_uses_tracking_and_scouting_signals(client, i
     assert timeline["status"] == "rendered"
     assert timeline["export_format"] == "timeline_json"
     assert timeline["filename"].endswith("-timeline.json")
+
+    share_response = client.post(
+        f"/api/v1/performance/scouting/highlight-reels/{reel['id']}/shares",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "include_players": True,
+            "include_guardians": False,
+            "subject_prefix": "Scout reel ready",
+            "message_intro": "A controlled scout highlight reel is ready.",
+            "delivery_channel": "scout_packet",
+            "export_format": "timeline_json",
+            "include_branding": True,
+        },
+    )
+    assert share_response.status_code == 201
+    share = share_response.json()
+    assert share["highlight_reel_export_id"] == timeline["id"]
+    assert share["recipient_count"] == 1
+    assert share["player_recipient_count"] == 1
+    assert share["guardian_recipient_count"] == 0
+    assert share["audit"]["message_id"] == share["message_id"]
+    assert share["audit"]["queued_count"] == 1
+    assert share["share_policy"] == "scout_packet_internal_review"
+    share_recipients = client.get(
+        f"/api/v1/communications/messages/{share['message_id']}/recipients",
+        headers=identity_headers,
+    )
+    assert share_recipients.status_code == 200
+    assert [recipient["person_id"] for recipient in share_recipients.json()] == [member["subject_id"]]
+    share_audits = client.get(
+        f"/api/v1/performance/scouting/highlight-reel-shares?organization_id={organization['id']}&highlight_reel_id={reel['id']}",
+        headers=identity_headers,
+    )
+    assert share_audits.status_code == 200
+    assert share_audits.json()[0]["message_id"] == share["message_id"]
     assert timeline["content_type"] == "application/json"
     assert timeline["size_bytes"] > 100
     assert len(timeline["checksum"]) == 64

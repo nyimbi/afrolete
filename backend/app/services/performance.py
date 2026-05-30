@@ -63,6 +63,7 @@ from app.models.performance import (
     PerformanceHardwareSyncRun,
     PerformanceHighlightReel,
     PerformanceHighlightReelExport,
+    PerformanceHighlightReelShareAudit,
     PerformanceMatchAnalysisReport,
     PerformanceMatchMoment,
     PerformanceMatchPlayerGuidancePublishAudit,
@@ -108,6 +109,7 @@ from app.schemas.performance import (
     PerformanceHardwareSyncRunCreate,
     PerformanceHighlightReelCreate,
     PerformanceHighlightReelExportCreate,
+    PerformanceHighlightReelShareCreate,
     PerformanceIngestionCreate,
     PerformanceModelExtractionBulkReviewCreate,
     PerformanceMatchAnalysisReportCreate,
@@ -2989,6 +2991,294 @@ async def list_performance_highlight_reel_exports(
             )
         ).all()
     )
+
+
+async def share_performance_highlight_reel(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    highlight_reel_id: UUID,
+    payload: PerformanceHighlightReelShareCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    reel = await get_performance_highlight_reel(db, highlight_reel_id)
+    if reel.organization_id != payload.organization_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Organization mismatch")
+    await ensure_manage_performance(authz, identity, reel.organization_id)
+    video_asset = await get_opposition_scouting_video_asset(db, reel.video_asset_id)
+    player_ids = await highlight_reel_player_recipient_ids(db, reel) if payload.include_players else set()
+    guardian_ids: set[UUID] = set()
+    if payload.include_guardians:
+        for player_id in sorted(player_ids, key=str):
+            guardian_ids.update(await guardian_person_ids(db, player_id))
+    explicit_ids = set(payload.recipient_person_ids)
+    recipient_ids = sorted(player_ids | guardian_ids | explicit_ids, key=str)
+    if not recipient_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No eligible highlight recipients found",
+        )
+    share_policy = highlight_reel_share_policy(reel, payload, bool(guardian_ids))
+    export = await highlight_reel_share_export(db, identity, reel, payload, authz)
+    subject = f"{payload.subject_prefix}: {reel.title}"[:240]
+    body = highlight_reel_share_message_body(
+        reel,
+        video_asset,
+        export,
+        payload,
+        share_policy=share_policy,
+    )
+    message = await create_message_for_recipients(
+        db,
+        organization_id=reel.organization_id,
+        message_type=CommunicationMessageType.REPORT,
+        channel=payload.channel,
+        scope_type=CommunicationScopeType.ORGANIZATION,
+        scope_id=reel.organization_id,
+        recipient_person_ids=recipient_ids,
+        subject=subject,
+        body=body,
+        created_by_person_id=identity.person_id,
+    )
+    now = datetime.now(UTC)
+    audit = PerformanceHighlightReelShareAudit(
+        organization_id=reel.organization_id,
+        highlight_reel_id=reel.id,
+        highlight_reel_export_id=export.id if export is not None else None,
+        video_asset_id=reel.video_asset_id,
+        tracking_run_id=reel.tracking_run_id,
+        message_id=message.id,
+        channel=payload.channel,
+        audience=reel.audience,
+        share_policy=share_policy,
+        recipient_count=len(recipient_ids),
+        player_recipient_count=len(player_ids),
+        guardian_recipient_count=len(guardian_ids),
+        explicit_recipient_count=len(explicit_ids),
+        published_by_person_id=identity.person_id,
+        status="shared",
+        published_at=now,
+    )
+    db.add(audit)
+    await db.commit()
+    await db.refresh(audit)
+    return {
+        "highlight_reel_id": reel.id,
+        "organization_id": reel.organization_id,
+        "video_asset_id": reel.video_asset_id,
+        "highlight_reel_export_id": export.id if export is not None else None,
+        "message_id": message.id,
+        "channel": payload.channel,
+        "share_policy": share_policy,
+        "recipient_count": len(recipient_ids),
+        "player_recipient_count": len(player_ids),
+        "guardian_recipient_count": len(guardian_ids),
+        "explicit_recipient_count": len(explicit_ids),
+        "subject": subject,
+        "audit": highlight_reel_share_audit_read(audit, await delivery_counts_for_messages(db, [message.id])),
+        "published_at": now,
+    }
+
+
+async def list_performance_highlight_reel_shares(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+    highlight_reel_id: UUID | None = None,
+) -> list[dict[str, object]]:
+    await ensure_manage_performance(authz, identity, organization_id)
+    statement = select(PerformanceHighlightReelShareAudit).where(
+        PerformanceHighlightReelShareAudit.organization_id == organization_id
+    )
+    if highlight_reel_id is not None:
+        statement = statement.where(PerformanceHighlightReelShareAudit.highlight_reel_id == highlight_reel_id)
+    audits = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    PerformanceHighlightReelShareAudit.published_at.desc(),
+                    PerformanceHighlightReelShareAudit.created_at.desc(),
+                ).limit(100)
+            )
+        ).all()
+    )
+    counts = await delivery_counts_for_messages(db, [audit.message_id for audit in audits])
+    return [highlight_reel_share_audit_read(audit, counts) for audit in audits]
+
+
+async def highlight_reel_share_export(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    reel: PerformanceHighlightReel,
+    payload: PerformanceHighlightReelShareCreate,
+    authz: AuthorizationService,
+) -> PerformanceHighlightReelExport | None:
+    exports = await list_performance_highlight_reel_exports(
+        db,
+        identity,
+        reel.organization_id,
+        authz,
+        highlight_reel_id=reel.id,
+    )
+    export_format = normalize_highlight_export_format(payload.export_format)
+    for export in exports:
+        if export.export_format == export_format:
+            return export
+    return await create_performance_highlight_reel_export(
+        db,
+        identity,
+        reel.id,
+        PerformanceHighlightReelExportCreate(
+            organization_id=reel.organization_id,
+            export_format=export_format,
+            delivery_channel=payload.delivery_channel,
+            include_branding=payload.include_branding,
+            notes=payload.notes,
+        ),
+        authz,
+    )
+
+
+async def highlight_reel_player_recipient_ids(
+    db: AsyncSession,
+    reel: PerformanceHighlightReel,
+) -> set[UUID]:
+    if reel.athlete_profile_id is not None:
+        athlete = await get_athlete_profile(db, reel.athlete_profile_id, reel.organization_id)
+        return {athlete.person_id}
+    if reel.tracking_run_id is None:
+        return set()
+    run = await get_match_tracking_run(db, reel.tracking_run_id)
+    return set((await match_tracking_player_person_by_track(db, run)).values())
+
+
+def highlight_reel_share_policy(
+    reel: PerformanceHighlightReel,
+    payload: PerformanceHighlightReelShareCreate,
+    guardian_included: bool,
+) -> str:
+    if reel.audience in {"parent", "family", "guardian"}:
+        return "family_visible" if guardian_included else "family_requested_no_guardian_recipient"
+    if reel.audience == "scout":
+        return "guardian_reviewed_scout_packet" if guardian_included else "scout_packet_internal_review"
+    if payload.recipient_person_ids:
+        return "explicit_recipient_distribution"
+    return "team_internal"
+
+
+def highlight_reel_share_message_body(
+    reel: PerformanceHighlightReel,
+    video_asset: OppositionScoutingVideoAsset,
+    export: PerformanceHighlightReelExport | None,
+    payload: PerformanceHighlightReelShareCreate,
+    *,
+    share_policy: str,
+) -> str:
+    clips = decode_json_list(reel.clips_json)
+    lines = [
+        payload.message_intro.strip() if payload.message_intro else "A coach-reviewed highlight reel is ready.",
+        "",
+        f"Highlight reel: {reel.title}",
+        f"Match: {video_asset.opponent_name}",
+        f"Audience: {reel.audience}",
+        f"Purpose: {reel.purpose}",
+        f"Share policy: {share_policy.replace('_', ' ')}",
+        f"Clips: {reel.clip_count} | Duration: {round(reel.duration_seconds)}s",
+    ]
+    if export is not None:
+        lines.extend(
+            [
+                f"Export: {export.filename}",
+                f"Download path: /api/v1/performance/scouting/highlight-reel-exports/{export.id}/content",
+                f"Checksum: {export.checksum}",
+            ]
+        )
+    lines.extend(["", "Top clips:"])
+    for index, clip in enumerate(clips[:5], start=1):
+        if not isinstance(clip, dict):
+            continue
+        score = clip.get("moment_score")
+        score_text = f" | score {round(float(score))}" if score is not None else ""
+        lines.append(
+            f"{index}. {clip.get('title')} ({clip.get('start_seconds')}s-{clip.get('end_seconds')}s{score_text})"
+        )
+    lines.extend(["", "Use this reel for controlled review only. Confirm guardian or player sharing rules before forwarding."])
+    return "\n".join(lines)
+
+
+async def delivery_counts_for_messages(
+    db: AsyncSession,
+    message_ids: list[UUID],
+) -> dict[UUID, dict[str, int]]:
+    if not message_ids:
+        return {}
+    recipient_rows = (
+        await db.execute(
+            select(MessageRecipient.message_id, MessageRecipient.delivery_status).where(
+                MessageRecipient.message_id.in_(message_ids)
+            )
+        )
+    ).all()
+    counts_by_message: dict[UUID, dict[str, int]] = {
+        message_id: {
+            "queued_count": 0,
+            "sent_count": 0,
+            "delivered_count": 0,
+            "read_count": 0,
+            "failed_count": 0,
+            "suppressed_count": 0,
+        }
+        for message_id in message_ids
+    }
+    status_count_keys = {
+        MessageDeliveryStatus.QUEUED.value: "queued_count",
+        MessageDeliveryStatus.SENT.value: "sent_count",
+        MessageDeliveryStatus.DELIVERED.value: "delivered_count",
+        MessageDeliveryStatus.READ.value: "read_count",
+        MessageDeliveryStatus.FAILED.value: "failed_count",
+        MessageDeliveryStatus.SUPPRESSED.value: "suppressed_count",
+    }
+    for message_id, delivery_status in recipient_rows:
+        key = status_count_keys.get(str(delivery_status))
+        if key is None and hasattr(delivery_status, "value"):
+            key = status_count_keys.get(str(delivery_status.value))
+        if key is not None:
+            counts_by_message.setdefault(message_id, {}).setdefault(key, 0)
+            counts_by_message[message_id][key] += 1
+    return counts_by_message
+
+
+def highlight_reel_share_audit_read(
+    audit: PerformanceHighlightReelShareAudit,
+    delivery_counts_by_message: dict[UUID, dict[str, int]],
+) -> dict[str, object]:
+    delivery_counts = delivery_counts_by_message.get(audit.message_id, {})
+    return {
+        "id": audit.id,
+        "organization_id": audit.organization_id,
+        "highlight_reel_id": audit.highlight_reel_id,
+        "highlight_reel_export_id": audit.highlight_reel_export_id,
+        "video_asset_id": audit.video_asset_id,
+        "tracking_run_id": audit.tracking_run_id,
+        "message_id": audit.message_id,
+        "channel": audit.channel,
+        "audience": audit.audience,
+        "share_policy": audit.share_policy,
+        "recipient_count": audit.recipient_count,
+        "player_recipient_count": audit.player_recipient_count,
+        "guardian_recipient_count": audit.guardian_recipient_count,
+        "explicit_recipient_count": audit.explicit_recipient_count,
+        "queued_count": delivery_counts.get("queued_count", 0),
+        "sent_count": delivery_counts.get("sent_count", 0),
+        "delivered_count": delivery_counts.get("delivered_count", 0),
+        "read_count": delivery_counts.get("read_count", 0),
+        "failed_count": delivery_counts.get("failed_count", 0),
+        "suppressed_count": delivery_counts.get("suppressed_count", 0),
+        "published_by_person_id": audit.published_by_person_id,
+        "status": audit.status,
+        "published_at": audit.published_at,
+        "created_at": audit.created_at,
+    }
 
 
 async def render_performance_highlight_reel_export(

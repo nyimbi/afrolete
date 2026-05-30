@@ -752,6 +752,41 @@ class PerformanceHighlightReelExport(IdMixin, TimestampMixin, Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class PerformanceHighlightReelShareAudit(IdMixin, TimestampMixin, Base):
+    __tablename__ = "performance_highlight_reel_share_audits"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    highlight_reel_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("performance_highlight_reels.id"), nullable=False, index=True
+    )
+    highlight_reel_export_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_highlight_reel_exports.id"), index=True
+    )
+    video_asset_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("opposition_scouting_video_assets.id"), nullable=False, index=True
+    )
+    tracking_run_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("performance_match_tracking_runs.id"), index=True
+    )
+    message_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("communication_messages.id"), nullable=False, index=True
+    )
+    channel: Mapped[CommunicationChannel] = mapped_column(
+        enum_type(CommunicationChannel), nullable=False, index=True
+    )
+    audience: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    share_policy: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    recipient_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    player_recipient_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    guardian_recipient_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    explicit_recipient_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    published_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="shared", nullable=False, index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class PerformanceMovementReferenceProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "performance_movement_reference_profiles"
     __table_args__ = (

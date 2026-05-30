@@ -42,6 +42,9 @@ from app.schemas.performance import (
     PerformanceHighlightReelExportCreate,
     PerformanceHighlightReelExportRead,
     PerformanceHighlightReelRead,
+    PerformanceHighlightReelShareAuditRead,
+    PerformanceHighlightReelShareCreate,
+    PerformanceHighlightReelShareRead,
     PerformanceInjuryRiskAlertRead,
     PerformanceInjuryRiskAlertRunRead,
     PerformanceInjuryRiskRead,
@@ -174,6 +177,7 @@ from app.services.performance import (
     list_performance_hardware_sync_runs,
     list_performance_highlight_reels,
     list_performance_highlight_reel_exports,
+    list_performance_highlight_reel_shares,
     list_metric_definitions,
     list_match_tracking_identity_reviews,
     list_match_tracking_player_guidance_publishes,
@@ -198,6 +202,7 @@ from app.services.performance import (
     list_performance_video_pose_samples,
     process_performance_video_pose_samples,
     publish_match_tracking_player_guidance,
+    share_performance_highlight_reel,
     list_performance_forecast_validation_runs,
     list_performance_model_extraction_benchmark_datasets,
     list_wearable_provider_connections,
@@ -1540,6 +1545,43 @@ async def list_performance_highlight_reel_exports_route(
     return [
         PerformanceHighlightReelExportRead(**highlight_reel_export_read(export))
         for export in await list_performance_highlight_reel_exports(
+            db,
+            identity,
+            organization_id,
+            authz,
+            highlight_reel_id=highlight_reel_id,
+        )
+    ]
+
+
+@router.post(
+    "/scouting/highlight-reels/{highlight_reel_id}/shares",
+    response_model=PerformanceHighlightReelShareRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def share_performance_highlight_reel_route(
+    highlight_reel_id: UUID,
+    payload: PerformanceHighlightReelShareCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> PerformanceHighlightReelShareRead:
+    return PerformanceHighlightReelShareRead(
+        **await share_performance_highlight_reel(db, identity, highlight_reel_id, payload, authz)
+    )
+
+
+@router.get("/scouting/highlight-reel-shares", response_model=list[PerformanceHighlightReelShareAuditRead])
+async def list_performance_highlight_reel_shares_route(
+    organization_id: UUID = Query(),
+    highlight_reel_id: UUID | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[PerformanceHighlightReelShareAuditRead]:
+    return [
+        PerformanceHighlightReelShareAuditRead(**audit)
+        for audit in await list_performance_highlight_reel_shares(
             db,
             identity,
             organization_id,

@@ -7598,6 +7598,64 @@ export type PerformanceHighlightReelExportRead = {
   created_at: string;
 };
 
+export type PerformanceHighlightReelShareCreate = {
+  organization_id: UUID;
+  channel?: CommunicationChannel;
+  include_players?: boolean;
+  include_guardians?: boolean;
+  recipient_person_ids?: UUID[];
+  subject_prefix?: string;
+  message_intro?: string | null;
+  delivery_channel?: string;
+  export_format?: string;
+  include_branding?: boolean;
+  notes?: string | null;
+};
+
+export type PerformanceHighlightReelShareAuditRead = {
+  id: UUID;
+  organization_id: UUID;
+  highlight_reel_id: UUID;
+  highlight_reel_export_id: UUID | null;
+  video_asset_id: UUID;
+  tracking_run_id: UUID | null;
+  message_id: UUID;
+  channel: CommunicationChannel;
+  audience: string;
+  share_policy: string;
+  recipient_count: number;
+  player_recipient_count: number;
+  guardian_recipient_count: number;
+  explicit_recipient_count: number;
+  queued_count: number;
+  sent_count: number;
+  delivered_count: number;
+  read_count: number;
+  failed_count: number;
+  suppressed_count: number;
+  published_by_person_id: UUID | null;
+  status: string;
+  published_at: string;
+  created_at: string;
+};
+
+export type PerformanceHighlightReelShareRead = {
+  highlight_reel_id: UUID;
+  organization_id: UUID;
+  video_asset_id: UUID;
+  highlight_reel_export_id: UUID | null;
+  message_id: UUID;
+  channel: CommunicationChannel;
+  share_policy: string;
+  recipient_count: number;
+  player_recipient_count: number;
+  guardian_recipient_count: number;
+  explicit_recipient_count: number;
+  subject: string;
+  audit: PerformanceHighlightReelShareAuditRead;
+  published_at: string;
+};
+
 export type PerformanceVideoAnnotationRead = {
   id: UUID;
   organization_id: UUID;

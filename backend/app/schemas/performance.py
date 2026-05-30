@@ -1289,6 +1289,64 @@ class PerformanceHighlightReelExportRead(BaseModel):
     created_at: datetime
 
 
+class PerformanceHighlightReelShareCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.IN_APP
+    include_players: bool = True
+    include_guardians: bool = True
+    recipient_person_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    subject_prefix: str = Field(default="Highlight reel ready", min_length=2, max_length=120)
+    message_intro: str | None = Field(default=None, max_length=1000)
+    delivery_channel: str = Field(default="coach_review", min_length=2, max_length=80)
+    export_format: str = Field(default="timeline_json", min_length=2, max_length=80)
+    include_branding: bool = True
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PerformanceHighlightReelShareAuditRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    highlight_reel_id: UUID
+    highlight_reel_export_id: UUID | None
+    video_asset_id: UUID
+    tracking_run_id: UUID | None
+    message_id: UUID
+    channel: CommunicationChannel
+    audience: str
+    share_policy: str
+    recipient_count: int
+    player_recipient_count: int
+    guardian_recipient_count: int
+    explicit_recipient_count: int
+    queued_count: int = 0
+    sent_count: int = 0
+    delivered_count: int = 0
+    read_count: int = 0
+    failed_count: int = 0
+    suppressed_count: int = 0
+    published_by_person_id: UUID | None
+    status: str
+    published_at: datetime
+    created_at: datetime
+
+
+class PerformanceHighlightReelShareRead(BaseModel):
+    highlight_reel_id: UUID
+    organization_id: UUID
+    video_asset_id: UUID
+    highlight_reel_export_id: UUID | None
+    message_id: UUID
+    channel: CommunicationChannel
+    share_policy: str
+    recipient_count: int
+    player_recipient_count: int
+    guardian_recipient_count: int
+    explicit_recipient_count: int
+    subject: str
+    audit: PerformanceHighlightReelShareAuditRead
+    published_at: datetime
+
+
 class PerformanceModelExtractionBenchmarkCaseCreate(BaseModel):
     case_id: str = Field(min_length=2, max_length=120)
     metric_code: str = Field(min_length=2, max_length=80)

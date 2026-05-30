@@ -379,6 +379,8 @@ import type {
   PerformanceHardwareSyncRunRead,
   PerformanceHighlightReelExportRead,
   PerformanceHighlightReelRead,
+  PerformanceHighlightReelShareAuditRead,
+  PerformanceHighlightReelShareRead,
   PerformanceInjuryRiskAlertRead,
   PerformanceInjuryRiskAlertRunRead,
   PerformanceInjuryRiskRead,
@@ -1897,6 +1899,10 @@ export default function HomePage() {
     useState<PerformanceHighlightReelExportRead[]>([]);
   const [performanceHighlightReelExport, setPerformanceHighlightReelExport] =
     useState<PerformanceHighlightReelExportRead | null>(null);
+  const [performanceHighlightReelShares, setPerformanceHighlightReelShares] =
+    useState<PerformanceHighlightReelShareAuditRead[]>([]);
+  const [performanceHighlightReelShare, setPerformanceHighlightReelShare] =
+    useState<PerformanceHighlightReelShareRead | null>(null);
   const [performancePoseGaitAnalysis, setPerformancePoseGaitAnalysis] =
     useState<PerformancePoseGaitAnalysisRead | null>(null);
   const [performanceVideoAnnotations, setPerformanceVideoAnnotations] =
@@ -4068,7 +4074,8 @@ export default function HomePage() {
       hardwareKitData,
       hardwareDeviceData,
       highlightReelData,
-      highlightExportData
+      highlightExportData,
+      highlightShareData
     ] = await Promise.all([
       apiRequest<OppositionScoutingVideoAssetRead[]>(
         `/performance/scouting/videos?${params.toString()}`,
@@ -4121,6 +4128,10 @@ export default function HomePage() {
       apiRequest<PerformanceHighlightReelExportRead[]>(
         `/performance/scouting/highlight-reel-exports?organization_id=${organizationId}`,
         { identity }
+      ),
+      apiRequest<PerformanceHighlightReelShareAuditRead[]>(
+        `/performance/scouting/highlight-reel-shares?organization_id=${organizationId}`,
+        { identity }
       )
     ]);
     setOppositionScoutingVideos(videoData);
@@ -4136,6 +4147,7 @@ export default function HomePage() {
     setPerformanceHardwareDevices(hardwareDeviceData);
     setPerformanceHighlightReels(highlightReelData);
     setPerformanceHighlightReelExports(highlightExportData);
+    setPerformanceHighlightReelShares(highlightShareData);
     setOppositionScoutingVideo((current) =>
       current && videoData.some((video) => video.id === current.id) ? current : videoData[0] ?? null
     );
@@ -5333,6 +5345,8 @@ export default function HomePage() {
       setPerformanceHighlightReel(null);
       setPerformanceHighlightReelExports([]);
       setPerformanceHighlightReelExport(null);
+      setPerformanceHighlightReelShares([]);
+      setPerformanceHighlightReelShare(null);
       setPerformancePoseGaitAnalysis(null);
       setPerformanceVideoAnnotations([]);
       setPerformancePoseSampleBatch(null);
@@ -11263,6 +11277,50 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== artifact.id)
         ]);
         addLog(`${artifact.filename} ${artifact.status}`, artifact.status === "rendered" ? "good" : "neutral");
+      }
+    );
+  };
+
+  const sharePerformanceHighlightReel = () => {
+    if (!selectedOrganizationId || !performanceHighlightReel) {
+      addLog("Generate or select a highlight reel before sharing it", "bad");
+      return;
+    }
+    const deliveryChannel = Array.isArray(performanceHighlightReel.distribution.channels)
+      ? String(performanceHighlightReel.distribution.channels[0] ?? "coach_review")
+      : "coach_review";
+    runAction(
+      `share-performance-highlight-reel-${performanceHighlightReel.id}`,
+      () =>
+        apiRequest<PerformanceHighlightReelShareRead>(
+          `/performance/scouting/highlight-reels/${performanceHighlightReel.id}/shares`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              include_players: true,
+              include_guardians: performanceHighlightReel.audience === "family" || performanceHighlightReel.audience === "parent" || performanceHighlightReel.audience === "scout",
+              subject_prefix: "Highlight reel ready",
+              message_intro: "Your coach has prepared a controlled highlight reel for review.",
+              delivery_channel: deliveryChannel,
+              export_format: "timeline_json",
+              include_branding: true,
+              notes: `Shared from the operations console for ${performanceHighlightReel.audience} review.`
+            }
+          }
+        ),
+      (share) => {
+        setPerformanceHighlightReelShare(share);
+        setPerformanceHighlightReelShares((current) => [
+          share.audit,
+          ...current.filter((item) => item.id !== share.audit.id)
+        ]);
+        addLog(
+          `${share.recipient_count} highlight recipient(s) notified through ${share.channel}`,
+          share.recipient_count ? "good" : "neutral"
+        );
       }
     );
   };
@@ -26451,6 +26509,7 @@ export default function HomePage() {
                 <button type="button" onClick={provisionPerformanceHardwareDevice} disabled={busyAction !== null}>Device</button>
                 <button type="button" onClick={syncPerformanceHardwareDevice} disabled={busyAction !== null}>Hardware sync</button>
                 <button type="button" onClick={createPerformanceHighlightReel} disabled={busyAction !== null}>Highlights</button>
+                <button type="button" onClick={sharePerformanceHighlightReel} disabled={busyAction !== null}>Share reel</button>
                 <button type="button" onClick={createPerformanceModelBenchmarkDataset} disabled={busyAction !== null}>Dataset</button>
                 <button type="button" onClick={runPerformanceModelBenchmark} disabled={busyAction !== null}>Benchmark</button>
                 <button type="button" onClick={bulkReviewModelExtractionQueue} disabled={busyAction !== null}>AI review</button>
@@ -27100,6 +27159,7 @@ export default function HomePage() {
                   <button type="button" onClick={reviewPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Review share</button>
                   <button type="button" onClick={publishPerformanceMatchPlayerGuidance} disabled={busyAction !== null}>Publish</button>
                   <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>Export reel</button>
+                  <button type="button" onClick={sharePerformanceHighlightReel} disabled={busyAction !== null}>Share reel</button>
                 </div>
               </div>
               <div className="mini-grid">
@@ -27253,6 +27313,17 @@ export default function HomePage() {
                     {performanceHighlightReel
                       ? `${Math.round(performanceHighlightReel.duration_seconds)}s · ${performanceHighlightReel.audience} · ${performanceHighlightReel.purpose}`
                     : "Generate AI-selected reels for coaches, players, families, scouts, and fans."}
+                  </p>
+                </article>
+                <article className="mini-card">
+                  <span className="muted">Reel sharing</span>
+                  <strong>{performanceHighlightReelShare?.recipient_count ?? performanceHighlightReelShares.length} recipient(s)</strong>
+                  <p>
+                    {performanceHighlightReelShare
+                      ? `${performanceHighlightReelShare.share_policy.replaceAll("_", " ")} · ${performanceHighlightReelShare.channel}`
+                      : performanceHighlightReelShares[0]
+                        ? `${performanceHighlightReelShares[0].share_policy.replaceAll("_", " ")} · latest ${new Date(performanceHighlightReelShares[0].published_at).toLocaleDateString()}`
+                        : "Send highlight reels through controlled player, guardian, or selected-recipient inbox messages."}
                   </p>
                 </article>
                 <article className="mini-card">
@@ -28005,9 +28076,42 @@ export default function HomePage() {
                         <button type="button" onClick={() => exportPerformanceHighlightReel("timeline_json")} disabled={busyAction !== null}>JSON</button>
                         <button type="button" onClick={() => exportPerformanceHighlightReel("mp4_edit_decision_list")} disabled={busyAction !== null}>EDL</button>
                         <button type="button" onClick={() => exportPerformanceHighlightReel("social_caption_pack")} disabled={busyAction !== null}>Captions</button>
+                        <button type="button" onClick={sharePerformanceHighlightReel} disabled={busyAction !== null}>Share</button>
                       </span>
                     </article>
                   ) : null}
+                  {performanceHighlightReelShare ? (
+                    <article className="task-card">
+                      <div>
+                        <strong>{performanceHighlightReelShare.subject}</strong>
+                        <span>
+                          {performanceHighlightReelShare.recipient_count} recipient(s) ·{" "}
+                          {performanceHighlightReelShare.player_recipient_count} player(s) ·{" "}
+                          {performanceHighlightReelShare.guardian_recipient_count} guardian(s)
+                        </span>
+                        <small>
+                          {performanceHighlightReelShare.share_policy.replaceAll("_", " ")} · message {performanceHighlightReelShare.message_id.slice(0, 8)}
+                        </small>
+                      </div>
+                    </article>
+                  ) : null}
+                  {performanceHighlightReelShares
+                    .filter((share) => share.highlight_reel_id === performanceHighlightReel?.id)
+                    .slice(0, 3)
+                    .map((share) => (
+                      <article key={share.id} className="task-card">
+                        <div>
+                          <strong>{share.audience} reel shared · {share.status}</strong>
+                          <span>
+                            {share.recipient_count} recipient(s) · {share.channel} ·{" "}
+                            {new Date(share.published_at).toLocaleString()}
+                          </span>
+                          <small>
+                            {share.share_policy.replaceAll("_", " ")} · delivered {share.delivered_count} · read {share.read_count}
+                          </small>
+                        </div>
+                      </article>
+                    ))}
                   {performanceHighlightReelExport ? (
                     <article className="task-card">
                       <div>
