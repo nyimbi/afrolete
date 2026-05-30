@@ -25,11 +25,19 @@ from app.schemas.organization import (
     MembershipRead,
     OrganizationCreate,
     OrganizationDirectoryRead,
+    OrganizationGroupCreate,
+    OrganizationGroupMemberAdd,
+    OrganizationGroupMembershipRead,
+    OrganizationGroupRead,
     OrganizationHandleAvailabilityRead,
     OrganizationOnboardingCreate,
     OrganizationOnboardingRead,
+    OrganizationProgramCreate,
+    OrganizationProgramRead,
     OrganizationPublicSiteRead,
     OrganizationRead,
+    OrganizationSeasonCreate,
+    OrganizationSeasonRead,
     PublicRegistrationDocumentUpload,
     PublicRegistrationPacketUpdate,
     PublicRegistrationInquiryCreate,
@@ -77,8 +85,12 @@ from app.services.organizations import (
     convert_registration_inquiry,
     create_registration_inquiry_follow_up,
     create_registration_payment_session,
+    add_organization_group_member,
     create_member_subscription,
     create_member_subscription_plan,
+    create_organization_group,
+    create_organization_program,
+    create_organization_season,
     create_public_registration_inquiry,
     create_committee,
     create_onboarding_starter_team,
@@ -89,9 +101,14 @@ from app.services.organizations import (
     get_organization_for_identity,
     get_public_registration_inquiry,
     get_public_site,
+    ensure_manage_organization,
     import_registration_inquiries,
     organization_handle_availability,
     list_family_registration_inquiries,
+    list_organization_group_members,
+    list_organization_groups,
+    list_organization_programs,
+    list_organization_seasons,
     list_member_subscription_plans,
     list_member_subscriptions,
     list_committees,
@@ -975,6 +992,170 @@ async def add_member_route(
         title=membership.title,
         status=membership.status,
     )
+
+
+def to_organization_program_read(program) -> OrganizationProgramRead:
+    return OrganizationProgramRead(
+        id=program.id,
+        organization_id=program.organization_id,
+        name=program.name,
+        program_type=program.program_type,
+        sport=program.sport,
+        age_group=program.age_group,
+        gender_category=program.gender_category,
+        description=program.description,
+        capacity=program.capacity,
+        starts_on=program.starts_on,
+        ends_on=program.ends_on,
+        status=program.status,
+    )
+
+
+def to_organization_season_read(season) -> OrganizationSeasonRead:
+    return OrganizationSeasonRead(
+        id=season.id,
+        organization_id=season.organization_id,
+        name=season.name,
+        sport=season.sport,
+        starts_on=season.starts_on,
+        ends_on=season.ends_on,
+        registration_opens_on=season.registration_opens_on,
+        registration_closes_on=season.registration_closes_on,
+        status=season.status,
+        notes=season.notes,
+    )
+
+
+def to_organization_group_read(item) -> OrganizationGroupRead:
+    group, member_count = item
+    return OrganizationGroupRead(
+        id=group.id,
+        organization_id=group.organization_id,
+        name=group.name,
+        group_type=group.group_type,
+        program_id=group.program_id,
+        season_id=group.season_id,
+        team_id=group.team_id,
+        lead_person_id=group.lead_person_id,
+        sport=group.sport,
+        age_group=group.age_group,
+        description=group.description,
+        capacity=group.capacity,
+        status=group.status,
+        member_count=member_count,
+    )
+
+
+def to_organization_group_membership_read(item) -> OrganizationGroupMembershipRead:
+    membership, subject_label = item
+    return OrganizationGroupMembershipRead(
+        id=membership.id,
+        group_id=membership.group_id,
+        subject_type=membership.subject_type,
+        subject_id=membership.subject_id,
+        subject_label=subject_label,
+        role=membership.role,
+        status=membership.status,
+        notes=membership.notes,
+    )
+
+
+@router.post("/{organization_id}/programs", response_model=OrganizationProgramRead, status_code=201)
+async def create_organization_program_route(
+    organization_id: UUID,
+    payload: OrganizationProgramCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationProgramRead:
+    return to_organization_program_read(
+        await create_organization_program(db, identity, organization_id, payload, authz)
+    )
+
+
+@router.get("/{organization_id}/programs", response_model=list[OrganizationProgramRead])
+async def list_organization_programs_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationProgramRead]:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    return [to_organization_program_read(program) for program in await list_organization_programs(db, organization_id)]
+
+
+@router.post("/{organization_id}/seasons", response_model=OrganizationSeasonRead, status_code=201)
+async def create_organization_season_route(
+    organization_id: UUID,
+    payload: OrganizationSeasonCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationSeasonRead:
+    return to_organization_season_read(
+        await create_organization_season(db, identity, organization_id, payload, authz)
+    )
+
+
+@router.get("/{organization_id}/seasons", response_model=list[OrganizationSeasonRead])
+async def list_organization_seasons_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationSeasonRead]:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    return [to_organization_season_read(season) for season in await list_organization_seasons(db, organization_id)]
+
+
+@router.post("/{organization_id}/groups", response_model=OrganizationGroupRead, status_code=201)
+async def create_organization_group_route(
+    organization_id: UUID,
+    payload: OrganizationGroupCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationGroupRead:
+    group = await create_organization_group(db, identity, organization_id, payload, authz)
+    rows = await list_organization_groups(db, organization_id)
+    return to_organization_group_read(next(row for row in rows if row[0].id == group.id))
+
+
+@router.get("/{organization_id}/groups", response_model=list[OrganizationGroupRead])
+async def list_organization_groups_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationGroupRead]:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    return [to_organization_group_read(row) for row in await list_organization_groups(db, organization_id)]
+
+
+@router.post("/groups/{group_id}/members", response_model=OrganizationGroupMembershipRead, status_code=201)
+async def add_organization_group_member_route(
+    group_id: UUID,
+    payload: OrganizationGroupMemberAdd,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationGroupMembershipRead:
+    membership = await add_organization_group_member(db, identity, group_id, payload, authz)
+    rows = await list_organization_group_members(db, identity, group_id, authz)
+    return to_organization_group_membership_read(next(row for row in rows if row[0].id == membership.id))
+
+
+@router.get("/groups/{group_id}/members", response_model=list[OrganizationGroupMembershipRead])
+async def list_organization_group_members_route(
+    group_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationGroupMembershipRead]:
+    return [
+        to_organization_group_membership_read(row)
+        for row in await list_organization_group_members(db, identity, group_id, authz)
+    ]
 
 
 def to_member_subscription_plan_read(plan) -> MemberSubscriptionPlanRead:

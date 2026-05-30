@@ -182,6 +182,10 @@ from app.models.organization import (  # noqa: F401,E402
     MemberSubscriptionPayment,
     MemberSubscriptionPlan,
     Membership,
+    OrganizationGroup,
+    OrganizationGroupMembership,
+    OrganizationProgram,
+    OrganizationSeason,
     Organization,
     RegistrationInquiry,
 )

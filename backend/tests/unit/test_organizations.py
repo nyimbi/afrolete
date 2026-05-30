@@ -188,6 +188,116 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert subscriptions_response.json()[0]["balance_amount"] == "500.00"
 
 
+def test_organization_program_season_and_group_crud(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Program Managed Academy",
+            "organization_type": "academy",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+    team = client.post(
+        "/api/v1/teams",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "U15 Development",
+            "sport": "football",
+            "sport_format": "team",
+            "age_group": "U15",
+            "season_label": "2026",
+        },
+    ).json()
+    member = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "group-member@example.com",
+            "display_name": "Group Member",
+            "role": "athlete",
+        },
+    ).json()
+
+    program_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/programs",
+        headers=identity_headers,
+        json={
+            "name": "Foundation Development Pathway",
+            "program_type": "academy_pathway",
+            "sport": "football",
+            "age_group": "U13-U17",
+            "gender_category": "open",
+            "capacity": 80,
+            "starts_on": "2026-01-10",
+            "ends_on": "2026-11-30",
+            "description": "Technical, tactical, academic, and safeguarding development pathway.",
+        },
+    )
+    assert program_response.status_code == 201
+    program = program_response.json()
+
+    season_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/seasons",
+        headers=identity_headers,
+        json={
+            "name": "2026 Long Rains Season",
+            "sport": "football",
+            "starts_on": "2026-03-01",
+            "ends_on": "2026-08-31",
+            "registration_opens_on": "2026-01-15",
+            "registration_closes_on": "2026-02-20",
+            "status": "registration_open",
+            "notes": "Registration, dues, team assignments, and competition readiness window.",
+        },
+    )
+    assert season_response.status_code == 201
+    season = season_response.json()
+
+    group_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/groups",
+        headers=identity_headers,
+        json={
+            "name": "Advanced Midfield Cohort",
+            "group_type": "position_group",
+            "program_id": program["id"],
+            "season_id": season["id"],
+            "team_id": team["id"],
+            "sport": "football",
+            "age_group": "U15",
+            "capacity": 16,
+            "description": "Position-specific small group for tactical and video review work.",
+        },
+    )
+    assert group_response.status_code == 201
+    group = group_response.json()
+    assert group["member_count"] == 0
+    assert group["program_id"] == program["id"]
+    assert group["season_id"] == season["id"]
+
+    group_member_response = client.post(
+        f"/api/v1/organizations/groups/{group['id']}/members",
+        headers=identity_headers,
+        json={
+            "subject_type": "person",
+            "subject_id": member["subject_id"],
+            "role": "athlete",
+            "notes": "Primary midfield development cohort.",
+        },
+    )
+    assert group_member_response.status_code == 201
+    group_member = group_member_response.json()
+    assert group_member["subject_label"] == "Group Member"
+    assert group_member["role"] == "athlete"
+
+    groups = client.get(f"/api/v1/organizations/{organization['id']}/groups", headers=identity_headers).json()
+    assert groups[0]["member_count"] == 1
+    members = client.get(f"/api/v1/organizations/groups/{group['id']}/members", headers=identity_headers).json()
+    assert members[0]["subject_id"] == member["subject_id"]
+
+
 def test_registration_learning_path_personalizes_onboarding(client) -> None:
     response = client.post(
         "/api/v1/organizations/registration-learning-path",

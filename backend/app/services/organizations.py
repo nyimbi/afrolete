@@ -52,6 +52,10 @@ from app.models.organization import (
     MemberSubscriptionPayment,
     MemberSubscriptionPlan,
     Membership,
+    OrganizationGroup,
+    OrganizationGroupMembership,
+    OrganizationProgram,
+    OrganizationSeason,
     Organization,
     RegistrationInquiry,
 )
@@ -64,6 +68,10 @@ from app.schemas.organization import (
     MemberSubscriptionCreate,
     MemberSubscriptionPaymentCreate,
     MemberSubscriptionPlanCreate,
+    OrganizationGroupCreate,
+    OrganizationGroupMemberAdd,
+    OrganizationProgramCreate,
+    OrganizationSeasonCreate,
     OrganizationHandleAvailabilityRead,
     OrganizationCreate,
     PublicRegistrationDocumentUpload,
@@ -3631,6 +3639,210 @@ async def ensure_manage_organization(
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     return organization
+
+
+async def create_organization_program(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationProgramCreate,
+    authz: AuthorizationService,
+) -> OrganizationProgram:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    program = OrganizationProgram(
+        organization_id=organization_id,
+        name=payload.name,
+        program_type=payload.program_type,
+        sport=payload.sport,
+        age_group=payload.age_group,
+        gender_category=payload.gender_category,
+        description=payload.description,
+        capacity=payload.capacity,
+        starts_on=payload.starts_on,
+        ends_on=payload.ends_on,
+        status=payload.status,
+    )
+    db.add(program)
+    await db.commit()
+    await db.refresh(program)
+    return program
+
+
+async def list_organization_programs(db: AsyncSession, organization_id: UUID) -> list[OrganizationProgram]:
+    return list(
+        (
+            await db.scalars(
+                select(OrganizationProgram)
+                .where(OrganizationProgram.organization_id == organization_id)
+                .order_by(OrganizationProgram.status, OrganizationProgram.name)
+            )
+        ).all()
+    )
+
+
+async def create_organization_season(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationSeasonCreate,
+    authz: AuthorizationService,
+) -> OrganizationSeason:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    if payload.ends_on < payload.starts_on:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Season end must be on or after start")
+    season = OrganizationSeason(
+        organization_id=organization_id,
+        name=payload.name,
+        sport=payload.sport,
+        starts_on=payload.starts_on,
+        ends_on=payload.ends_on,
+        registration_opens_on=payload.registration_opens_on,
+        registration_closes_on=payload.registration_closes_on,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(season)
+    await db.commit()
+    await db.refresh(season)
+    return season
+
+
+async def list_organization_seasons(db: AsyncSession, organization_id: UUID) -> list[OrganizationSeason]:
+    return list(
+        (
+            await db.scalars(
+                select(OrganizationSeason)
+                .where(OrganizationSeason.organization_id == organization_id)
+                .order_by(OrganizationSeason.starts_on.desc(), OrganizationSeason.name)
+            )
+        ).all()
+    )
+
+
+async def create_organization_group(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationGroupCreate,
+    authz: AuthorizationService,
+) -> OrganizationGroup:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    await ensure_group_links_match_organization(db, organization_id, payload)
+    group = OrganizationGroup(
+        organization_id=organization_id,
+        program_id=payload.program_id,
+        season_id=payload.season_id,
+        team_id=payload.team_id,
+        lead_person_id=payload.lead_person_id,
+        name=payload.name,
+        group_type=payload.group_type,
+        sport=payload.sport,
+        age_group=payload.age_group,
+        description=payload.description,
+        capacity=payload.capacity,
+        status=payload.status,
+    )
+    db.add(group)
+    await db.commit()
+    await db.refresh(group)
+    return group
+
+
+async def list_organization_groups(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[OrganizationGroup, int]]:
+    rows = (
+        await db.execute(
+            select(OrganizationGroup, func.count(OrganizationGroupMembership.id))
+            .outerjoin(OrganizationGroupMembership, OrganizationGroupMembership.group_id == OrganizationGroup.id)
+            .where(OrganizationGroup.organization_id == organization_id)
+            .group_by(OrganizationGroup.id)
+            .order_by(OrganizationGroup.status, OrganizationGroup.name)
+        )
+    ).all()
+    return [(group, int(member_count or 0)) for group, member_count in rows]
+
+
+async def add_organization_group_member(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    group_id: UUID,
+    payload: OrganizationGroupMemberAdd,
+    authz: AuthorizationService,
+) -> OrganizationGroupMembership:
+    group = await db.get(OrganizationGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization group not found")
+    await ensure_manage_organization(db, identity, group.organization_id, authz)
+    await ensure_member_subject_exists(db, payload.subject_type, payload.subject_id)
+    existing = await db.scalar(
+        select(OrganizationGroupMembership).where(
+            OrganizationGroupMembership.group_id == group_id,
+            OrganizationGroupMembership.subject_type == payload.subject_type,
+            OrganizationGroupMembership.subject_id == payload.subject_id,
+            OrganizationGroupMembership.role == payload.role,
+        )
+    )
+    if existing is not None:
+        return existing
+    membership = OrganizationGroupMembership(
+        group_id=group_id,
+        subject_type=payload.subject_type,
+        subject_id=payload.subject_id,
+        role=payload.role,
+        notes=payload.notes,
+    )
+    db.add(membership)
+    await db.commit()
+    await db.refresh(membership)
+    return membership
+
+
+async def list_organization_group_members(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    group_id: UUID,
+    authz: AuthorizationService,
+) -> list[tuple[OrganizationGroupMembership, str | None]]:
+    group = await db.get(OrganizationGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization group not found")
+    await ensure_manage_organization(db, identity, group.organization_id, authz)
+    memberships = list(
+        (
+            await db.scalars(
+                select(OrganizationGroupMembership)
+                .where(OrganizationGroupMembership.group_id == group_id)
+                .order_by(OrganizationGroupMembership.role, OrganizationGroupMembership.created_at)
+            )
+        ).all()
+    )
+    return [
+        (membership, await member_subject_label(db, membership.subject_type, membership.subject_id))
+        for membership in memberships
+    ]
+
+
+async def ensure_group_links_match_organization(
+    db: AsyncSession,
+    organization_id: UUID,
+    payload: OrganizationGroupCreate,
+) -> None:
+    if payload.program_id is not None:
+        program = await db.get(OrganizationProgram, payload.program_id)
+        if program is None or program.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
+    if payload.season_id is not None:
+        season = await db.get(OrganizationSeason, payload.season_id)
+        if season is None or season.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
+    if payload.team_id is not None:
+        team = await db.get(Team, payload.team_id)
+        if team is None or team.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if payload.lead_person_id is not None and await db.get(Person, payload.lead_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead person not found")
 
 
 async def create_member_subscription_plan(

@@ -45,6 +45,76 @@ class Organization(IdMixin, TimestampMixin, Base):
     registration_required_documents_json: Mapped[str | None] = mapped_column(Text)
 
 
+class OrganizationProgram(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_programs"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    program_type: Mapped[str] = mapped_column(String(80), default="athlete_development", nullable=False, index=True)
+    sport: Mapped[str | None] = mapped_column(String(80), index=True)
+    age_group: Mapped[str | None] = mapped_column(String(80), index=True)
+    gender_category: Mapped[str | None] = mapped_column(String(80), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    capacity: Mapped[int | None] = mapped_column(Integer)
+    starts_on: Mapped[date | None] = mapped_column(Date, index=True)
+    ends_on: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
+class OrganizationSeason(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_seasons"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    sport: Mapped[str | None] = mapped_column(String(80), index=True)
+    starts_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    ends_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    registration_opens_on: Mapped[date | None] = mapped_column(Date, index=True)
+    registration_closes_on: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="planned", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationGroup(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_groups"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    program_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("organization_programs.id"), index=True)
+    season_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("organization_seasons.id"), index=True)
+    team_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("teams.id"), index=True)
+    lead_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    group_type: Mapped[str] = mapped_column(String(80), default="cohort", nullable=False, index=True)
+    sport: Mapped[str | None] = mapped_column(String(80), index=True)
+    age_group: Mapped[str | None] = mapped_column(String(80), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    capacity: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
+class OrganizationGroupMembership(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_group_memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "group_id",
+            "subject_type",
+            "subject_id",
+            "role",
+            name="uq_organization_group_memberships_subject_role",
+        ),
+    )
+
+    group_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_groups.id"), index=True)
+    subject_type: Mapped[MemberSubjectType] = mapped_column(enum_type(MemberSubjectType), nullable=False, index=True)
+    subject_id: Mapped[UUID] = mapped_column(GUID(), index=True)
+    role: Mapped[str] = mapped_column(String(80), default="member", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class Membership(IdMixin, TimestampMixin, Base):
     __tablename__ = "memberships"
     __table_args__ = (

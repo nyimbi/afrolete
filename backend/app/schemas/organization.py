@@ -67,6 +67,78 @@ class OrganizationRead(BaseModel):
     my_roles: list[MembershipRole] = Field(default_factory=list)
 
 
+class OrganizationProgramCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    program_type: str = Field(default="athlete_development", min_length=2, max_length=80)
+    sport: str | None = Field(default=None, max_length=80)
+    age_group: str | None = Field(default=None, max_length=80)
+    gender_category: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=4000)
+    capacity: int | None = Field(default=None, ge=0)
+    starts_on: date | None = None
+    ends_on: date | None = None
+    status: str = Field(default="active", pattern="^(planned|active|paused|completed|archived)$")
+
+
+class OrganizationProgramRead(OrganizationProgramCreate):
+    id: UUID
+    organization_id: UUID
+
+
+class OrganizationSeasonCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    sport: str | None = Field(default=None, max_length=80)
+    starts_on: date
+    ends_on: date
+    registration_opens_on: date | None = None
+    registration_closes_on: date | None = None
+    status: str = Field(default="planned", pattern="^(planned|registration_open|active|completed|archived)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationSeasonRead(OrganizationSeasonCreate):
+    id: UUID
+    organization_id: UUID
+
+
+class OrganizationGroupCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    group_type: str = Field(default="cohort", min_length=2, max_length=80)
+    program_id: UUID | None = None
+    season_id: UUID | None = None
+    team_id: UUID | None = None
+    lead_person_id: UUID | None = None
+    sport: str | None = Field(default=None, max_length=80)
+    age_group: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=4000)
+    capacity: int | None = Field(default=None, ge=0)
+    status: str = Field(default="active", pattern="^(planned|active|paused|completed|archived)$")
+
+
+class OrganizationGroupRead(OrganizationGroupCreate):
+    id: UUID
+    organization_id: UUID
+    member_count: int = 0
+
+
+class OrganizationGroupMemberAdd(BaseModel):
+    subject_type: MemberSubjectType = MemberSubjectType.PERSON
+    subject_id: UUID
+    role: str = Field(default="member", min_length=2, max_length=80)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class OrganizationGroupMembershipRead(BaseModel):
+    id: UUID
+    group_id: UUID
+    subject_type: MemberSubjectType
+    subject_id: UUID
+    subject_label: str | None = None
+    role: str
+    status: str
+    notes: str | None
+
+
 class PublicSiteTeamRead(BaseModel):
     id: UUID
     name: str

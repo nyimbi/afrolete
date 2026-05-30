@@ -346,7 +346,11 @@ import type {
   MetricVerificationStatus,
   MetricSource,
   OfficialRole,
+  OrganizationGroupMembershipRead,
+  OrganizationGroupRead,
+  OrganizationProgramRead,
   OrganizationRead,
+  OrganizationSeasonRead,
   OrganizationType,
   ParticipationClearanceRead,
   PaymentSettlementRead,
@@ -1822,6 +1826,10 @@ export default function HomePage() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [organizations, setOrganizations] = useState<OrganizationRead[]>([]);
   const [teams, setTeams] = useState<TeamRead[]>([]);
+  const [organizationPrograms, setOrganizationPrograms] = useState<OrganizationProgramRead[]>([]);
+  const [organizationSeasons, setOrganizationSeasons] = useState<OrganizationSeasonRead[]>([]);
+  const [organizationGroups, setOrganizationGroups] = useState<OrganizationGroupRead[]>([]);
+  const [organizationGroupMembers, setOrganizationGroupMembers] = useState<OrganizationGroupMembershipRead[]>([]);
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
@@ -2408,6 +2416,7 @@ export default function HomePage() {
   const [incidentMedicalClearanceProviderSync, setIncidentMedicalClearanceProviderSync] = useState<IncidentMedicalClearanceProviderSyncRead | null>(null);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedOrganizationGroupId, setSelectedOrganizationGroupId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
@@ -2480,6 +2489,40 @@ export default function HomePage() {
     age_group: "U16",
     gender_category: "open",
     season_label: "2026"
+  });
+  const [organizationProgramForm, setOrganizationProgramForm] = useState({
+    name: "U16 Development Program",
+    program_type: "athlete_development",
+    sport: "football",
+    age_group: "U16",
+    gender_category: "open",
+    capacity: 28,
+    starts_on: "2026-06-01",
+    ends_on: "2026-11-30",
+    description: "Structured training, competition, safeguarding, and family operations program."
+  });
+  const [organizationSeasonForm, setOrganizationSeasonForm] = useState({
+    name: "2026 Main Season",
+    sport: "football",
+    starts_on: "2026-06-01",
+    ends_on: "2026-11-30",
+    registration_opens_on: "2026-05-01",
+    registration_closes_on: "2026-06-15",
+    status: "registration_open",
+    notes: "Registration, dues, squads, events, and player development operating window."
+  });
+  const [organizationGroupForm, setOrganizationGroupForm] = useState({
+    name: "U16 Goalkeepers",
+    group_type: "position_group",
+    sport: "football",
+    age_group: "U16",
+    capacity: 4,
+    description: "Position-specific small group for training, video review, and communication."
+  });
+  const [organizationGroupMemberForm, setOrganizationGroupMemberForm] = useState({
+    subject_id: "",
+    role: "athlete",
+    notes: "Added from operations console."
   });
   const [memberDuesPlanForm, setMemberDuesPlanForm] = useState({
     name: "Senior player monthly dues",
@@ -3877,6 +3920,28 @@ export default function HomePage() {
     },
     []
   );
+
+  const loadOrganizationOperatingUnits = useCallback(async (organizationId: string) => {
+    const [programs, seasons, groups] = await Promise.all([
+      apiRequest<OrganizationProgramRead[]>(`/organizations/${organizationId}/programs`, { identity }),
+      apiRequest<OrganizationSeasonRead[]>(`/organizations/${organizationId}/seasons`, { identity }),
+      apiRequest<OrganizationGroupRead[]>(`/organizations/${organizationId}/groups`, { identity })
+    ]);
+    setOrganizationPrograms(programs);
+    setOrganizationSeasons(seasons);
+    setOrganizationGroups(groups);
+    setSelectedOrganizationGroupId((current) =>
+      groups.some((group) => group.id === current) ? current : groups[0]?.id ?? ""
+    );
+  }, [identity]);
+
+  const loadOrganizationGroupMembers = useCallback(async (groupId: string) => {
+    const data = await apiRequest<OrganizationGroupMembershipRead[]>(
+      `/organizations/groups/${groupId}/members`,
+      { identity }
+    );
+    setOrganizationGroupMembers(data);
+  }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
     const [plans, subscriptions] = await Promise.all([
@@ -5397,6 +5462,11 @@ export default function HomePage() {
   useEffect(() => {
     if (!selectedOrganizationId) {
       setTeams([]);
+      setOrganizationPrograms([]);
+      setOrganizationSeasons([]);
+      setOrganizationGroups([]);
+      setOrganizationGroupMembers([]);
+      setSelectedOrganizationGroupId("");
       setMemberSubscriptionPlans([]);
       setMemberSubscriptions([]);
       setMemberSubscriptionPayment(null);
@@ -5814,6 +5884,7 @@ export default function HomePage() {
     }
     runAction("load-tenant-data", async () => {
       await loadTeams(selectedOrganizationId);
+      await loadOrganizationOperatingUnits(selectedOrganizationId);
       await loadMemberDues(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
@@ -5848,6 +5919,7 @@ export default function HomePage() {
   }, [
     selectedOrganizationId,
     loadTeams,
+    loadOrganizationOperatingUnits,
     loadMemberDues,
     loadRegistrationInquiries,
     loadEvents,
@@ -5881,6 +5953,18 @@ export default function HomePage() {
     runAction,
     addLog
   ]);
+
+  useEffect(() => {
+    if (!selectedOrganizationGroupId) {
+      setOrganizationGroupMembers([]);
+      return;
+    }
+    runAction(
+      "load-organization-group-members",
+      () => loadOrganizationGroupMembers(selectedOrganizationGroupId),
+      () => undefined
+    );
+  }, [selectedOrganizationGroupId, loadOrganizationGroupMembers, runAction]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -6219,6 +6303,107 @@ export default function HomePage() {
         setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
         setSelectedTeamId(team.id);
         addLog(`${team.name} roster lane opened`, "good");
+      }
+    );
+  };
+
+  const createOrganizationProgram = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a program", "bad");
+      return;
+    }
+    runAction(
+      "create-organization-program",
+      () =>
+        apiRequest<OrganizationProgramRead>(`/organizations/${selectedOrganizationId}/programs`, {
+          method: "POST",
+          identity,
+          body: organizationProgramForm
+        }),
+      (program) => {
+        setOrganizationPrograms((current) => [program, ...current.filter((item) => item.id !== program.id)]);
+        addLog(`${program.name} program opened`, "good");
+      }
+    );
+  };
+
+  const createOrganizationSeason = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a season", "bad");
+      return;
+    }
+    runAction(
+      "create-organization-season",
+      () =>
+        apiRequest<OrganizationSeasonRead>(`/organizations/${selectedOrganizationId}/seasons`, {
+          method: "POST",
+          identity,
+          body: organizationSeasonForm
+        }),
+      (season) => {
+        setOrganizationSeasons((current) => [season, ...current.filter((item) => item.id !== season.id)]);
+        addLog(`${season.name} season opened`, "good");
+      }
+    );
+  };
+
+  const createOrganizationGroup = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a group", "bad");
+      return;
+    }
+    runAction(
+      "create-organization-group",
+      () =>
+        apiRequest<OrganizationGroupRead>(`/organizations/${selectedOrganizationId}/groups`, {
+          method: "POST",
+          identity,
+          body: {
+            ...organizationGroupForm,
+            program_id: organizationPrograms[0]?.id ?? null,
+            season_id: organizationSeasons[0]?.id ?? null,
+            team_id: selectedTeamId || null
+          }
+        }),
+      (group) => {
+        setOrganizationGroups((current) => [group, ...current.filter((item) => item.id !== group.id)]);
+        setSelectedOrganizationGroupId(group.id);
+        addLog(`${group.name} group opened`, "good");
+      }
+    );
+  };
+
+  const addOrganizationGroupMember = () => {
+    const groupId = selectedOrganizationGroupId || organizationGroups[0]?.id;
+    const subjectId = organizationGroupMemberForm.subject_id || selectedAthlete?.personId || "";
+    if (!groupId || !subjectId) {
+      addLog("Select a group and member before adding group membership", "bad");
+      return;
+    }
+    runAction(
+      "add-organization-group-member",
+      () =>
+        apiRequest<OrganizationGroupMembershipRead>(`/organizations/groups/${groupId}/members`, {
+          method: "POST",
+          identity,
+          body: {
+            subject_type: "person",
+            subject_id: subjectId,
+            role: organizationGroupMemberForm.role,
+            notes: organizationGroupMemberForm.notes
+          }
+        }),
+      (membership) => {
+        setOrganizationGroupMembers((current) => [
+          membership,
+          ...current.filter((item) => item.id !== membership.id)
+        ]);
+        setOrganizationGroups((current) =>
+          current.map((group) =>
+            group.id === membership.group_id ? { ...group, member_count: group.member_count + 1 } : group
+          )
+        );
+        addLog(`${membership.subject_label ?? "Member"} added to group`, "good");
       }
     );
   };
@@ -21237,6 +21422,141 @@ export default function HomePage() {
               ))}
             </div>
           </form>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Tenant structure</p>
+                <h2>Programs, seasons, groups</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createOrganizationProgram} disabled={busyAction !== null}>Program</button>
+                <button type="button" onClick={createOrganizationSeason} disabled={busyAction !== null}>Season</button>
+                <button type="button" onClick={createOrganizationGroup} disabled={busyAction !== null}>Group</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Program
+                <input value={organizationProgramForm.name} onChange={(event) => setOrganizationProgramForm({ ...organizationProgramForm, name: event.target.value })} />
+              </label>
+              <label>
+                Type
+                <select value={organizationProgramForm.program_type} onChange={(event) => setOrganizationProgramForm({ ...organizationProgramForm, program_type: event.target.value })}>
+                  <option value="athlete_development">Athlete development</option>
+                  <option value="academy_pathway">Academy pathway</option>
+                  <option value="school_term">School term</option>
+                  <option value="competition_squad">Competition squad</option>
+                  <option value="conditioning">Conditioning</option>
+                </select>
+              </label>
+              <label>
+                Sport
+                <input value={organizationProgramForm.sport} onChange={(event) => setOrganizationProgramForm({ ...organizationProgramForm, sport: event.target.value })} />
+              </label>
+              <label>
+                Program age
+                <input value={organizationProgramForm.age_group} onChange={(event) => setOrganizationProgramForm({ ...organizationProgramForm, age_group: event.target.value })} />
+              </label>
+              <label>
+                Capacity
+                <input type="number" min="0" value={organizationProgramForm.capacity} onChange={(event) => setOrganizationProgramForm({ ...organizationProgramForm, capacity: Number(event.target.value) })} />
+              </label>
+              <label>
+                Starts
+                <input type="date" value={organizationProgramForm.starts_on} onChange={(event) => setOrganizationProgramForm({ ...organizationProgramForm, starts_on: event.target.value })} />
+              </label>
+              <label>
+                Season
+                <input value={organizationSeasonForm.name} onChange={(event) => setOrganizationSeasonForm({ ...organizationSeasonForm, name: event.target.value })} />
+              </label>
+              <label>
+                Season status
+                <select value={organizationSeasonForm.status} onChange={(event) => setOrganizationSeasonForm({ ...organizationSeasonForm, status: event.target.value })}>
+                  <option value="planned">Planned</option>
+                  <option value="registration_open">Registration open</option>
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </label>
+              <label>
+                Season start
+                <input type="date" value={organizationSeasonForm.starts_on} onChange={(event) => setOrganizationSeasonForm({ ...organizationSeasonForm, starts_on: event.target.value })} />
+              </label>
+              <label>
+                Season end
+                <input type="date" value={organizationSeasonForm.ends_on} onChange={(event) => setOrganizationSeasonForm({ ...organizationSeasonForm, ends_on: event.target.value })} />
+              </label>
+              <label>
+                Group
+                <input value={organizationGroupForm.name} onChange={(event) => setOrganizationGroupForm({ ...organizationGroupForm, name: event.target.value })} />
+              </label>
+              <label>
+                Group type
+                <select value={organizationGroupForm.group_type} onChange={(event) => setOrganizationGroupForm({ ...organizationGroupForm, group_type: event.target.value })}>
+                  <option value="cohort">Cohort</option>
+                  <option value="position_group">Position group</option>
+                  <option value="skill_group">Skill group</option>
+                  <option value="conditioning_group">Conditioning group</option>
+                  <option value="committee">Committee</option>
+                  <option value="academic_year">Academic year</option>
+                </select>
+              </label>
+            </div>
+            <div className="event-toolbar">
+              <button type="button" onClick={addOrganizationGroupMember} disabled={busyAction !== null}>Add member to group</button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Member person id
+                <input value={organizationGroupMemberForm.subject_id || selectedAthlete?.personId || ""} onChange={(event) => setOrganizationGroupMemberForm({ ...organizationGroupMemberForm, subject_id: event.target.value })} />
+              </label>
+              <label>
+                Group role
+                <input value={organizationGroupMemberForm.role} onChange={(event) => setOrganizationGroupMemberForm({ ...organizationGroupMemberForm, role: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {organizationPrograms.slice(0, 3).map((program) => (
+                <article key={program.id} className="task-card">
+                  <div>
+                    <strong>{program.name}</strong>
+                    <span>{program.program_type.replaceAll("_", " ")} · {program.sport ?? "multi-sport"} · {program.age_group ?? "open age"}</span>
+                    <small>{program.capacity ?? "Open"} capacity · {program.starts_on ?? "start open"} to {program.ends_on ?? "end open"}</small>
+                  </div>
+                </article>
+              ))}
+              {organizationSeasons.slice(0, 3).map((season) => (
+                <article key={season.id} className="task-card">
+                  <div>
+                    <strong>{season.name}</strong>
+                    <span>{season.status.replaceAll("_", " ")} · {season.sport ?? "multi-sport"}</span>
+                    <small>{season.starts_on} to {season.ends_on}</small>
+                  </div>
+                </article>
+              ))}
+              {organizationGroups.slice(0, 5).map((group) => (
+                <article key={group.id} className={`task-card ${group.id === selectedOrganizationGroupId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{group.name}</strong>
+                    <span>{group.group_type.replaceAll("_", " ")} · {group.member_count} member(s) · {group.status}</span>
+                    <small>{group.sport ?? selectedOrganization?.primary_sport ?? "multi-sport"} · {group.age_group ?? "open age"} · {group.capacity ?? "open"} capacity</small>
+                  </div>
+                  <button type="button" onClick={() => setSelectedOrganizationGroupId(group.id)}>Select</button>
+                </article>
+              ))}
+              {organizationGroupMembers.slice(0, 4).map((member) => (
+                <article key={member.id} className="task-card">
+                  <div>
+                    <strong>{member.subject_label ?? member.subject_id}</strong>
+                    <span>{member.role.replaceAll("_", " ")} · {member.status}</span>
+                    <small>{member.notes ?? "Group membership"}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
 
           <div className="panel form-panel">
             <div className="panel-head">

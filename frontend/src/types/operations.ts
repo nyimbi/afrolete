@@ -292,6 +292,62 @@ export type OrganizationRead = {
   my_roles: MembershipRole[];
 };
 
+export type OrganizationProgramRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  program_type: string;
+  sport: string | null;
+  age_group: string | null;
+  gender_category: string | null;
+  description: string | null;
+  capacity: number | null;
+  starts_on: string | null;
+  ends_on: string | null;
+  status: string;
+};
+
+export type OrganizationSeasonRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  sport: string | null;
+  starts_on: string;
+  ends_on: string;
+  registration_opens_on: string | null;
+  registration_closes_on: string | null;
+  status: string;
+  notes: string | null;
+};
+
+export type OrganizationGroupRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  group_type: string;
+  program_id: UUID | null;
+  season_id: UUID | null;
+  team_id: UUID | null;
+  lead_person_id: UUID | null;
+  sport: string | null;
+  age_group: string | null;
+  description: string | null;
+  capacity: number | null;
+  status: string;
+  member_count: number;
+};
+
+export type OrganizationGroupMembershipRead = {
+  id: UUID;
+  group_id: UUID;
+  subject_type: "person" | "team" | "organization";
+  subject_id: UUID;
+  subject_label: string | null;
+  role: string;
+  status: string;
+  notes: string | null;
+};
+
 export type PublicSiteTeamRead = {
   id: UUID;
   name: string;
