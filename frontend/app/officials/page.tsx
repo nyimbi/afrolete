@@ -21,6 +21,11 @@ export default function OfficialsPortalPage() {
   const [assignments, setAssignments] = useState<MyOfficialAssignmentRead[]>([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState("");
   const [responseNotes, setResponseNotes] = useState("Arriving 45 minutes before kickoff.");
+  const [resultForm, setResultForm] = useState({
+    home_score: 0,
+    away_score: 0,
+    notes: "Result confirmed by the assigned official."
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -113,6 +118,30 @@ export default function OfficialsPortalPage() {
     }
   };
 
+  const submitMatchReport = async (assignment: MyOfficialAssignmentRead) => {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await apiRequest<MyOfficialAssignmentRead>(
+        `/competitions/official-assignments/${assignment.id}/match-report`,
+        {
+          method: "PATCH",
+          identity,
+          body: resultForm
+        }
+      );
+      setAssignments((current) => [
+        updated,
+        ...current.filter((item) => item.id !== updated.id)
+      ].sort((left, right) => new Date(left.scheduled_at).getTime() - new Date(right.scheduled_at).getTime()));
+      setSelectedAssignmentId(updated.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Match report submission failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="official-page">
       <section className="official-shell official-hero">
@@ -199,8 +228,11 @@ export default function OfficialsPortalPage() {
             assignment={selectedAssignment}
             responseNotes={responseNotes}
             setResponseNotes={setResponseNotes}
+            resultForm={resultForm}
+            setResultForm={setResultForm}
             busy={busy}
             respondToAssignment={respondToAssignment}
+            submitMatchReport={submitMatchReport}
           />
         </section>
       ) : (
@@ -226,14 +258,20 @@ function AssignmentDetail({
   assignment,
   responseNotes,
   setResponseNotes,
+  resultForm,
+  setResultForm,
   busy,
-  respondToAssignment
+  respondToAssignment,
+  submitMatchReport
 }: {
   assignment: MyOfficialAssignmentRead | null;
   responseNotes: string;
   setResponseNotes: (value: string) => void;
+  resultForm: { home_score: number; away_score: number; notes: string };
+  setResultForm: (value: { home_score: number; away_score: number; notes: string }) => void;
   busy: boolean;
   respondToAssignment: (assignment: MyOfficialAssignmentRead, status: "accepted" | "declined") => Promise<void>;
+  submitMatchReport: (assignment: MyOfficialAssignmentRead) => Promise<void>;
 }) {
   if (!assignment) {
     return (
@@ -277,6 +315,9 @@ function AssignmentDetail({
       <div className={`official-status official-status-${assignment.status}`}>
         <strong>{assignment.status.replaceAll("_", " ")}</strong>
         <span>{assignment.action_label}</span>
+        {assignment.home_score !== null && assignment.away_score !== null ? (
+          <small>{assignment.home_team_name} {assignment.home_score} - {assignment.away_score} {assignment.away_team_name}</small>
+        ) : null}
       </div>
       <label className="official-notes">
         Response notes
@@ -290,6 +331,38 @@ function AssignmentDetail({
         <button type="button" onClick={() => respondToAssignment(assignment, "declined")} disabled={busy}>
           Decline
         </button>
+      </div>
+      <div className="official-report-form">
+        <label>
+          Home score
+          <input
+            type="number"
+            min="0"
+            value={resultForm.home_score}
+            onChange={(event) => setResultForm({ ...resultForm, home_score: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          Away score
+          <input
+            type="number"
+            min="0"
+            value={resultForm.away_score}
+            onChange={(event) => setResultForm({ ...resultForm, away_score: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          Match report notes
+          <textarea value={resultForm.notes} onChange={(event) => setResultForm({ ...resultForm, notes: event.target.value })} />
+        </label>
+        <button
+          type="button"
+          onClick={() => submitMatchReport(assignment)}
+          disabled={busy || !["accepted", "confirmed"].includes(assignment.status)}
+        >
+          Submit result
+        </button>
+        {assignment.fixture_notes ? <small>{assignment.fixture_notes}</small> : null}
       </div>
     </article>
   );

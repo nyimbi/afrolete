@@ -47,6 +47,7 @@ from app.schemas.competition import (
     FixtureMatchEventCreate,
     FixtureOfficialAssignmentCreate,
     FixtureOfficialResponseUpdate,
+    OfficialMatchReportSubmit,
     FixtureResultUpdate,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -992,6 +993,42 @@ async def update_my_official_assignment_response(
     return next(row for row in rows if row["id"] == assignment.id)
 
 
+async def submit_my_official_match_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    assignment_id: UUID,
+    payload: OfficialMatchReportSubmit,
+) -> dict[str, object]:
+    assignment = await db.get(FixtureOfficialAssignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Official assignment not found")
+    if assignment.person_id != identity.person_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    fixture = await get_fixture(db, assignment.fixture_id)
+    if assignment.status not in {
+        OfficialAssignmentStatus.ACCEPTED,
+        OfficialAssignmentStatus.CONFIRMED,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Official must accept the assignment before submitting a match report",
+        )
+    fixture.home_score = payload.home_score
+    fixture.away_score = payload.away_score
+    fixture.notes = payload.notes if payload.notes is not None else fixture.notes
+    fixture.status = FixtureStatus.FINAL
+    fixture.result_confirmed_at = datetime.now(UTC)
+    assignment.status = OfficialAssignmentStatus.CONFIRMED
+    await db.commit()
+    await db.refresh(assignment)
+    rows = await list_my_official_assignments(
+        db,
+        identity,
+        organization_id=fixture.organization_id,
+    )
+    return next(row for row in rows if row["id"] == assignment.id)
+
+
 def official_assignment_portal_read(
     assignment: FixtureOfficialAssignment,
     fixture: CompetitionFixture,
@@ -1000,8 +1037,11 @@ def official_assignment_portal_read(
     home_team_name: str,
     away_team_name: str,
 ) -> dict[str, object]:
-    response_required = assignment.status == OfficialAssignmentStatus.PROPOSED
-    if assignment.status == OfficialAssignmentStatus.ACCEPTED:
+    result_submitted = fixture.status == FixtureStatus.FINAL and fixture.result_confirmed_at is not None
+    response_required = assignment.status == OfficialAssignmentStatus.PROPOSED and not result_submitted
+    if result_submitted:
+        action_label = "Result submitted - await organizer review"
+    elif assignment.status == OfficialAssignmentStatus.ACCEPTED:
         action_label = "Accepted - await match-day confirmation"
     elif assignment.status == OfficialAssignmentStatus.CONFIRMED:
         action_label = "Confirmed - prepare match report and arrival checks"
@@ -1024,6 +1064,10 @@ def official_assignment_portal_read(
         "scheduled_at": fixture.scheduled_at,
         "venue_name": fixture.venue_name,
         "fixture_status": fixture.status,
+        "home_score": fixture.home_score,
+        "away_score": fixture.away_score,
+        "result_confirmed_at": fixture.result_confirmed_at,
+        "fixture_notes": fixture.notes,
         "role": assignment.role,
         "status": assignment.status,
         "certification_level": assignment.certification_level,

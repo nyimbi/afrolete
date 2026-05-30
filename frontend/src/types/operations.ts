@@ -8705,6 +8705,10 @@ export type MyOfficialAssignmentRead = {
   scheduled_at: string;
   venue_name: string | null;
   fixture_status: FixtureStatus;
+  home_score: number | null;
+  away_score: number | null;
+  result_confirmed_at: string | null;
+  fixture_notes: string | null;
   role: OfficialRole;
   status: OfficialAssignmentStatus;
   certification_level: string | null;

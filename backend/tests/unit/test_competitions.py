@@ -242,6 +242,18 @@ def test_official_can_review_and_respond_to_own_fixture_assignments(
     assert portal[0]["status"] == "proposed"
     assert portal[0]["response_required"] is True
     assert portal[0]["action_label"] == "Respond to assignment"
+    assert portal[0]["home_score"] is None
+
+    early_report_response = client.patch(
+        f"/api/v1/competitions/official-assignments/{assignment['id']}/match-report",
+        headers=official_headers,
+        json={
+            "home_score": 1,
+            "away_score": 1,
+            "notes": "Cannot submit before accepting.",
+        },
+    )
+    assert early_report_response.status_code == 409
 
     accepted_response = client.patch(
         f"/api/v1/competitions/official-assignments/{assignment['id']}/response",
@@ -261,6 +273,32 @@ def test_official_can_review_and_respond_to_own_fixture_assignments(
     )
     assert filtered_response.status_code == 200
     assert filtered_response.json()[0]["id"] == assignment["id"]
+
+    match_report_response = client.patch(
+        f"/api/v1/competitions/official-assignments/{assignment['id']}/match-report",
+        headers=official_headers,
+        json={
+            "home_score": 3,
+            "away_score": 2,
+            "notes": "Final score confirmed from the officials portal.",
+        },
+    )
+    assert match_report_response.status_code == 200
+    match_report = match_report_response.json()
+    assert match_report["status"] == "confirmed"
+    assert match_report["fixture_status"] == "final"
+    assert match_report["home_score"] == 3
+    assert match_report["away_score"] == 2
+    assert match_report["result_confirmed_at"] is not None
+    assert match_report["fixture_notes"] == "Final score confirmed from the officials portal."
+    assert "Result submitted" in match_report["action_label"]
+
+    standings_response = client.get(f"/api/v1/competitions/{competition['id']}/standings")
+    assert standings_response.status_code == 200
+    standings = standings_response.json()
+    assert standings[0]["team_id"] == home_team["id"]
+    assert standings[0]["points"] == 3
+    assert standings[0]["goals_for"] == 3
 
     other_headers = {
         "X-Afrolete-Sub": "kc-other-official",

@@ -347,6 +347,12 @@ class FixtureOfficialResponseUpdate(BaseModel):
         return self
 
 
+class OfficialMatchReportSubmit(BaseModel):
+    home_score: int = Field(ge=0)
+    away_score: int = Field(ge=0)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
 class MyOfficialAssignmentRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -362,6 +368,10 @@ class MyOfficialAssignmentRead(BaseModel):
     scheduled_at: datetime
     venue_name: str | None
     fixture_status: FixtureStatus
+    home_score: int | None
+    away_score: int | None
+    result_confirmed_at: datetime | None
+    fixture_notes: str | None
     role: OfficialRole
     status: OfficialAssignmentStatus
     certification_level: str | None

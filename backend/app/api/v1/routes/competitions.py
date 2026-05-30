@@ -36,6 +36,7 @@ from app.schemas.competition import (
     FixtureOfficialResponseUpdate,
     FixtureResultUpdate,
     MyOfficialAssignmentRead,
+    OfficialMatchReportSubmit,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -64,6 +65,7 @@ from app.services.competitions import (
     list_my_official_assignments,
     optimize_competition_schedule,
     record_fixture_match_event,
+    submit_my_official_match_report,
     update_my_official_assignment_response,
     update_fixture_result,
 )
@@ -496,6 +498,21 @@ async def update_my_official_assignment_response_route(
 ) -> MyOfficialAssignmentRead:
     return MyOfficialAssignmentRead(
         **await update_my_official_assignment_response(db, identity, assignment_id, payload)
+    )
+
+
+@router.patch(
+    "/official-assignments/{assignment_id}/match-report",
+    response_model=MyOfficialAssignmentRead,
+)
+async def submit_my_official_match_report_route(
+    assignment_id: UUID,
+    payload: OfficialMatchReportSubmit,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+) -> MyOfficialAssignmentRead:
+    return MyOfficialAssignmentRead(
+        **await submit_my_official_match_report(db, identity, assignment_id, payload)
     )
 
 
