@@ -236,8 +236,10 @@ import type {
   EquipmentScanEventRead,
   EquipmentScanRead,
   FacilityAvailabilityRead,
+  FacilityBookingCheckoutRead,
   FacilityBookingRead,
   FacilityBookingRuleRead,
+  FacilityBookingWaitlistRead,
   FacilityRead,
   FacilityType,
   FacilityUtilizationRead,
@@ -1785,6 +1787,7 @@ export default function HomePage() {
   const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckoutRead[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [facilityBookings, setFacilityBookings] = useState<FacilityBookingRead[]>([]);
+  const [facilityWaitlist, setFacilityWaitlist] = useState<FacilityBookingWaitlistRead[]>([]);
   const [facilityBookingRule, setFacilityBookingRule] = useState<FacilityBookingRuleRead | null>(null);
   const [facilityAvailability, setFacilityAvailability] = useState<FacilityAvailabilityRead | null>(null);
   const [facilityUtilization, setFacilityUtilization] = useState<FacilityUtilizationRead | null>(null);
@@ -3912,6 +3915,7 @@ export default function HomePage() {
       checkoutData,
       workOrderData,
       bookingData,
+      waitlistData,
       bookingRuleData,
       availabilityData,
       facilityUtilizationData,
@@ -3931,6 +3935,7 @@ export default function HomePage() {
       apiRequest<EquipmentCheckoutRead[]>(`/assets/checkouts?organization_id=${organizationId}`),
       apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
       apiRequest<FacilityBookingRead[]>(`/assets/bookings?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilityBookingWaitlistRead[]>(`/assets/waitlist?organization_id=${organizationId}${facilityQuery}`),
       facilityId
         ? apiRequest<FacilityBookingRuleRead | null>(
             `/assets/facility-booking-rules/${facilityId}?organization_id=${organizationId}`
@@ -3974,6 +3979,7 @@ export default function HomePage() {
     setEquipmentCheckouts(checkoutData);
     setWorkOrders(workOrderData);
     setFacilityBookings(bookingData);
+    setFacilityWaitlist(waitlistData);
     setFacilityBookingRule(bookingRuleData);
     setFacilityAvailability(availabilityData);
     setFacilityUtilization(facilityUtilizationData);
@@ -13744,6 +13750,102 @@ export default function HomePage() {
     );
   };
 
+  const updateFacilityBookingStatus = (booking: FacilityBookingRead, status: FacilityBookingRead["status"]) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before updating bookings", "bad");
+      return;
+    }
+    runAction(
+      `facility-booking-${status}`,
+      () =>
+        apiRequest<FacilityBookingRead>(`/assets/bookings/${booking.id}/status`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            notes: `${status} from operations scheduling console.`
+          }
+        }),
+      (updated) => {
+        setFacilityBookings((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.title} marked ${updated.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const updateFacilityWaitlist = (
+    entry: FacilityBookingWaitlistRead,
+    status: FacilityBookingWaitlistRead["status"]
+  ) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before updating waitlist entries", "bad");
+      return;
+    }
+    runAction(
+      `facility-waitlist-${status}`,
+      () =>
+        apiRequest<FacilityBookingWaitlistRead>(`/assets/waitlist/${entry.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            notes: `${status} from operations scheduling console.`
+          }
+        }),
+      (updated) => {
+        setFacilityWaitlist((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.title} waitlist marked ${updated.status}`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
+  const convertFacilityWaitlist = (entry: FacilityBookingWaitlistRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before converting waitlist entries", "bad");
+      return;
+    }
+    runAction(
+      "facility-waitlist-convert",
+      () =>
+        apiRequest<FacilityBookingCheckoutRead>(`/assets/waitlist/${entry.id}/convert`, {
+          method: "POST",
+          identity,
+          body: {
+            provider: "manual_gateway",
+            checkout_base_url: `${window.location.origin}/pay/sessions`
+          }
+        }),
+      (checkout) => {
+        setFacilityBookings((current) => [
+          checkout.booking,
+          ...current.filter((item) => item.id !== checkout.booking.id)
+        ]);
+        setFacilityWaitlist((current) =>
+          current.map((item) =>
+            item.id === entry.id
+              ? {
+                  ...item,
+                  status: "converted",
+                  offered_booking_id: checkout.booking.id
+                }
+              : item
+          )
+        );
+        addLog(`${entry.title} converted to checkout ${checkout.session_id}`, "good");
+        window.open(checkout.checkout_url, "_blank", "noopener,noreferrer");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const createSponsorAndAgreement = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -17812,6 +17914,11 @@ export default function HomePage() {
                 <strong>{facilityAvailability?.conflict_count ?? 0}</strong>
                 <span className="muted">{facilityBookingRule?.allow_public_booking ? "public enabled" : "internal only"}</span>
               </div>
+              <div>
+                <span className="muted">Waitlist</span>
+                <strong>{facilityWaitlist.filter((entry) => entry.status === "pending" || entry.status === "offered").length}</strong>
+                <span className="muted">{facilityWaitlist.filter((entry) => entry.status === "converted").length} converted</span>
+              </div>
             </div>
             <div className="task-list">
               {facilityUtilization ? (
@@ -17877,8 +17984,45 @@ export default function HomePage() {
                 <article key={booking.id} className="task-card">
                   <div>
                     <strong>{booking.title}</strong>
-                    <span>{booking.status} · {new Date(booking.starts_at).toLocaleString()}</span>
-                    <span>{booking.recurrence_group_id ? `Series #${booking.occurrence_index}` : "Single booking"} · {booking.public_visible ? "public" : "private"}</span>
+                    <span>{booking.status} · {booking.payment_status} · {new Date(booking.starts_at).toLocaleString()}</span>
+                    <span>
+                      {booking.recurrence_group_id ? `Series #${booking.occurrence_index}` : booking.booking_source} ·{" "}
+                      {booking.public_booking_reference ?? (booking.public_visible ? "public" : "private")}
+                    </span>
+                  </div>
+                  <div className="event-toolbar">
+                    {booking.status === "requested" ? (
+                      <button type="button" onClick={() => updateFacilityBookingStatus(booking, "approved")}>Approve</button>
+                    ) : null}
+                    {booking.status === "approved" || booking.status === "requested" ? (
+                      <button type="button" onClick={() => updateFacilityBookingStatus(booking, "cancelled")}>Cancel</button>
+                    ) : null}
+                    {booking.payment_status === "paid" && booking.status !== "confirmed" ? (
+                      <button type="button" onClick={() => updateFacilityBookingStatus(booking, "confirmed")}>Confirm</button>
+                    ) : null}
+                    {booking.status === "confirmed" ? (
+                      <button type="button" onClick={() => updateFacilityBookingStatus(booking, "completed")}>Complete</button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+              {facilityWaitlist.slice(0, 4).map((entry) => (
+                <article key={entry.id} className="task-card">
+                  <div>
+                    <strong>{entry.title}</strong>
+                    <span>{entry.status} · priority {entry.priority_score} · {new Date(entry.desired_starts_at).toLocaleString()}</span>
+                    <span>{entry.requester_name} · {entry.requester_email} · {entry.expected_attendees ?? 0} attendees</span>
+                  </div>
+                  <div className="event-toolbar">
+                    {entry.status === "pending" ? (
+                      <button type="button" onClick={() => updateFacilityWaitlist(entry, "offered")}>Offer</button>
+                    ) : null}
+                    {entry.status === "pending" || entry.status === "offered" ? (
+                      <button type="button" onClick={() => convertFacilityWaitlist(entry)}>Convert</button>
+                    ) : null}
+                    {entry.status !== "converted" && entry.status !== "cancelled" ? (
+                      <button type="button" onClick={() => updateFacilityWaitlist(entry, "declined")}>Decline</button>
+                    ) : null}
                   </div>
                 </article>
               ))}

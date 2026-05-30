@@ -365,6 +365,30 @@ class FacilityBooking(IdMixin, TimestampMixin, Base):
     conflict_note: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilityBookingWaitlistEntry(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_booking_waitlist_entries"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    facility_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facilities.id"), nullable=False, index=True)
+    offered_booking_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facility_bookings.id"), index=True)
+    requester_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    requester_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    requester_phone: Mapped[str | None] = mapped_column(String(80))
+    activity_type: Mapped[str] = mapped_column(String(120), default="training", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    desired_starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    desired_ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    expected_attendees: Mapped[int | None] = mapped_column(Integer)
+    insurance_certificate_ref: Mapped[str | None] = mapped_column(String(240))
+    special_requirements: Mapped[str | None] = mapped_column(Text)
+    add_ons: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    priority_score: Mapped[int] = mapped_column(Integer, default=100, nullable=False, index=True)
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class SupplierOrder(IdMixin, TimestampMixin, Base):
     __tablename__ = "supplier_orders"
 

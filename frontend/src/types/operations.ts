@@ -2762,6 +2762,29 @@ export type FacilityBookingCheckoutRead = {
   access_window_summary: string;
 };
 
+export type FacilityBookingWaitlistRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID;
+  offered_booking_id: UUID | null;
+  activity_type: string;
+  title: string;
+  desired_starts_at: string;
+  desired_ends_at: string;
+  requester_name: string;
+  requester_email: string;
+  requester_phone: string | null;
+  expected_attendees: number | null;
+  insurance_certificate_ref: string | null;
+  special_requirements: string | null;
+  add_ons: string | null;
+  notes: string | null;
+  status: "pending" | "offered" | "converted" | "declined" | "cancelled";
+  priority_score: number;
+  notified_at: string | null;
+  expires_at: string | null;
+};
+
 export type FacilityHireHostedCheckoutRead = {
   invoice_id: UUID;
   booking_id: UUID;

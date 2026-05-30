@@ -15,6 +15,7 @@ import { afroleteAuthMode } from "@/lib/config";
 import type {
   AgentEthicalScorecardRead,
   FacilityBookingCheckoutRead,
+  FacilityBookingWaitlistRead,
   FacilityPublicListingRead,
   OrganizationPublicSiteRead,
   PublicSupporterChallengeProgressRead,
@@ -144,6 +145,7 @@ export default function PublicOrganizationSitePage() {
   const [submittedVolunteerGroup, setSubmittedVolunteerGroup] = useState<VolunteerGroupApplicationRead | null>(null);
   const [submittedSupporter, setSubmittedSupporter] = useState<PublicSupporterSignupRead | null>(null);
   const [facilityBookingCheckout, setFacilityBookingCheckout] = useState<FacilityBookingCheckoutRead | null>(null);
+  const [facilityWaitlistEntry, setFacilityWaitlistEntry] = useState<FacilityBookingWaitlistRead | null>(null);
   const [supporterChallengeProgress, setSupporterChallengeProgress] =
     useState<PublicSupporterChallengeProgressRead | null>(null);
   const [error, setError] = useState("");
@@ -607,6 +609,44 @@ export default function PublicOrganizationSitePage() {
     }
   };
 
+  const submitFacilityWaitlist = async () => {
+    if (!site || !facilityHireForm.facility_id) {
+      setFacilityHireError("Choose a public facility first.");
+      return;
+    }
+    setFacilityHireBusy(true);
+    setFacilityHireError("");
+    try {
+      const startsAt = new Date(facilityHireForm.starts_at);
+      const endsAt = new Date(startsAt.getTime() + facilityHireForm.duration_hours * 60 * 60_000);
+      const entry = await apiRequest<FacilityBookingWaitlistRead>(
+        `/assets/public/${encodeURIComponent(site.slug)}/waitlist`,
+        {
+          method: "POST",
+          body: {
+            facility_id: facilityHireForm.facility_id,
+            activity_type: facilityHireForm.activity_type,
+            title: facilityHireForm.title,
+            desired_starts_at: startsAt.toISOString(),
+            desired_ends_at: endsAt.toISOString(),
+            requester_name: facilityHireForm.requester_name,
+            requester_email: facilityHireForm.requester_email,
+            requester_phone: facilityHireForm.requester_phone || null,
+            expected_attendees: facilityHireForm.expected_attendees,
+            insurance_certificate_ref: facilityHireForm.insurance_certificate_ref || null,
+            special_requirements: facilityHireForm.special_requirements,
+            add_ons: facilityHireForm.add_ons || null
+          }
+        }
+      );
+      setFacilityWaitlistEntry(entry);
+    } catch (caught) {
+      setFacilityHireError(caught instanceof Error ? caught.message : "Facility waitlist request could not be created");
+    } finally {
+      setFacilityHireBusy(false);
+    }
+  };
+
   const submitSupporterSignup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSupporterBusy("signup");
@@ -907,6 +947,15 @@ export default function PublicOrganizationSitePage() {
                 <a href={facilityBookingCheckout.checkout_url}>Open payment link</a>
               </div>
             ) : null}
+            {facilityWaitlistEntry ? (
+              <div className="public-site-success">
+                <strong>{facilityWaitlistEntry.title}</strong>
+                <span>
+                  {facilityWaitlistEntry.status} waitlist · priority {facilityWaitlistEntry.priority_score}
+                </span>
+                <span>{new Date(facilityWaitlistEntry.desired_starts_at).toLocaleString()}</span>
+              </div>
+            ) : null}
           </div>
           <form onSubmit={submitFacilityHire}>
             <label className="public-site-wide">
@@ -1016,6 +1065,9 @@ export default function PublicOrganizationSitePage() {
             {facilityHireError ? <p className="form-error public-site-wide">{facilityHireError}</p> : null}
             <button type="submit" disabled={facilityHireBusy}>
               {facilityHireBusy ? "Preparing" : "Book and pay"}
+            </button>
+            <button type="button" disabled={facilityHireBusy} onClick={submitFacilityWaitlist}>
+              Join waitlist
             </button>
           </form>
         </section>

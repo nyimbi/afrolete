@@ -480,6 +480,207 @@ def test_public_facility_hire_creates_invoice_checkout_and_access_window(client,
     assert bookings[0]["payment_checkout_url"].startswith("https://book.example.test/pay/sessions/")
 
 
+def test_facility_approval_and_waitlist_conversion_flow(client, identity_headers) -> None:
+    organization, team, _, _ = create_assets_context(client, identity_headers, "Approval Waitlist Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Show Court",
+            "facility_type": "court",
+            "hourly_rate": "90.00",
+            "capacity": 80,
+        },
+    ).json()
+    client.post(
+        "/api/v1/assets/facility-booking-rules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "min_booking_minutes": 60,
+            "max_booking_minutes": 240,
+            "buffer_minutes": 0,
+            "advance_booking_days": 90,
+            "requires_approval": True,
+            "allow_public_booking": True,
+            "cancellation_notice_hours": 12,
+        },
+    )
+
+    public_booking = client.post(
+        f"/api/v1/assets/public/{organization['slug']}/bookings",
+        json={
+            "facility_id": facility["id"],
+            "activity_type": "basketball clinic",
+            "title": "Youth skills clinic",
+            "starts_at": "2026-06-16T10:00:00Z",
+            "ends_at": "2026-06-16T12:00:00Z",
+            "requester_name": "Clinic Organizer",
+            "requester_email": "clinic@example.com",
+            "expected_attendees": 24,
+            "checkout_base_url": "https://book.example.test/pay/sessions",
+        },
+    )
+    assert public_booking.status_code == 201
+    checkout = public_booking.json()
+    booking = checkout["booking"]
+    invoice = checkout["invoice"]
+    assert booking["status"] == "requested"
+
+    premature_confirm = client.patch(
+        f"/api/v1/assets/bookings/{booking['id']}/status",
+        headers=identity_headers,
+        json={"status": "confirmed", "notes": "Trying to bypass payment."},
+    )
+    assert premature_confirm.status_code == 409
+
+    approved = client.patch(
+        f"/api/v1/assets/bookings/{booking['id']}/status",
+        headers=identity_headers,
+        json={"status": "approved", "notes": "Insurance and venue cover verified."},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert "Insurance and venue cover verified" in approved.json()["conflict_note"]
+
+    payment = client.post(
+        f"/api/v1/assets/facility-checkout-sessions/{checkout['session_id']}/settle",
+        json={
+            "invoice_id": invoice["id"],
+            "booking_id": booking["id"],
+            "provider": "manual_gateway",
+            "amount": "180.00",
+            "currency": "USD",
+            "method": "card",
+            "status": "succeeded",
+            "external_payment_id": "approval-payment-1",
+        },
+    )
+    assert payment.status_code == 200
+    assert payment.json()["booking_status"] == "confirmed"
+    assert payment.json()["access_code"].startswith("FAC-")
+
+    blocker = client.post(
+        "/api/v1/assets/bookings",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "team_id": team["id"],
+            "title": "Club training block",
+            "starts_at": "2026-06-17T10:00:00Z",
+            "ends_at": "2026-06-17T12:00:00Z",
+        },
+    )
+    assert blocker.status_code == 201
+    assert blocker.json()["status"] == "requested"
+
+    overlap = client.post(
+        f"/api/v1/assets/public/{organization['slug']}/bookings",
+        json={
+            "facility_id": facility["id"],
+            "activity_type": "basketball clinic",
+            "title": "Overflow skills clinic",
+            "starts_at": "2026-06-17T10:00:00Z",
+            "ends_at": "2026-06-17T12:00:00Z",
+            "requester_name": "Overflow Organizer",
+            "requester_email": "overflow@example.com",
+        },
+    )
+    assert overlap.status_code == 409
+
+    waitlist = client.post(
+        f"/api/v1/assets/public/{organization['slug']}/waitlist",
+        json={
+            "facility_id": facility["id"],
+            "activity_type": "basketball clinic",
+            "title": "Overflow skills clinic",
+            "desired_starts_at": "2026-06-17T10:00:00Z",
+            "desired_ends_at": "2026-06-17T12:00:00Z",
+            "requester_name": "Overflow Organizer",
+            "requester_email": "overflow@example.com",
+            "requester_phone": "+15551234567",
+            "expected_attendees": 32,
+            "insurance_certificate_ref": "INS-WAIT-1",
+            "special_requirements": "Scoreboard and bench seating.",
+            "add_ons": "Trainer room",
+        },
+    )
+    assert waitlist.status_code == 201
+    entry = waitlist.json()
+    assert entry["status"] == "pending"
+    assert entry["priority_score"] > 100
+
+    listed = client.get(
+        f"/api/v1/assets/waitlist?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == entry["id"]
+
+    offered = client.patch(
+        f"/api/v1/assets/waitlist/{entry['id']}",
+        headers=identity_headers,
+        json={"status": "offered", "notes": "Slot may open after internal cancellation."},
+    )
+    assert offered.status_code == 200
+    assert offered.json()["notified_at"] is not None
+    assert offered.json()["expires_at"] is not None
+
+    cancelled = client.patch(
+        f"/api/v1/assets/bookings/{blocker.json()['id']}/status",
+        headers=identity_headers,
+        json={"status": "cancelled", "notes": "Team moved to auxiliary court."},
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+    converted = client.post(
+        f"/api/v1/assets/waitlist/{entry['id']}/convert",
+        headers=identity_headers,
+        json={
+            "provider": "manual_gateway",
+            "checkout_base_url": "https://book.example.test/pay/sessions",
+        },
+    )
+    assert converted.status_code == 200
+    converted_checkout = converted.json()
+    assert converted_checkout["booking"]["booking_source"] == "waitlist"
+    assert converted_checkout["booking"]["status"] == "requested"
+    assert converted_checkout["invoice"]["amount_due"] == "180.00"
+    assert "booking_id=" in converted_checkout["checkout_url"]
+
+    hosted = client.get(
+        f"/api/v1/assets/facility-checkout-sessions/{converted_checkout['session_id']}"
+        f"?invoice_id={converted_checkout['invoice']['id']}"
+        f"&booking_id={converted_checkout['booking']['id']}&provider=manual_gateway"
+    )
+    assert hosted.status_code == 200
+    assert hosted.json()["client_reference"] == f"facility-hire:{converted_checkout['booking']['id']}"
+
+    converted_payment = client.post(
+        f"/api/v1/assets/facility-checkout-sessions/{converted_checkout['session_id']}/settle",
+        json={
+            "invoice_id": converted_checkout["invoice"]["id"],
+            "booking_id": converted_checkout["booking"]["id"],
+            "provider": "manual_gateway",
+            "amount": "180.00",
+            "currency": "USD",
+            "method": "mobile_money",
+            "status": "succeeded",
+            "external_payment_id": "waitlist-payment-1",
+        },
+    )
+    assert converted_payment.status_code == 200
+    assert converted_payment.json()["booking_status"] == "confirmed"
+
+    converted_waitlist = client.get(
+        f"/api/v1/assets/waitlist?organization_id={organization['id']}&status=converted"
+    ).json()
+    assert converted_waitlist[0]["offered_booking_id"] == converted_checkout["booking"]["id"]
+
+
 def test_emergency_escalation_timer_advances_due_activation(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Emergency Timer Club")
     plan = client.post(

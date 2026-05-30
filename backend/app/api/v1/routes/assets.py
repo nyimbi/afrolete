@@ -49,6 +49,11 @@ from app.schemas.assets import (
     FacilityBookingRead,
     FacilityBookingRuleCreate,
     FacilityBookingRuleRead,
+    FacilityBookingStatusUpdate,
+    FacilityBookingWaitlistConversionCreate,
+    FacilityBookingWaitlistCreate,
+    FacilityBookingWaitlistRead,
+    FacilityBookingWaitlistUpdate,
     FacilityCreate,
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
@@ -80,6 +85,7 @@ from app.services.assets import (
     create_equipment_item,
     create_facility,
     create_facility_booking,
+    create_public_facility_waitlist_entry,
     create_recurring_facility_bookings,
     create_equipment_lease_invoice,
     create_equipment_lease_schedule,
@@ -96,6 +102,7 @@ from app.services.assets import (
     get_facility_booking_rule,
     get_facility_hire_hosted_checkout,
     list_public_facility_hire,
+    list_facility_waitlist_entries,
     list_equipment_files,
     list_equipment_scan_events,
     list_checkouts,
@@ -119,6 +126,8 @@ from app.services.assets import (
     sync_asset_accounting_export,
     sync_supplier_invoice,
     settle_facility_hire_checkout,
+    update_facility_booking_status,
+    update_facility_waitlist_entry,
     supplier_scorecard,
     update_emergency_action_plan,
     update_emergency_plan_activation,
@@ -128,6 +137,7 @@ from app.services.assets import (
     provision_equipment_reader,
     update_work_order,
     utilization_recommendations,
+    convert_facility_waitlist_entry,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -489,6 +499,19 @@ async def create_public_facility_booking_route(
     db: AsyncSession = Depends(get_db),
 ) -> FacilityBookingCheckoutRead:
     return await create_public_facility_booking(db, site, payload)
+
+
+@router.post(
+    "/public/{site}/waitlist",
+    response_model=FacilityBookingWaitlistRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_public_facility_waitlist_route(
+    site: str,
+    payload: FacilityBookingWaitlistCreate,
+    db: AsyncSession = Depends(get_db),
+) -> FacilityBookingWaitlistRead:
+    return await create_public_facility_waitlist_entry(db, site, payload)
 
 
 @router.get(
@@ -963,6 +986,17 @@ async def create_recurring_facility_bookings_route(
     ]
 
 
+@router.patch("/bookings/{booking_id}/status", response_model=FacilityBookingRead)
+async def update_facility_booking_status_route(
+    booking_id: UUID,
+    payload: FacilityBookingStatusUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityBookingRead:
+    return to_booking_read(await update_facility_booking_status(db, identity, booking_id, payload, authz))
+
+
 @router.get("/bookings", response_model=list[FacilityBookingRead])
 async def list_facility_bookings_route(
     organization_id: UUID = Query(),
@@ -973,6 +1007,43 @@ async def list_facility_bookings_route(
         to_booking_read(booking)
         for booking in await list_facility_bookings(db, organization_id, facility_id=facility_id)
     ]
+
+
+@router.get("/waitlist", response_model=list[FacilityBookingWaitlistRead])
+async def list_facility_waitlist_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: AsyncSession = Depends(get_db),
+) -> list[FacilityBookingWaitlistRead]:
+    return await list_facility_waitlist_entries(
+        db,
+        organization_id,
+        facility_id=facility_id,
+        status_filter=status_filter,
+    )
+
+
+@router.patch("/waitlist/{entry_id}", response_model=FacilityBookingWaitlistRead)
+async def update_facility_waitlist_route(
+    entry_id: UUID,
+    payload: FacilityBookingWaitlistUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityBookingWaitlistRead:
+    return await update_facility_waitlist_entry(db, identity, entry_id, payload, authz)
+
+
+@router.post("/waitlist/{entry_id}/convert", response_model=FacilityBookingCheckoutRead)
+async def convert_facility_waitlist_route(
+    entry_id: UUID,
+    payload: FacilityBookingWaitlistConversionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilityBookingCheckoutRead:
+    return await convert_facility_waitlist_entry(db, identity, entry_id, payload, authz)
 
 
 @router.get("/summary", response_model=AssetSummaryRead)

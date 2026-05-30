@@ -792,6 +792,57 @@ class FacilityBookingCheckoutRead(BaseModel):
     access_window_summary: str
 
 
+class FacilityBookingStatusUpdate(BaseModel):
+    status: FacilityBookingStatus
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class FacilityBookingWaitlistCreate(BaseModel):
+    facility_id: UUID
+    activity_type: str = Field(default="training", min_length=2, max_length=120)
+    title: str = Field(min_length=2, max_length=220)
+    desired_starts_at: datetime
+    desired_ends_at: datetime
+    requester_name: str = Field(min_length=2, max_length=180)
+    requester_email: str = Field(min_length=5, max_length=255)
+    requester_phone: str | None = Field(default=None, max_length=80)
+    expected_attendees: int | None = Field(default=None, ge=0)
+    insurance_certificate_ref: str | None = Field(default=None, max_length=240)
+    special_requirements: str | None = Field(default=None, max_length=4000)
+    add_ons: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "FacilityBookingWaitlistCreate":
+        if self.desired_ends_at <= self.desired_starts_at:
+            raise ValueError("desired_ends_at must be after desired_starts_at")
+        return self
+
+
+class FacilityBookingWaitlistUpdate(BaseModel):
+    status: str = Field(default="offered", pattern="^(pending|offered|converted|declined|cancelled)$")
+    priority_score: int | None = Field(default=None, ge=0, le=1000)
+    expires_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class FacilityBookingWaitlistConversionCreate(BaseModel):
+    provider: str = Field(default="manual_gateway", min_length=2, max_length=80)
+    checkout_base_url: str = Field(default="/pay/sessions", min_length=1, max_length=800)
+
+
+class FacilityBookingWaitlistRead(FacilityBookingWaitlistCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    organization_id: UUID
+    offered_booking_id: UUID | None
+    status: str
+    priority_score: int
+    notified_at: datetime | None
+    expires_at: datetime | None
+
+
 class FacilityHireHostedCheckoutRead(BaseModel):
     invoice_id: UUID
     booking_id: UUID

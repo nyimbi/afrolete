@@ -32,6 +32,7 @@ from app.models.assets import (
     Facility,
     FacilityBooking,
     FacilityBookingRule,
+    FacilityBookingWaitlistEntry,
     MaintenanceWorkOrder,
     SupplierOrder,
 )
@@ -94,6 +95,11 @@ from app.schemas.assets import (
     FacilityBookingCheckoutRead,
     FacilityBookingCreate,
     FacilityBookingRuleCreate,
+    FacilityBookingStatusUpdate,
+    FacilityBookingWaitlistConversionCreate,
+    FacilityBookingWaitlistCreate,
+    FacilityBookingWaitlistRead,
+    FacilityBookingWaitlistUpdate,
     FacilityCreate,
     FacilityHireCheckoutSettlementCreate,
     FacilityHireCheckoutSettlementRead,
@@ -1504,11 +1510,8 @@ async def settle_facility_hire_checkout(
         invoice.status = CommercialStatus.PAID if invoice_open_amount(invoice) <= 0 else CommercialStatus.PARTIAL
     if invoice_open_amount(invoice) <= 0:
         booking.payment_status = "paid"
-        booking.status = FacilityBookingStatus.CONFIRMED if booking.status != FacilityBookingStatus.CANCELLED else booking.status
-        booking.access_code = booking.access_code or f"FAC-{token_urlsafe(4).upper()}"
-        booking.access_starts_at = booking.starts_at - timedelta(minutes=15)
-        booking.access_ends_at = booking.ends_at + timedelta(minutes=15)
-        booking.conflict_note = "Payment received; booking confirmed with access window."
+        if booking.status != FacilityBookingStatus.CANCELLED:
+            apply_facility_access_window(booking)
     elif invoice.amount_paid > 0:
         booking.payment_status = "partial"
     else:
@@ -1519,6 +1522,178 @@ async def settle_facility_hire_checkout(
     await db.refresh(invoice)
     await db.refresh(booking)
     return facility_settlement_read(invoice, booking, payment, payload.provider)
+
+
+async def update_facility_booking_status(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    booking_id: UUID,
+    payload: FacilityBookingStatusUpdate,
+    authz: AuthorizationService,
+) -> FacilityBooking:
+    booking = await get_facility_booking(db, booking_id)
+    await ensure_manage_assets(authz, identity, booking.organization_id)
+    if payload.status == FacilityBookingStatus.CONFIRMED and booking.payment_status in {"payment_pending", "partial"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Booking still has unpaid facility hire balance")
+    booking.status = payload.status
+    if payload.status == FacilityBookingStatus.CONFIRMED and booking.payment_status == "paid":
+        apply_facility_access_window(booking)
+    if payload.status == FacilityBookingStatus.CANCELLED:
+        booking.access_code = None
+        booking.access_starts_at = None
+        booking.access_ends_at = None
+        if booking.finance_invoice_id is not None:
+            invoice = await db.get(FinanceInvoice, booking.finance_invoice_id)
+            if invoice is not None and invoice.status not in {CommercialStatus.PAID, CommercialStatus.PARTIAL}:
+                invoice.status = CommercialStatus.CANCELLED
+    if payload.notes:
+        booking.conflict_note = append_note(booking.conflict_note, payload.notes)
+    await db.commit()
+    await db.refresh(booking)
+    return booking
+
+
+async def create_public_facility_waitlist_entry(
+    db: AsyncSession,
+    site: str,
+    payload: FacilityBookingWaitlistCreate,
+) -> FacilityBookingWaitlistRead:
+    organization = await get_public_site_organization(db, site)
+    facility = await get_facility_for_organization(db, payload.facility_id, organization.id)
+    rule = await get_facility_booking_rule(db, organization.id, facility.id)
+    if rule is None or not rule.allow_public_booking or rule.status != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility is not publicly bookable")
+    validate_booking_against_rule(payload.desired_starts_at, payload.desired_ends_at, rule)
+    entry = FacilityBookingWaitlistEntry(
+        organization_id=organization.id,
+        priority_score=waitlist_priority_score(payload),
+        status="pending",
+        **payload.model_dump(),
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+    return facility_waitlist_read(entry)
+
+
+async def list_facility_waitlist_entries(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[FacilityBookingWaitlistRead]:
+    await get_organization(db, organization_id)
+    statement = select(FacilityBookingWaitlistEntry).where(FacilityBookingWaitlistEntry.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilityBookingWaitlistEntry.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(FacilityBookingWaitlistEntry.status == status_filter)
+    rows = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    FacilityBookingWaitlistEntry.priority_score.desc(),
+                    FacilityBookingWaitlistEntry.created_at.asc(),
+                )
+            )
+        ).all()
+    )
+    return [facility_waitlist_read(row) for row in rows]
+
+
+async def update_facility_waitlist_entry(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    entry_id: UUID,
+    payload: FacilityBookingWaitlistUpdate,
+    authz: AuthorizationService,
+) -> FacilityBookingWaitlistRead:
+    entry = await get_facility_waitlist_entry(db, entry_id)
+    await ensure_manage_assets(authz, identity, entry.organization_id)
+    entry.status = payload.status
+    entry.priority_score = payload.priority_score if payload.priority_score is not None else entry.priority_score
+    entry.expires_at = payload.expires_at if payload.expires_at is not None else entry.expires_at
+    entry.notes = append_note(entry.notes, payload.notes) if payload.notes else entry.notes
+    if payload.status == "offered":
+        entry.notified_at = datetime.now(UTC)
+        entry.expires_at = entry.expires_at or datetime.now(UTC) + timedelta(hours=24)
+    await db.commit()
+    await db.refresh(entry)
+    return facility_waitlist_read(entry)
+
+
+async def convert_facility_waitlist_entry(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    entry_id: UUID,
+    payload: FacilityBookingWaitlistConversionCreate,
+    authz: AuthorizationService,
+) -> FacilityBookingCheckoutRead:
+    entry = await get_facility_waitlist_entry(db, entry_id)
+    await ensure_manage_assets(authz, identity, entry.organization_id)
+    if entry.status not in {"pending", "offered"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Waitlist entry is not convertible")
+    facility = await get_facility_for_organization(db, entry.facility_id, entry.organization_id)
+    rule = await get_facility_booking_rule(db, entry.organization_id, facility.id)
+    if rule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility booking rule not found")
+    await ensure_facility_available(db, facility.id, entry.desired_starts_at, entry.desired_ends_at, rule=rule)
+    rate = facility_public_hourly_rate(facility, rule, entry.desired_starts_at)
+    duration_hours = Decimal(str(max((entry.desired_ends_at - entry.desired_starts_at).total_seconds() / 3600, 0)))
+    amount_due = (duration_hours * rate).quantize(Decimal("0.01"))
+    reference = f"FAC-WL-{token_urlsafe(5).upper()}"
+    invoice = FinanceInvoice(
+        organization_id=entry.organization_id,
+        invoice_number=f"{reference}-{entry.desired_starts_at:%m%d}",
+        title=f"Waitlist facility hire: {facility.name}",
+        amount_due=amount_due,
+        amount_paid=Decimal("0"),
+        currency="USD",
+        due_on=entry.desired_starts_at.date(),
+        status=CommercialStatus.DRAFT,
+        memo=f"Converted waitlist entry for {entry.requester_name} ({entry.requester_email}).",
+    )
+    db.add(invoice)
+    await db.flush()
+    session_id = facility_checkout_session_id(invoice.id, payload.provider)
+    booking = FacilityBooking(
+        organization_id=entry.organization_id,
+        facility_id=facility.id,
+        title=entry.title,
+        starts_at=entry.desired_starts_at,
+        ends_at=entry.desired_ends_at,
+        status=FacilityBookingStatus.REQUESTED if rule.requires_approval else FacilityBookingStatus.APPROVED,
+        requester_name=entry.requester_name,
+        requester_email=entry.requester_email,
+        expected_attendees=entry.expected_attendees,
+        rate=rate,
+        deposit_required=amount_due,
+        finance_invoice_id=invoice.id,
+        insurance_certificate_ref=entry.insurance_certificate_ref,
+        special_requirements=waitlist_requirements(entry),
+        public_visible=True,
+        booking_source="waitlist",
+        public_booking_reference=reference,
+        payment_status="payment_pending",
+        conflict_note="Converted from public facility waitlist.",
+    )
+    db.add(booking)
+    await db.flush()
+    booking.payment_checkout_url = facility_checkout_url(payload.checkout_base_url, session_id, invoice.id, booking.id, payload.provider)
+    entry.status = "converted"
+    entry.offered_booking_id = booking.id
+    entry.notified_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(invoice)
+    await db.refresh(booking)
+    await db.refresh(entry)
+    return FacilityBookingCheckoutRead(
+        booking=booking,
+        invoice=finance_invoice_read(invoice),
+        checkout_url=booking.payment_checkout_url or "",
+        session_id=session_id,
+        access_window_summary="Converted from waitlist; access opens after payment confirmation.",
+    )
 
 
 async def asset_summary(db: AsyncSession, organization_id: UUID) -> AssetSummaryRead:
@@ -2332,6 +2507,23 @@ async def get_facility_for_organization(
     return facility
 
 
+async def get_facility_booking(db: AsyncSession, booking_id: UUID) -> FacilityBooking:
+    booking = await db.get(FacilityBooking, booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility booking not found")
+    return booking
+
+
+async def get_facility_waitlist_entry(
+    db: AsyncSession,
+    entry_id: UUID,
+) -> FacilityBookingWaitlistEntry:
+    entry = await db.get(FacilityBookingWaitlistEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility waitlist entry not found")
+    return entry
+
+
 async def get_equipment_for_organization(
     db: AsyncSession,
     equipment_item_id: UUID,
@@ -2603,6 +2795,39 @@ def public_booking_requirements(payload: FacilityPublicBookingCreate) -> str:
     return " ".join(parts)
 
 
+def waitlist_requirements(entry: FacilityBookingWaitlistEntry) -> str:
+    parts = [entry.special_requirements or "No special requirements."]
+    if entry.requester_phone:
+        parts.append(f"Requester phone: {entry.requester_phone}.")
+    if entry.add_ons:
+        parts.append(f"Requested add-ons: {entry.add_ons}.")
+    return " ".join(parts)
+
+
+def waitlist_priority_score(payload: FacilityBookingWaitlistCreate) -> int:
+    attendee_score = min(payload.expected_attendees or 0, 100)
+    insurance_score = 15 if payload.insurance_certificate_ref else 0
+    contact_score = 10 if payload.requester_phone else 0
+    return 100 + attendee_score + insurance_score + contact_score
+
+
+def append_note(existing: str | None, note: str) -> str:
+    timestamp = datetime.now(UTC).isoformat()
+    line = f"{timestamp}: {note}"
+    return f"{existing}\n{line}" if existing else line
+
+
+def apply_facility_access_window(booking: FacilityBooking) -> None:
+    booking.status = FacilityBookingStatus.CONFIRMED
+    booking.access_code = booking.access_code or f"FAC-{token_urlsafe(4).upper()}"
+    booking.access_starts_at = booking.starts_at - timedelta(minutes=15)
+    booking.access_ends_at = booking.ends_at + timedelta(minutes=15)
+    booking.conflict_note = append_note(
+        booking.conflict_note,
+        "Payment received; booking confirmed with access window.",
+    )
+
+
 def facility_checkout_session_id(invoice_id: UUID, provider: str) -> str:
     digest = sha256(f"facility-hire:{invoice_id}:{provider}".encode()).hexdigest()[:24]
     return f"fac_{digest}"
@@ -2637,7 +2862,7 @@ async def get_facility_checkout_records(
         or booking is None
         or booking.finance_invoice_id != invoice.id
         or booking.organization_id != invoice.organization_id
-        or booking.booking_source != "public_site"
+        or booking.booking_source not in {"public_site", "waitlist"}
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility checkout session not found")
     return invoice, booking
@@ -2696,6 +2921,31 @@ def facility_settlement_read(
         access_code=booking.access_code,
         access_starts_at=booking.access_starts_at,
         access_ends_at=booking.access_ends_at,
+    )
+
+
+def facility_waitlist_read(entry: FacilityBookingWaitlistEntry) -> FacilityBookingWaitlistRead:
+    return FacilityBookingWaitlistRead(
+        id=entry.id,
+        organization_id=entry.organization_id,
+        facility_id=entry.facility_id,
+        offered_booking_id=entry.offered_booking_id,
+        activity_type=entry.activity_type,
+        title=entry.title,
+        desired_starts_at=entry.desired_starts_at,
+        desired_ends_at=entry.desired_ends_at,
+        requester_name=entry.requester_name,
+        requester_email=entry.requester_email,
+        requester_phone=entry.requester_phone,
+        expected_attendees=entry.expected_attendees,
+        insurance_certificate_ref=entry.insurance_certificate_ref,
+        special_requirements=entry.special_requirements,
+        add_ons=entry.add_ons,
+        status=entry.status,
+        priority_score=entry.priority_score,
+        notified_at=entry.notified_at,
+        expires_at=entry.expires_at,
+        notes=entry.notes,
     )
 
 
