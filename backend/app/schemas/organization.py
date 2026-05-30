@@ -139,6 +139,109 @@ class OrganizationGroupMembershipRead(BaseModel):
     notes: str | None
 
 
+class OrganizationAwardProgramCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    season_label: str | None = Field(default=None, max_length=80)
+    level: str = Field(default="club", min_length=2, max_length=80)
+    frequency: str = Field(default="seasonal", min_length=2, max_length=80)
+    nomination_opens_at: datetime | None = None
+    nomination_closes_at: datetime | None = None
+    voting_opens_at: datetime | None = None
+    voting_closes_at: datetime | None = None
+    eligibility_summary: str | None = Field(default=None, max_length=4000)
+    ceremony_name: str | None = Field(default=None, max_length=180)
+    ceremony_at: datetime | None = None
+    ceremony_venue: str | None = Field(default=None, max_length=240)
+    certificate_template: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="draft", pattern="^(draft|nominations_open|voting_open|closed|awarded|archived)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationAwardProgramRead(OrganizationAwardProgramCreate):
+    id: UUID
+    organization_id: UUID
+    category_count: int = 0
+    nomination_count: int = 0
+    recipient_count: int = 0
+
+
+class OrganizationAwardCategoryCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    award_type: str = Field(default="individual", min_length=2, max_length=80)
+    judging_method: str = Field(default="committee", min_length=2, max_length=80)
+    criteria: str | None = Field(default=None, max_length=4000)
+    max_recipients: int = Field(default=1, ge=1, le=100)
+    voter_roles: str | None = Field(default=None, max_length=1000)
+    status: str = Field(default="active", pattern="^(active|paused|closed|archived)$")
+
+
+class OrganizationAwardCategoryRead(OrganizationAwardCategoryCreate):
+    id: UUID
+    organization_id: UUID
+    program_id: UUID
+    nomination_count: int = 0
+    recipient_count: int = 0
+
+
+class OrganizationAwardNominationCreate(BaseModel):
+    nominee_subject_type: MemberSubjectType = MemberSubjectType.PERSON
+    nominee_subject_id: UUID
+    title: str = Field(min_length=2, max_length=180)
+    nomination_summary: str = Field(min_length=3, max_length=8000)
+    evidence_url: str | None = Field(default=None, max_length=500)
+    status: str = Field(default="submitted", pattern="^(submitted|accepted|shortlisted|rejected|withdrawn)$")
+    finalist: bool = False
+    score: Decimal | None = Field(default=None, ge=0, max_digits=8, decimal_places=2)
+
+
+class OrganizationAwardNominationRead(OrganizationAwardNominationCreate):
+    id: UUID
+    organization_id: UUID
+    program_id: UUID
+    category_id: UUID
+    nominee_label: str | None = None
+    nominated_by_person_id: UUID | None
+    vote_count: int = 0
+    weighted_score: Decimal = Decimal("0")
+
+
+class OrganizationAwardVoteCreate(BaseModel):
+    voter_person_id: UUID | None = None
+    score: Decimal = Field(ge=0, le=100, max_digits=8, decimal_places=2)
+    weight: Decimal = Field(default=Decimal("1"), ge=0, le=100, max_digits=8, decimal_places=2)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class OrganizationAwardVoteRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    nomination_id: UUID
+    voter_person_id: UUID
+    voter_label: str | None = None
+    score: Decimal
+    weight: Decimal
+    comment: str | None
+
+
+class OrganizationAwardRecipientCreate(BaseModel):
+    nomination_id: UUID | None = None
+    recipient_subject_type: MemberSubjectType = MemberSubjectType.PERSON
+    recipient_subject_id: UUID
+    awarded_on: date
+    public_citation: str = Field(min_length=3, max_length=8000)
+    certificate_url: str | None = Field(default=None, max_length=500)
+    status: str = Field(default="awarded", pattern="^(awarded|announced|withheld|revoked)$")
+
+
+class OrganizationAwardRecipientRead(OrganizationAwardRecipientCreate):
+    id: UUID
+    organization_id: UUID
+    program_id: UUID
+    category_id: UUID
+    recipient_label: str | None = None
+    certificate_number: str
+
+
 class PublicSiteTeamRead(BaseModel):
     id: UUID
     name: str

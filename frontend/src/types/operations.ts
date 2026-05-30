@@ -348,6 +348,90 @@ export type OrganizationGroupMembershipRead = {
   notes: string | null;
 };
 
+export type OrganizationAwardProgramRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  season_label: string | null;
+  level: string;
+  frequency: string;
+  nomination_opens_at: string | null;
+  nomination_closes_at: string | null;
+  voting_opens_at: string | null;
+  voting_closes_at: string | null;
+  eligibility_summary: string | null;
+  ceremony_name: string | null;
+  ceremony_at: string | null;
+  ceremony_venue: string | null;
+  certificate_template: string | null;
+  status: string;
+  notes: string | null;
+  category_count: number;
+  nomination_count: number;
+  recipient_count: number;
+};
+
+export type OrganizationAwardCategoryRead = {
+  id: UUID;
+  organization_id: UUID;
+  program_id: UUID;
+  name: string;
+  award_type: string;
+  judging_method: string;
+  criteria: string | null;
+  max_recipients: number;
+  voter_roles: string | null;
+  status: string;
+  nomination_count: number;
+  recipient_count: number;
+};
+
+export type OrganizationAwardNominationRead = {
+  id: UUID;
+  organization_id: UUID;
+  program_id: UUID;
+  category_id: UUID;
+  nominee_subject_type: "person" | "team" | "organization";
+  nominee_subject_id: UUID;
+  nominee_label: string | null;
+  nominated_by_person_id: UUID | null;
+  title: string;
+  nomination_summary: string;
+  evidence_url: string | null;
+  status: string;
+  finalist: boolean;
+  score: string | null;
+  vote_count: number;
+  weighted_score: string;
+};
+
+export type OrganizationAwardVoteRead = {
+  id: UUID;
+  organization_id: UUID;
+  nomination_id: UUID;
+  voter_person_id: UUID;
+  voter_label: string | null;
+  score: string;
+  weight: string;
+  comment: string | null;
+};
+
+export type OrganizationAwardRecipientRead = {
+  id: UUID;
+  organization_id: UUID;
+  program_id: UUID;
+  category_id: UUID;
+  nomination_id: UUID | null;
+  recipient_subject_type: "person" | "team" | "organization";
+  recipient_subject_id: UUID;
+  recipient_label: string | null;
+  certificate_number: string;
+  awarded_on: string;
+  public_citation: string;
+  certificate_url: string | null;
+  status: string;
+};
+
 export type PublicSiteTeamRead = {
   id: UUID;
   name: string;

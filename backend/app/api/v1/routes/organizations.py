@@ -23,6 +23,16 @@ from app.schemas.organization import (
     MemberSubscriptionPlanRead,
     MemberSubscriptionRead,
     MembershipRead,
+    OrganizationAwardCategoryCreate,
+    OrganizationAwardCategoryRead,
+    OrganizationAwardNominationCreate,
+    OrganizationAwardNominationRead,
+    OrganizationAwardProgramCreate,
+    OrganizationAwardProgramRead,
+    OrganizationAwardRecipientCreate,
+    OrganizationAwardRecipientRead,
+    OrganizationAwardVoteCreate,
+    OrganizationAwardVoteRead,
     OrganizationCreate,
     OrganizationDirectoryRead,
     OrganizationGroupCreate,
@@ -85,6 +95,11 @@ from app.services.organizations import (
     convert_registration_inquiry,
     create_registration_inquiry_follow_up,
     create_registration_payment_session,
+    create_or_update_organization_award_vote,
+    create_organization_award_category,
+    create_organization_award_nomination,
+    create_organization_award_program,
+    create_organization_award_recipient,
     add_organization_group_member,
     create_member_subscription,
     create_member_subscription_plan,
@@ -105,6 +120,10 @@ from app.services.organizations import (
     import_registration_inquiries,
     organization_handle_availability,
     list_family_registration_inquiries,
+    list_organization_award_categories,
+    list_organization_award_nominations,
+    list_organization_award_programs,
+    list_organization_award_recipients,
     list_organization_group_members,
     list_organization_groups,
     list_organization_programs,
@@ -1155,6 +1174,256 @@ async def list_organization_group_members_route(
     return [
         to_organization_group_membership_read(row)
         for row in await list_organization_group_members(db, identity, group_id, authz)
+    ]
+
+
+def to_organization_award_program_read(item) -> OrganizationAwardProgramRead:
+    program, category_count, nomination_count, recipient_count = item
+    return OrganizationAwardProgramRead(
+        id=program.id,
+        organization_id=program.organization_id,
+        name=program.name,
+        season_label=program.season_label,
+        level=program.level,
+        frequency=program.frequency,
+        nomination_opens_at=program.nomination_opens_at,
+        nomination_closes_at=program.nomination_closes_at,
+        voting_opens_at=program.voting_opens_at,
+        voting_closes_at=program.voting_closes_at,
+        eligibility_summary=program.eligibility_summary,
+        ceremony_name=program.ceremony_name,
+        ceremony_at=program.ceremony_at,
+        ceremony_venue=program.ceremony_venue,
+        certificate_template=program.certificate_template,
+        status=program.status,
+        notes=program.notes,
+        category_count=category_count,
+        nomination_count=nomination_count,
+        recipient_count=recipient_count,
+    )
+
+
+def to_organization_award_category_read(item) -> OrganizationAwardCategoryRead:
+    category, nomination_count, recipient_count = item
+    return OrganizationAwardCategoryRead(
+        id=category.id,
+        organization_id=category.organization_id,
+        program_id=category.program_id,
+        name=category.name,
+        award_type=category.award_type,
+        judging_method=category.judging_method,
+        criteria=category.criteria,
+        max_recipients=category.max_recipients,
+        voter_roles=category.voter_roles,
+        status=category.status,
+        nomination_count=nomination_count,
+        recipient_count=recipient_count,
+    )
+
+
+def to_organization_award_nomination_read(item) -> OrganizationAwardNominationRead:
+    nomination, nominee_label, vote_count, weighted_score = item
+    return OrganizationAwardNominationRead(
+        id=nomination.id,
+        organization_id=nomination.organization_id,
+        program_id=nomination.program_id,
+        category_id=nomination.category_id,
+        nominee_subject_type=nomination.nominee_subject_type,
+        nominee_subject_id=nomination.nominee_subject_id,
+        nominee_label=nominee_label,
+        nominated_by_person_id=nomination.nominated_by_person_id,
+        title=nomination.title,
+        nomination_summary=nomination.nomination_summary,
+        evidence_url=nomination.evidence_url,
+        status=nomination.status,
+        finalist=nomination.finalist,
+        score=nomination.score,
+        vote_count=vote_count,
+        weighted_score=weighted_score,
+    )
+
+
+def to_organization_award_vote_read(item) -> OrganizationAwardVoteRead:
+    vote, voter_label = item
+    return OrganizationAwardVoteRead(
+        id=vote.id,
+        organization_id=vote.organization_id,
+        nomination_id=vote.nomination_id,
+        voter_person_id=vote.voter_person_id,
+        voter_label=voter_label,
+        score=vote.score,
+        weight=vote.weight,
+        comment=vote.comment,
+    )
+
+
+def to_organization_award_recipient_read(item) -> OrganizationAwardRecipientRead:
+    recipient, recipient_label = item
+    return OrganizationAwardRecipientRead(
+        id=recipient.id,
+        organization_id=recipient.organization_id,
+        program_id=recipient.program_id,
+        category_id=recipient.category_id,
+        nomination_id=recipient.nomination_id,
+        recipient_subject_type=recipient.recipient_subject_type,
+        recipient_subject_id=recipient.recipient_subject_id,
+        recipient_label=recipient_label,
+        certificate_number=recipient.certificate_number,
+        awarded_on=recipient.awarded_on,
+        public_citation=recipient.public_citation,
+        certificate_url=recipient.certificate_url,
+        status=recipient.status,
+    )
+
+
+@router.post(
+    "/{organization_id}/award-programs",
+    response_model=OrganizationAwardProgramRead,
+    status_code=201,
+)
+async def create_organization_award_program_route(
+    organization_id: UUID,
+    payload: OrganizationAwardProgramCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationAwardProgramRead:
+    program = await create_organization_award_program(db, identity, organization_id, payload, authz)
+    rows = await list_organization_award_programs(db, identity, organization_id, authz)
+    return to_organization_award_program_read(next(row for row in rows if row[0].id == program.id))
+
+
+@router.get("/{organization_id}/award-programs", response_model=list[OrganizationAwardProgramRead])
+async def list_organization_award_programs_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationAwardProgramRead]:
+    return [
+        to_organization_award_program_read(row)
+        for row in await list_organization_award_programs(db, identity, organization_id, authz)
+    ]
+
+
+@router.post(
+    "/award-programs/{program_id}/categories",
+    response_model=OrganizationAwardCategoryRead,
+    status_code=201,
+)
+async def create_organization_award_category_route(
+    program_id: UUID,
+    payload: OrganizationAwardCategoryCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationAwardCategoryRead:
+    category = await create_organization_award_category(db, identity, program_id, payload, authz)
+    rows = await list_organization_award_categories(db, identity, program_id, authz)
+    return to_organization_award_category_read(next(row for row in rows if row[0].id == category.id))
+
+
+@router.get("/award-programs/{program_id}/categories", response_model=list[OrganizationAwardCategoryRead])
+async def list_organization_award_categories_route(
+    program_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationAwardCategoryRead]:
+    return [
+        to_organization_award_category_read(row)
+        for row in await list_organization_award_categories(db, identity, program_id, authz)
+    ]
+
+
+@router.post(
+    "/award-categories/{category_id}/nominations",
+    response_model=OrganizationAwardNominationRead,
+    status_code=201,
+)
+async def create_organization_award_nomination_route(
+    category_id: UUID,
+    payload: OrganizationAwardNominationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationAwardNominationRead:
+    nomination = await create_organization_award_nomination(db, identity, category_id, payload, authz)
+    rows = await list_organization_award_nominations(db, identity, category_id, authz)
+    return to_organization_award_nomination_read(
+        next(row for row in rows if row[0].id == nomination.id)
+    )
+
+
+@router.get(
+    "/award-categories/{category_id}/nominations",
+    response_model=list[OrganizationAwardNominationRead],
+)
+async def list_organization_award_nominations_route(
+    category_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationAwardNominationRead]:
+    return [
+        to_organization_award_nomination_read(row)
+        for row in await list_organization_award_nominations(db, identity, category_id, authz)
+    ]
+
+
+@router.post(
+    "/award-nominations/{nomination_id}/votes",
+    response_model=OrganizationAwardVoteRead,
+    status_code=201,
+)
+async def create_organization_award_vote_route(
+    nomination_id: UUID,
+    payload: OrganizationAwardVoteCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationAwardVoteRead:
+    vote = await create_or_update_organization_award_vote(
+        db,
+        identity,
+        nomination_id,
+        payload,
+        authz,
+    )
+    voter_label = identity.display_name if vote.voter_person_id == identity.person_id else None
+    return to_organization_award_vote_read((vote, voter_label))
+
+
+@router.post(
+    "/award-categories/{category_id}/recipients",
+    response_model=OrganizationAwardRecipientRead,
+    status_code=201,
+)
+async def create_organization_award_recipient_route(
+    category_id: UUID,
+    payload: OrganizationAwardRecipientCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationAwardRecipientRead:
+    recipient = await create_organization_award_recipient(db, identity, category_id, payload, authz)
+    rows = await list_organization_award_recipients(db, identity, recipient.program_id, authz)
+    return to_organization_award_recipient_read(next(row for row in rows if row[0].id == recipient.id))
+
+
+@router.get(
+    "/award-programs/{program_id}/recipients",
+    response_model=list[OrganizationAwardRecipientRead],
+)
+async def list_organization_award_recipients_route(
+    program_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationAwardRecipientRead]:
+    return [
+        to_organization_award_recipient_read(row)
+        for row in await list_organization_award_recipients(db, identity, program_id, authz)
     ]
 
 

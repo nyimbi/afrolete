@@ -298,6 +298,134 @@ def test_organization_program_season_and_group_crud(client, identity_headers) ->
     assert members[0]["subject_id"] == member["subject_id"]
 
 
+def test_organization_awards_nomination_voting_and_certificate_crud(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Awards Managed Club",
+            "organization_type": "club",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+    member = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "award-winner@example.com",
+            "display_name": "Award Winner",
+            "role": "athlete",
+            "title": "Forward",
+        },
+    ).json()
+
+    program_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/award-programs",
+        headers=identity_headers,
+        json={
+            "name": "Season Awards",
+            "season_label": "2026",
+            "level": "club",
+            "frequency": "seasonal",
+            "nomination_opens_at": "2026-11-01T08:00:00Z",
+            "nomination_closes_at": "2026-11-15T18:00:00Z",
+            "voting_opens_at": "2026-11-16T08:00:00Z",
+            "voting_closes_at": "2026-11-25T18:00:00Z",
+            "eligibility_summary": "Active members in good standing with attendance and dues complete.",
+            "ceremony_name": "Awards Night",
+            "ceremony_at": "2026-12-05T17:00:00Z",
+            "ceremony_venue": "Clubhouse Hall",
+            "certificate_template": "Presented to {{name}} for {{award}}.",
+            "status": "nominations_open",
+        },
+    )
+    assert program_response.status_code == 201
+    program = program_response.json()
+    assert program["category_count"] == 0
+    assert program["recipient_count"] == 0
+
+    category_response = client.post(
+        f"/api/v1/organizations/award-programs/{program['id']}/categories",
+        headers=identity_headers,
+        json={
+            "name": "Player of the Season",
+            "award_type": "individual",
+            "judging_method": "weighted_vote",
+            "criteria": "Attendance, match impact, leadership, and coachability.",
+            "max_recipients": 1,
+            "voter_roles": "coaches,players,committee",
+        },
+    )
+    assert category_response.status_code == 201
+    category = category_response.json()
+    assert category["program_id"] == program["id"]
+
+    nomination_response = client.post(
+        f"/api/v1/organizations/award-categories/{category['id']}/nominations",
+        headers=identity_headers,
+        json={
+            "nominee_subject_type": "person",
+            "nominee_subject_id": member["subject_id"],
+            "title": "Relentless season leader",
+            "nomination_summary": "Led training attendance, match contribution, and teammate mentoring.",
+            "evidence_url": "https://example.test/evidence/award-winner",
+            "status": "shortlisted",
+            "finalist": True,
+            "score": "88.50",
+        },
+    )
+    assert nomination_response.status_code == 201
+    nomination = nomination_response.json()
+    assert nomination["nominee_label"] == "Award Winner"
+    assert nomination["vote_count"] == 0
+
+    vote_response = client.post(
+        f"/api/v1/organizations/award-nominations/{nomination['id']}/votes",
+        headers=identity_headers,
+        json={
+            "score": "92.00",
+            "weight": "1.50",
+            "comment": "Clear winner on performance and leadership.",
+        },
+    )
+    assert vote_response.status_code == 201
+    assert vote_response.json()["score"] == "92.00"
+
+    nominations_response = client.get(
+        f"/api/v1/organizations/award-categories/{category['id']}/nominations",
+        headers=identity_headers,
+    )
+    assert nominations_response.status_code == 200
+    nominations = nominations_response.json()
+    assert nominations[0]["vote_count"] == 1
+    assert nominations[0]["weighted_score"] == "138.00"
+
+    recipient_response = client.post(
+        f"/api/v1/organizations/award-categories/{category['id']}/recipients",
+        headers=identity_headers,
+        json={
+            "nomination_id": nomination["id"],
+            "recipient_subject_type": "person",
+            "recipient_subject_id": member["subject_id"],
+            "awarded_on": "2026-12-05",
+            "public_citation": "Recognized for sustained excellence, leadership, and club impact.",
+            "certificate_url": "https://example.test/certificates/award-winner.pdf",
+        },
+    )
+    assert recipient_response.status_code == 201
+    recipient = recipient_response.json()
+    assert recipient["recipient_label"] == "Award Winner"
+    assert recipient["certificate_number"].startswith("AFROLETE-AWARD-")
+
+    recipients_response = client.get(
+        f"/api/v1/organizations/award-programs/{program['id']}/recipients",
+        headers=identity_headers,
+    )
+    assert recipients_response.status_code == 200
+    assert recipients_response.json()[0]["certificate_number"] == recipient["certificate_number"]
+
+
 def test_registration_learning_path_personalizes_onboarding(client) -> None:
     response = client.post(
         "/api/v1/organizations/registration-learning-path",

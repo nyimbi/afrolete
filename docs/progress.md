@@ -1224,6 +1224,7 @@ athlete-development platform:
 | 539 - Shared highlight reel feedback follow-ups | Complete | Focused highlight-reel feedback test; backend lint; frontend typecheck; Alembic heads; diff check | Shared highlight reel feedback now supports coach follow-up messages through the communications ledger, persists follow-up metadata on feedback records, exposes reply state in coach engagement summaries, and gives player/family portals direct acknowledgement/help controls plus visible coach replies. |
 | 540 - Club-managed member dues subscriptions | Complete | Focused organization dues test; backend lint; frontend typecheck; Alembic heads; diff check | Clubs, schools, and associations can now manage their own member subscription plans, assign dues to person/organization/team members, and record M-Pesa/manual/provider payment references against those subscriptions without mixing club receivables into AfroLete SaaS hosting subscriptions; the operations console exposes dues plan creation, selected-member assignment, outstanding balances, and payment recording. |
 | 541 - Program, season, and flexible group CRUD | Complete | Focused organization operating-unit test; backend lint; frontend typecheck; Alembic heads/upgrade; diff check | Tenant workspaces can now create programs, seasons, and flexible groups/cohorts linked to programs, seasons, teams, and person leads; groups support person/team/organization memberships with roles and member counts, giving clubs, schools, academies, and associations a CRUD foundation for age bands, skill groups, position groups, school-year groups, committees, and operating cohorts in the console. |
+| 542 - Organization awards, voting, and certificates | Complete | Focused organization awards test; backend lint; frontend typecheck; Alembic heads/upgrade; diff check | Clubs, schools, academies, and associations can now run organization-wide awards programs with seasons, ceremony details, categories, eligibility criteria, nominations for people/teams/organizations, weighted voting, recipient selection, certificate numbers, citations, and console controls for Program, Category, Nominate, Vote, and Award workflows. |
 
 ## Capability Coverage
 
@@ -1271,6 +1272,7 @@ Latest slices:
 - Shared highlight reels now close the same loop: players and guardians can acknowledge or ask for help, coaches can reply from highlight engagement summaries, and player/family cards show coach follow-up metadata.
 - Club-managed member dues now have separate plans, member subscriptions, and M-Pesa/manual payment tracking so tenant clubs can manage receivables without confusing them with AfroLete platform hosting subscriptions.
 - Tenant operating structures now have CRUD for programs, seasons, and flexible groups/cohorts, including group member assignment for person/team/organization subjects.
+- Organization awards now cover seasonal award programs, categories, nominations, weighted votes, recipients, and certificate numbers for people, teams, or organizations.
 
 ## Next Actions
 

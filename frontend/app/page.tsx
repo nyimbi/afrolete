@@ -346,6 +346,11 @@ import type {
   MetricVerificationStatus,
   MetricSource,
   OfficialRole,
+  OrganizationAwardCategoryRead,
+  OrganizationAwardNominationRead,
+  OrganizationAwardProgramRead,
+  OrganizationAwardRecipientRead,
+  OrganizationAwardVoteRead,
   OrganizationGroupMembershipRead,
   OrganizationGroupRead,
   OrganizationProgramRead,
@@ -1830,6 +1835,11 @@ export default function HomePage() {
   const [organizationSeasons, setOrganizationSeasons] = useState<OrganizationSeasonRead[]>([]);
   const [organizationGroups, setOrganizationGroups] = useState<OrganizationGroupRead[]>([]);
   const [organizationGroupMembers, setOrganizationGroupMembers] = useState<OrganizationGroupMembershipRead[]>([]);
+  const [awardPrograms, setAwardPrograms] = useState<OrganizationAwardProgramRead[]>([]);
+  const [awardCategories, setAwardCategories] = useState<OrganizationAwardCategoryRead[]>([]);
+  const [awardNominations, setAwardNominations] = useState<OrganizationAwardNominationRead[]>([]);
+  const [awardRecipients, setAwardRecipients] = useState<OrganizationAwardRecipientRead[]>([]);
+  const [awardVote, setAwardVote] = useState<OrganizationAwardVoteRead | null>(null);
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
@@ -2417,6 +2427,9 @@ export default function HomePage() {
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedOrganizationGroupId, setSelectedOrganizationGroupId] = useState("");
+  const [selectedAwardProgramId, setSelectedAwardProgramId] = useState("");
+  const [selectedAwardCategoryId, setSelectedAwardCategoryId] = useState("");
+  const [selectedAwardNominationId, setSelectedAwardNominationId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
@@ -2523,6 +2536,50 @@ export default function HomePage() {
     subject_id: "",
     role: "athlete",
     notes: "Added from operations console."
+  });
+  const [awardProgramForm, setAwardProgramForm] = useState({
+    name: "Season Awards",
+    season_label: "2026",
+    level: "club",
+    frequency: "seasonal",
+    nomination_opens_at: "2026-11-01T08:00:00Z",
+    nomination_closes_at: "2026-11-15T18:00:00Z",
+    voting_opens_at: "2026-11-16T08:00:00Z",
+    voting_closes_at: "2026-11-25T18:00:00Z",
+    eligibility_summary: "Active members in good standing with attendance and dues complete.",
+    ceremony_name: "Awards Night",
+    ceremony_at: "2026-12-05T17:00:00Z",
+    ceremony_venue: "Clubhouse Hall",
+    certificate_template: "Presented to {{name}} for {{award}}.",
+    status: "nominations_open"
+  });
+  const [awardCategoryForm, setAwardCategoryForm] = useState({
+    name: "Player of the Season",
+    award_type: "individual",
+    judging_method: "weighted_vote",
+    criteria: "Attendance, match impact, leadership, and coachability.",
+    max_recipients: 1,
+    voter_roles: "coaches,players,committee"
+  });
+  const [awardNominationForm, setAwardNominationForm] = useState({
+    nominee_subject_id: "",
+    title: "Relentless season leader",
+    nomination_summary: "Led training attendance, match contribution, and teammate mentoring.",
+    evidence_url: "https://example.test/evidence/award-winner",
+    status: "shortlisted",
+    finalist: true,
+    score: "88.50"
+  });
+  const [awardVoteForm, setAwardVoteForm] = useState({
+    score: "92.00",
+    weight: "1.50",
+    comment: "Clear winner on performance and leadership."
+  });
+  const [awardRecipientForm, setAwardRecipientForm] = useState({
+    recipient_subject_id: "",
+    awarded_on: "2026-12-05",
+    public_citation: "Recognized for sustained excellence, leadership, and club impact.",
+    certificate_url: "https://example.test/certificates/award-winner.pdf"
   });
   const [memberDuesPlanForm, setMemberDuesPlanForm] = useState({
     name: "Senior player monthly dues",
@@ -3941,6 +3998,40 @@ export default function HomePage() {
       { identity }
     );
     setOrganizationGroupMembers(data);
+  }, [identity]);
+
+  const loadAwardPrograms = useCallback(async (organizationId: string) => {
+    const data = await apiRequest<OrganizationAwardProgramRead[]>(
+      `/organizations/${organizationId}/award-programs`,
+      { identity }
+    );
+    setAwardPrograms(data);
+    setSelectedAwardProgramId((current) =>
+      data.some((program) => program.id === current) ? current : data[0]?.id ?? ""
+    );
+  }, [identity]);
+
+  const loadAwardProgramDetails = useCallback(async (programId: string) => {
+    const [categories, recipients] = await Promise.all([
+      apiRequest<OrganizationAwardCategoryRead[]>(`/organizations/award-programs/${programId}/categories`, { identity }),
+      apiRequest<OrganizationAwardRecipientRead[]>(`/organizations/award-programs/${programId}/recipients`, { identity })
+    ]);
+    setAwardCategories(categories);
+    setAwardRecipients(recipients);
+    setSelectedAwardCategoryId((current) =>
+      categories.some((category) => category.id === current) ? current : categories[0]?.id ?? ""
+    );
+  }, [identity]);
+
+  const loadAwardNominations = useCallback(async (categoryId: string) => {
+    const data = await apiRequest<OrganizationAwardNominationRead[]>(
+      `/organizations/award-categories/${categoryId}/nominations`,
+      { identity }
+    );
+    setAwardNominations(data);
+    setSelectedAwardNominationId((current) =>
+      data.some((nomination) => nomination.id === current) ? current : data[0]?.id ?? ""
+    );
   }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
@@ -5467,6 +5558,14 @@ export default function HomePage() {
       setOrganizationGroups([]);
       setOrganizationGroupMembers([]);
       setSelectedOrganizationGroupId("");
+      setAwardPrograms([]);
+      setAwardCategories([]);
+      setAwardNominations([]);
+      setAwardRecipients([]);
+      setAwardVote(null);
+      setSelectedAwardProgramId("");
+      setSelectedAwardCategoryId("");
+      setSelectedAwardNominationId("");
       setMemberSubscriptionPlans([]);
       setMemberSubscriptions([]);
       setMemberSubscriptionPayment(null);
@@ -5885,6 +5984,7 @@ export default function HomePage() {
     runAction("load-tenant-data", async () => {
       await loadTeams(selectedOrganizationId);
       await loadOrganizationOperatingUnits(selectedOrganizationId);
+      await loadAwardPrograms(selectedOrganizationId);
       await loadMemberDues(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
@@ -5920,6 +6020,7 @@ export default function HomePage() {
     selectedOrganizationId,
     loadTeams,
     loadOrganizationOperatingUnits,
+    loadAwardPrograms,
     loadMemberDues,
     loadRegistrationInquiries,
     loadEvents,
@@ -5965,6 +6066,33 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedOrganizationGroupId, loadOrganizationGroupMembers, runAction]);
+
+  useEffect(() => {
+    if (!selectedAwardProgramId) {
+      setAwardCategories([]);
+      setAwardRecipients([]);
+      setSelectedAwardCategoryId("");
+      return;
+    }
+    runAction(
+      "load-award-program-details",
+      () => loadAwardProgramDetails(selectedAwardProgramId),
+      () => undefined
+    );
+  }, [selectedAwardProgramId, loadAwardProgramDetails, runAction]);
+
+  useEffect(() => {
+    if (!selectedAwardCategoryId) {
+      setAwardNominations([]);
+      setSelectedAwardNominationId("");
+      return;
+    }
+    runAction(
+      "load-award-nominations",
+      () => loadAwardNominations(selectedAwardCategoryId),
+      () => undefined
+    );
+  }, [selectedAwardCategoryId, loadAwardNominations, runAction]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -6404,6 +6532,132 @@ export default function HomePage() {
           )
         );
         addLog(`${membership.subject_label ?? "Member"} added to group`, "good");
+      }
+    );
+  };
+
+  const createAwardProgram = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating awards", "bad");
+      return;
+    }
+    runAction(
+      "create-award-program",
+      () =>
+        apiRequest<OrganizationAwardProgramRead>(`/organizations/${selectedOrganizationId}/award-programs`, {
+          method: "POST",
+          identity,
+          body: awardProgramForm
+        }),
+      (program) => {
+        setAwardPrograms((current) => [program, ...current.filter((item) => item.id !== program.id)]);
+        setSelectedAwardProgramId(program.id);
+        addLog(`${program.name} awards program opened`, "good");
+      }
+    );
+  };
+
+  const createAwardCategory = () => {
+    const programId = selectedAwardProgramId || awardPrograms[0]?.id;
+    if (!programId) {
+      addLog("Create or select an awards program first", "bad");
+      return;
+    }
+    runAction(
+      "create-award-category",
+      () =>
+        apiRequest<OrganizationAwardCategoryRead>(`/organizations/award-programs/${programId}/categories`, {
+          method: "POST",
+          identity,
+          body: awardCategoryForm
+        }),
+      (category) => {
+        setAwardCategories((current) => [category, ...current.filter((item) => item.id !== category.id)]);
+        setSelectedAwardCategoryId(category.id);
+        addLog(`${category.name} category opened`, "good");
+      }
+    );
+  };
+
+  const createAwardNomination = () => {
+    const categoryId = selectedAwardCategoryId || awardCategories[0]?.id;
+    const nomineeId = awardNominationForm.nominee_subject_id || selectedAthlete?.personId || "";
+    if (!categoryId || !nomineeId) {
+      addLog("Select an award category and nominee first", "bad");
+      return;
+    }
+    runAction(
+      "create-award-nomination",
+      () =>
+        apiRequest<OrganizationAwardNominationRead>(`/organizations/award-categories/${categoryId}/nominations`, {
+          method: "POST",
+          identity,
+          body: {
+            ...awardNominationForm,
+            nominee_subject_type: "person",
+            nominee_subject_id: nomineeId
+          }
+        }),
+      (nomination) => {
+        setAwardNominations((current) => [
+          nomination,
+          ...current.filter((item) => item.id !== nomination.id)
+        ]);
+        setSelectedAwardNominationId(nomination.id);
+        addLog(`${nomination.nominee_label ?? "Nominee"} shortlisted`, "good");
+      }
+    );
+  };
+
+  const voteAwardNomination = () => {
+    const nominationId = selectedAwardNominationId || awardNominations[0]?.id;
+    const nomination = awardNominations.find((item) => item.id === nominationId);
+    if (!nominationId) {
+      addLog("Select an award nomination before voting", "bad");
+      return;
+    }
+    runAction(
+      "vote-award-nomination",
+      () =>
+        apiRequest<OrganizationAwardVoteRead>(`/organizations/award-nominations/${nominationId}/votes`, {
+          method: "POST",
+          identity,
+          body: awardVoteForm
+        }),
+      (vote) => {
+        setAwardVote(vote);
+        if (nomination) {
+          void loadAwardNominations(nomination.category_id);
+        }
+        addLog(`Award vote recorded at ${vote.score}`, "good");
+      }
+    );
+  };
+
+  const createAwardRecipient = () => {
+    const categoryId = selectedAwardCategoryId || awardCategories[0]?.id;
+    const nomination = awardNominations.find((item) => item.id === selectedAwardNominationId) ?? awardNominations[0];
+    const recipientId = awardRecipientForm.recipient_subject_id || nomination?.nominee_subject_id || selectedAthlete?.personId || "";
+    if (!categoryId || !recipientId) {
+      addLog("Select an award category and recipient first", "bad");
+      return;
+    }
+    runAction(
+      "create-award-recipient",
+      () =>
+        apiRequest<OrganizationAwardRecipientRead>(`/organizations/award-categories/${categoryId}/recipients`, {
+          method: "POST",
+          identity,
+          body: {
+            ...awardRecipientForm,
+            nomination_id: nomination?.id ?? null,
+            recipient_subject_type: "person",
+            recipient_subject_id: recipientId
+          }
+        }),
+      (recipient) => {
+        setAwardRecipients((current) => [recipient, ...current.filter((item) => item.id !== recipient.id)]);
+        addLog(`${recipient.recipient_label ?? "Recipient"} awarded ${recipient.certificate_number}`, "good");
       }
     );
   };
@@ -21552,6 +21806,135 @@ export default function HomePage() {
                     <strong>{member.subject_label ?? member.subject_id}</strong>
                     <span>{member.role.replaceAll("_", " ")} · {member.status}</span>
                     <small>{member.notes ?? "Group membership"}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Awards</p>
+                <h2>Nominations, voting, certificates</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createAwardProgram} disabled={busyAction !== null}>Program</button>
+                <button type="button" onClick={createAwardCategory} disabled={busyAction !== null}>Category</button>
+                <button type="button" onClick={createAwardNomination} disabled={busyAction !== null}>Nominate</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Program
+                <input value={awardProgramForm.name} onChange={(event) => setAwardProgramForm({ ...awardProgramForm, name: event.target.value })} />
+              </label>
+              <label>
+                Season
+                <input value={awardProgramForm.season_label} onChange={(event) => setAwardProgramForm({ ...awardProgramForm, season_label: event.target.value })} />
+              </label>
+              <label>
+                Level
+                <select value={awardProgramForm.level} onChange={(event) => setAwardProgramForm({ ...awardProgramForm, level: event.target.value })}>
+                  <option value="club">Club</option>
+                  <option value="school">School</option>
+                  <option value="association">Association</option>
+                  <option value="regional">Regional</option>
+                  <option value="national">National</option>
+                </select>
+              </label>
+              <label>
+                Ceremony
+                <input value={awardProgramForm.ceremony_name} onChange={(event) => setAwardProgramForm({ ...awardProgramForm, ceremony_name: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <input value={awardCategoryForm.name} onChange={(event) => setAwardCategoryForm({ ...awardCategoryForm, name: event.target.value })} />
+              </label>
+              <label>
+                Judging
+                <select value={awardCategoryForm.judging_method} onChange={(event) => setAwardCategoryForm({ ...awardCategoryForm, judging_method: event.target.value })}>
+                  <option value="committee">Committee</option>
+                  <option value="weighted_vote">Weighted vote</option>
+                  <option value="coach_vote">Coach vote</option>
+                  <option value="public_vote">Public vote</option>
+                </select>
+              </label>
+              <label>
+                Nominee person id
+                <input value={awardNominationForm.nominee_subject_id || selectedAthlete?.personId || ""} onChange={(event) => setAwardNominationForm({ ...awardNominationForm, nominee_subject_id: event.target.value })} />
+              </label>
+              <label>
+                Nomination title
+                <input value={awardNominationForm.title} onChange={(event) => setAwardNominationForm({ ...awardNominationForm, title: event.target.value })} />
+              </label>
+              <label>
+                Score
+                <input value={awardVoteForm.score} onChange={(event) => setAwardVoteForm({ ...awardVoteForm, score: event.target.value })} />
+              </label>
+              <label>
+                Weight
+                <input value={awardVoteForm.weight} onChange={(event) => setAwardVoteForm({ ...awardVoteForm, weight: event.target.value })} />
+              </label>
+              <label>
+                Awarded on
+                <input type="date" value={awardRecipientForm.awarded_on} onChange={(event) => setAwardRecipientForm({ ...awardRecipientForm, awarded_on: event.target.value })} />
+              </label>
+              <label>
+                Certificate URL
+                <input value={awardRecipientForm.certificate_url} onChange={(event) => setAwardRecipientForm({ ...awardRecipientForm, certificate_url: event.target.value })} />
+              </label>
+            </div>
+            <div className="event-toolbar">
+              <button type="button" onClick={voteAwardNomination} disabled={busyAction !== null}>Vote</button>
+              <button type="button" onClick={createAwardRecipient} disabled={busyAction !== null}>Award</button>
+            </div>
+            <div className="task-list">
+              {awardPrograms.slice(0, 3).map((program) => (
+                <article key={program.id} className={`task-card ${program.id === selectedAwardProgramId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{program.name}</strong>
+                    <span>{program.status.replaceAll("_", " ")} · {program.level} · {program.season_label ?? "season open"}</span>
+                    <small>{program.category_count} categories · {program.nomination_count} nominations · {program.recipient_count} recipients</small>
+                  </div>
+                  <button type="button" onClick={() => setSelectedAwardProgramId(program.id)}>Select</button>
+                </article>
+              ))}
+              {awardCategories.slice(0, 3).map((category) => (
+                <article key={category.id} className={`task-card ${category.id === selectedAwardCategoryId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{category.name}</strong>
+                    <span>{category.award_type.replaceAll("_", " ")} · {category.judging_method.replaceAll("_", " ")}</span>
+                    <small>{category.nomination_count} nomination(s) · {category.recipient_count} recipient(s)</small>
+                  </div>
+                  <button type="button" onClick={() => setSelectedAwardCategoryId(category.id)}>Select</button>
+                </article>
+              ))}
+              {awardNominations.slice(0, 4).map((nomination) => (
+                <article key={nomination.id} className={`task-card ${nomination.id === selectedAwardNominationId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{nomination.nominee_label ?? nomination.nominee_subject_id}</strong>
+                    <span>{nomination.title} · {nomination.status} · {nomination.vote_count} vote(s)</span>
+                    <small>Weighted {nomination.weighted_score} · {nomination.finalist ? "finalist" : "not finalist"}</small>
+                  </div>
+                  <button type="button" onClick={() => setSelectedAwardNominationId(nomination.id)}>Select</button>
+                </article>
+              ))}
+              {awardVote ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Vote recorded</strong>
+                    <span>{awardVote.score} x {awardVote.weight}</span>
+                    <small>{awardVote.comment ?? awardVote.voter_label ?? "Awards vote"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {awardRecipients.slice(0, 3).map((recipient) => (
+                <article key={recipient.id} className="task-card">
+                  <div>
+                    <strong>{recipient.recipient_label ?? recipient.recipient_subject_id}</strong>
+                    <span>{recipient.certificate_number} · {recipient.status}</span>
+                    <small>{recipient.public_citation}</small>
                   </div>
                 </article>
               ))}

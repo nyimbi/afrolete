@@ -115,6 +115,145 @@ class OrganizationGroupMembership(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class OrganizationAwardProgram(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_award_programs"
+    __table_args__ = (UniqueConstraint("organization_id", "name", "season_label"),)
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    season_label: Mapped[str | None] = mapped_column(String(80), index=True)
+    level: Mapped[str] = mapped_column(String(80), default="club", nullable=False, index=True)
+    frequency: Mapped[str] = mapped_column(
+        String(80), default="seasonal", nullable=False, index=True
+    )
+    nomination_opens_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    nomination_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    voting_opens_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    voting_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    eligibility_summary: Mapped[str | None] = mapped_column(Text)
+    ceremony_name: Mapped[str | None] = mapped_column(String(180))
+    ceremony_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    ceremony_venue: Mapped[str | None] = mapped_column(String(240))
+    certificate_template: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationAwardCategory(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_award_categories"
+    __table_args__ = (UniqueConstraint("program_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    program_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organization_award_programs.id"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    award_type: Mapped[str] = mapped_column(
+        String(80), default="individual", nullable=False, index=True
+    )
+    judging_method: Mapped[str] = mapped_column(
+        String(80), default="committee", nullable=False, index=True
+    )
+    criteria: Mapped[str | None] = mapped_column(Text)
+    max_recipients: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    voter_roles: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
+class OrganizationAwardNomination(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_award_nominations"
+    __table_args__ = (
+        UniqueConstraint(
+            "category_id",
+            "nominee_subject_type",
+            "nominee_subject_id",
+            name="uq_organization_award_nominations_nominee",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    program_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organization_award_programs.id"), index=True
+    )
+    category_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organization_award_categories.id"), index=True
+    )
+    nominee_subject_type: Mapped[MemberSubjectType] = mapped_column(
+        enum_type(MemberSubjectType), nullable=False, index=True
+    )
+    nominee_subject_id: Mapped[UUID] = mapped_column(GUID(), index=True)
+    nominated_by_person_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("persons.id"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    nomination_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(
+        String(40), default="submitted", nullable=False, index=True
+    )
+    finalist: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+
+
+class OrganizationAwardVote(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_award_votes"
+    __table_args__ = (
+        UniqueConstraint("nomination_id", "voter_person_id", name="uq_organization_award_votes_voter"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    nomination_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organization_award_nominations.id"), index=True
+    )
+    voter_person_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    score: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
+    weight: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=Decimal("1"), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationAwardRecipient(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_award_recipients"
+    __table_args__ = (
+        UniqueConstraint(
+            "category_id",
+            "recipient_subject_type",
+            "recipient_subject_id",
+            name="uq_organization_award_recipients_subject",
+        ),
+        UniqueConstraint("organization_id", "certificate_number"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    program_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organization_award_programs.id"), index=True
+    )
+    category_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organization_award_categories.id"), index=True
+    )
+    nomination_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("organization_award_nominations.id"), index=True
+    )
+    recipient_subject_type: Mapped[MemberSubjectType] = mapped_column(
+        enum_type(MemberSubjectType), nullable=False, index=True
+    )
+    recipient_subject_id: Mapped[UUID] = mapped_column(GUID(), index=True)
+    certificate_number: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    awarded_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    public_citation: Mapped[str] = mapped_column(Text, nullable=False)
+    certificate_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(40), default="awarded", nullable=False, index=True)
+
+
 class Membership(IdMixin, TimestampMixin, Base):
     __tablename__ = "memberships"
     __table_args__ = (

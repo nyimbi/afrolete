@@ -52,6 +52,11 @@ from app.models.organization import (
     MemberSubscriptionPayment,
     MemberSubscriptionPlan,
     Membership,
+    OrganizationAwardCategory,
+    OrganizationAwardNomination,
+    OrganizationAwardProgram,
+    OrganizationAwardRecipient,
+    OrganizationAwardVote,
     OrganizationGroup,
     OrganizationGroupMembership,
     OrganizationProgram,
@@ -68,6 +73,11 @@ from app.schemas.organization import (
     MemberSubscriptionCreate,
     MemberSubscriptionPaymentCreate,
     MemberSubscriptionPlanCreate,
+    OrganizationAwardCategoryCreate,
+    OrganizationAwardNominationCreate,
+    OrganizationAwardProgramCreate,
+    OrganizationAwardRecipientCreate,
+    OrganizationAwardVoteCreate,
     OrganizationGroupCreate,
     OrganizationGroupMemberAdd,
     OrganizationProgramCreate,
@@ -3843,6 +3853,337 @@ async def ensure_group_links_match_organization(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
     if payload.lead_person_id is not None and await db.get(Person, payload.lead_person_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead person not found")
+
+
+async def create_organization_award_program(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationAwardProgramCreate,
+    authz: AuthorizationService,
+) -> OrganizationAwardProgram:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    program = OrganizationAwardProgram(
+        organization_id=organization_id,
+        name=payload.name,
+        season_label=payload.season_label,
+        level=payload.level,
+        frequency=payload.frequency,
+        nomination_opens_at=payload.nomination_opens_at,
+        nomination_closes_at=payload.nomination_closes_at,
+        voting_opens_at=payload.voting_opens_at,
+        voting_closes_at=payload.voting_closes_at,
+        eligibility_summary=payload.eligibility_summary,
+        ceremony_name=payload.ceremony_name,
+        ceremony_at=payload.ceremony_at,
+        ceremony_venue=payload.ceremony_venue,
+        certificate_template=payload.certificate_template,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(program)
+    await db.commit()
+    await db.refresh(program)
+    return program
+
+
+async def list_organization_award_programs(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> list[tuple[OrganizationAwardProgram, int, int, int]]:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    programs = list(
+        (
+            await db.scalars(
+                select(OrganizationAwardProgram)
+                .where(OrganizationAwardProgram.organization_id == organization_id)
+                .order_by(OrganizationAwardProgram.created_at.desc())
+            )
+        ).all()
+    )
+    rows: list[tuple[OrganizationAwardProgram, int, int, int]] = []
+    for program in programs:
+        category_count = await scalar_count_for(db, OrganizationAwardCategory.program_id, program.id)
+        nomination_count = await scalar_count_for(db, OrganizationAwardNomination.program_id, program.id)
+        recipient_count = await scalar_count_for(db, OrganizationAwardRecipient.program_id, program.id)
+        rows.append((program, category_count, nomination_count, recipient_count))
+    return rows
+
+
+async def create_organization_award_category(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    program_id: UUID,
+    payload: OrganizationAwardCategoryCreate,
+    authz: AuthorizationService,
+) -> OrganizationAwardCategory:
+    program = await get_award_program_for_manage(db, identity, program_id, authz)
+    category = OrganizationAwardCategory(
+        organization_id=program.organization_id,
+        program_id=program.id,
+        name=payload.name,
+        award_type=payload.award_type,
+        judging_method=payload.judging_method,
+        criteria=payload.criteria,
+        max_recipients=payload.max_recipients,
+        voter_roles=payload.voter_roles,
+        status=payload.status,
+    )
+    db.add(category)
+    await db.commit()
+    await db.refresh(category)
+    return category
+
+
+async def list_organization_award_categories(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    program_id: UUID,
+    authz: AuthorizationService,
+) -> list[tuple[OrganizationAwardCategory, int, int]]:
+    await get_award_program_for_manage(db, identity, program_id, authz)
+    categories = list(
+        (
+            await db.scalars(
+                select(OrganizationAwardCategory)
+                .where(OrganizationAwardCategory.program_id == program_id)
+                .order_by(OrganizationAwardCategory.status, OrganizationAwardCategory.name)
+            )
+        ).all()
+    )
+    rows: list[tuple[OrganizationAwardCategory, int, int]] = []
+    for category in categories:
+        nomination_count = await scalar_count_for(db, OrganizationAwardNomination.category_id, category.id)
+        recipient_count = await scalar_count_for(db, OrganizationAwardRecipient.category_id, category.id)
+        rows.append((category, nomination_count, recipient_count))
+    return rows
+
+
+async def create_organization_award_nomination(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    category_id: UUID,
+    payload: OrganizationAwardNominationCreate,
+    authz: AuthorizationService,
+) -> OrganizationAwardNomination:
+    category = await get_award_category_for_manage(db, identity, category_id, authz)
+    await ensure_member_subject_exists(db, payload.nominee_subject_type, payload.nominee_subject_id)
+    nomination = OrganizationAwardNomination(
+        organization_id=category.organization_id,
+        program_id=category.program_id,
+        category_id=category.id,
+        nominee_subject_type=payload.nominee_subject_type,
+        nominee_subject_id=payload.nominee_subject_id,
+        nominated_by_person_id=identity.person_id,
+        title=payload.title,
+        nomination_summary=payload.nomination_summary,
+        evidence_url=payload.evidence_url,
+        status=payload.status,
+        finalist=payload.finalist,
+        score=payload.score,
+    )
+    db.add(nomination)
+    await db.commit()
+    await db.refresh(nomination)
+    return nomination
+
+
+async def list_organization_award_nominations(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    category_id: UUID,
+    authz: AuthorizationService,
+) -> list[tuple[OrganizationAwardNomination, str | None, int, Decimal]]:
+    await get_award_category_for_manage(db, identity, category_id, authz)
+    nominations = list(
+        (
+            await db.scalars(
+                select(OrganizationAwardNomination)
+                .where(OrganizationAwardNomination.category_id == category_id)
+                .order_by(
+                    OrganizationAwardNomination.finalist.desc(),
+                    OrganizationAwardNomination.status,
+                    OrganizationAwardNomination.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+    rows: list[tuple[OrganizationAwardNomination, str | None, int, Decimal]] = []
+    for nomination in nominations:
+        votes = list(
+            (
+                await db.scalars(
+                    select(OrganizationAwardVote).where(
+                        OrganizationAwardVote.nomination_id == nomination.id
+                    )
+                )
+            ).all()
+        )
+        weighted_score = sum((vote.score * vote.weight for vote in votes), Decimal("0")).quantize(
+            Decimal("0.01")
+        )
+        nominee_label = await member_subject_label(
+            db,
+            nomination.nominee_subject_type,
+            nomination.nominee_subject_id,
+        )
+        rows.append((nomination, nominee_label, len(votes), weighted_score))
+    return rows
+
+
+async def create_or_update_organization_award_vote(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    nomination_id: UUID,
+    payload: OrganizationAwardVoteCreate,
+    authz: AuthorizationService,
+) -> OrganizationAwardVote:
+    nomination = await get_award_nomination_for_manage(db, identity, nomination_id, authz)
+    voter_person_id = payload.voter_person_id or identity.person_id
+    voter = await db.get(Person, voter_person_id)
+    if voter is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voter not found")
+    vote = await db.scalar(
+        select(OrganizationAwardVote).where(
+            OrganizationAwardVote.nomination_id == nomination.id,
+            OrganizationAwardVote.voter_person_id == voter_person_id,
+        )
+    )
+    if vote is None:
+        vote = OrganizationAwardVote(
+            organization_id=nomination.organization_id,
+            nomination_id=nomination.id,
+            voter_person_id=voter_person_id,
+            score=payload.score,
+            weight=payload.weight,
+            comment=payload.comment,
+        )
+        db.add(vote)
+    else:
+        vote.score = payload.score
+        vote.weight = payload.weight
+        vote.comment = payload.comment
+    await db.commit()
+    await db.refresh(vote)
+    return vote
+
+
+async def create_organization_award_recipient(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    category_id: UUID,
+    payload: OrganizationAwardRecipientCreate,
+    authz: AuthorizationService,
+) -> OrganizationAwardRecipient:
+    category = await get_award_category_for_manage(db, identity, category_id, authz)
+    await ensure_member_subject_exists(db, payload.recipient_subject_type, payload.recipient_subject_id)
+    nomination: OrganizationAwardNomination | None = None
+    if payload.nomination_id is not None:
+        nomination = await db.get(OrganizationAwardNomination, payload.nomination_id)
+        if nomination is None or nomination.category_id != category.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Award nomination not found")
+    recipient = OrganizationAwardRecipient(
+        organization_id=category.organization_id,
+        program_id=category.program_id,
+        category_id=category.id,
+        nomination_id=nomination.id if nomination else None,
+        recipient_subject_type=payload.recipient_subject_type,
+        recipient_subject_id=payload.recipient_subject_id,
+        certificate_number=await next_award_certificate_number(db, category.organization_id),
+        awarded_on=payload.awarded_on,
+        public_citation=payload.public_citation,
+        certificate_url=payload.certificate_url,
+        status=payload.status,
+    )
+    db.add(recipient)
+    if nomination is not None:
+        nomination.status = "accepted"
+        nomination.finalist = True
+    await db.commit()
+    await db.refresh(recipient)
+    return recipient
+
+
+async def list_organization_award_recipients(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    program_id: UUID,
+    authz: AuthorizationService,
+) -> list[tuple[OrganizationAwardRecipient, str | None]]:
+    await get_award_program_for_manage(db, identity, program_id, authz)
+    recipients = list(
+        (
+            await db.scalars(
+                select(OrganizationAwardRecipient)
+                .where(OrganizationAwardRecipient.program_id == program_id)
+                .order_by(
+                    OrganizationAwardRecipient.awarded_on.desc(),
+                    OrganizationAwardRecipient.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+    return [
+        (
+            recipient,
+            await member_subject_label(
+                db,
+                recipient.recipient_subject_type,
+                recipient.recipient_subject_id,
+            ),
+        )
+        for recipient in recipients
+    ]
+
+
+async def get_award_program_for_manage(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    program_id: UUID,
+    authz: AuthorizationService,
+) -> OrganizationAwardProgram:
+    program = await db.get(OrganizationAwardProgram, program_id)
+    if program is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Award program not found")
+    await ensure_manage_organization(db, identity, program.organization_id, authz)
+    return program
+
+
+async def get_award_category_for_manage(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    category_id: UUID,
+    authz: AuthorizationService,
+) -> OrganizationAwardCategory:
+    category = await db.get(OrganizationAwardCategory, category_id)
+    if category is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Award category not found")
+    await ensure_manage_organization(db, identity, category.organization_id, authz)
+    return category
+
+
+async def get_award_nomination_for_manage(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    nomination_id: UUID,
+    authz: AuthorizationService,
+) -> OrganizationAwardNomination:
+    nomination = await db.get(OrganizationAwardNomination, nomination_id)
+    if nomination is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Award nomination not found")
+    await ensure_manage_organization(db, identity, nomination.organization_id, authz)
+    return nomination
+
+
+async def scalar_count_for(db: AsyncSession, column, value: UUID) -> int:
+    return int(await db.scalar(select(func.count()).where(column == value)) or 0)
+
+
+async def next_award_certificate_number(db: AsyncSession, organization_id: UUID) -> str:
+    count = await scalar_count_for(db, OrganizationAwardRecipient.organization_id, organization_id)
+    return f"AFROLETE-AWARD-{str(organization_id)[:8].upper()}-{count + 1:04d}"
 
 
 async def create_member_subscription_plan(
