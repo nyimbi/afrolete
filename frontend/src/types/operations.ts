@@ -1077,6 +1077,59 @@ export type MemberSubscriptionPaymentPlanRead = {
   notes: string | null;
 };
 
+export type OrganizationFinancialAidProgramRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  program_type: string;
+  sport: string | null;
+  age_group: string | null;
+  fund_source: string | null;
+  annual_budget: string;
+  budget_awarded: string;
+  currency: string;
+  awards_available: number | null;
+  awards_made: number;
+  minimum_score: number;
+  application_opens_on: string | null;
+  application_deadline_on: string | null;
+  awards_announced_on: string | null;
+  eligibility_criteria: string | null;
+  status: string;
+  notes: string | null;
+};
+
+export type OrganizationFinancialAidApplicationRead = {
+  id: UUID;
+  organization_id: UUID;
+  program_id: UUID;
+  program_name: string;
+  applicant_person_id: UUID | null;
+  applicant_label: string | null;
+  athlete_profile_id: UUID | null;
+  member_subscription_id: UUID | null;
+  household_income: string | null;
+  household_size: number | null;
+  government_assistance: boolean;
+  academic_summary: string | null;
+  athletic_summary: string | null;
+  financial_need_summary: string | null;
+  personal_statement: string | null;
+  amount_requested: string;
+  amount_awarded: string;
+  amount_applied: string;
+  currency: string;
+  eligibility_score: number;
+  review_score: number | null;
+  committee_recommendation: string;
+  decision_reason: string | null;
+  status: string;
+  submitted_on: string | null;
+  decided_on: string | null;
+  decided_by_person_id: UUID | null;
+  notes: string | null;
+};
+
 export type MemberSubscriptionChargeRead = {
   id: UUID;
   organization_id: UUID;

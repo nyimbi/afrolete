@@ -534,6 +534,60 @@ class MemberSubscriptionPaymentPlan(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class OrganizationFinancialAidProgram(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_financial_aid_programs"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    program_type: Mapped[str] = mapped_column(String(80), default="need_based", nullable=False, index=True)
+    sport: Mapped[str | None] = mapped_column(String(80), index=True)
+    age_group: Mapped[str | None] = mapped_column(String(80), index=True)
+    fund_source: Mapped[str | None] = mapped_column(String(180), index=True)
+    annual_budget: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    budget_awarded: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    awards_available: Mapped[int | None] = mapped_column(Integer)
+    awards_made: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    minimum_score: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    application_opens_on: Mapped[date | None] = mapped_column(Date, index=True)
+    application_deadline_on: Mapped[date | None] = mapped_column(Date, index=True)
+    awards_announced_on: Mapped[date | None] = mapped_column(Date, index=True)
+    eligibility_criteria: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationFinancialAidApplication(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_financial_aid_applications"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    program_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_financial_aid_programs.id"), index=True)
+    applicant_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    athlete_profile_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("athlete_profiles.id"), index=True)
+    member_subscription_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    household_income: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    household_size: Mapped[int | None] = mapped_column(Integer)
+    government_assistance: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    academic_summary: Mapped[str | None] = mapped_column(Text)
+    athletic_summary: Mapped[str | None] = mapped_column(Text)
+    financial_need_summary: Mapped[str | None] = mapped_column(Text)
+    personal_statement: Mapped[str | None] = mapped_column(Text)
+    amount_requested: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount_awarded: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    amount_applied: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    eligibility_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    review_score: Mapped[int | None] = mapped_column(Integer)
+    committee_recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="submitted", nullable=False, index=True)
+    submitted_on: Mapped[date | None] = mapped_column(Date, index=True)
+    decided_on: Mapped[date | None] = mapped_column(Date, index=True)
+    decided_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class OrganizationMarketProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "organization_market_profiles"
     __table_args__ = (

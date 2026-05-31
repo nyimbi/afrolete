@@ -397,6 +397,8 @@ import type {
   OrganizationDataMigrationRunRead,
   OrganizationExternalReportRead,
   OrganizationExternalReportSummaryRead,
+  OrganizationFinancialAidApplicationRead,
+  OrganizationFinancialAidProgramRead,
   OrganizationGroupMembershipRead,
   OrganizationGroupRead,
   OrganizationMarketProfileRead,
@@ -1894,6 +1896,8 @@ export default function HomePage() {
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
   const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
+  const [financialAidPrograms, setFinancialAidPrograms] = useState<OrganizationFinancialAidProgramRead[]>([]);
+  const [financialAidApplications, setFinancialAidApplications] = useState<OrganizationFinancialAidApplicationRead[]>([]);
   const [memberDuesReceivablesSummary, setMemberDuesReceivablesSummary] =
     useState<MemberSubscriptionReceivablesSummaryRead | null>(null);
   const [memberDuesChargeRun, setMemberDuesChargeRun] = useState<MemberSubscriptionChargeRunRead | null>(null);
@@ -2724,6 +2728,35 @@ export default function HomePage() {
     starts_on: "2026-06-20",
     next_due_on: "2026-06-20",
     notes: "Club-approved payment plan for outstanding member dues."
+  });
+  const [financialAidProgramForm, setFinancialAidProgramForm] = useState({
+    name: "Future Champions Financial Aid",
+    program_type: "need_based",
+    sport: "football",
+    age_group: "U-12 to U-18",
+    fund_source: "Donor-funded access fund",
+    annual_budget: "25000.00",
+    currency: "KES",
+    awards_available: 25,
+    minimum_score: 60,
+    application_opens_on: "2026-01-01",
+    application_deadline_on: "2026-03-31",
+    awards_announced_on: "2026-05-15",
+    eligibility_criteria: "Financial need, attendance commitment, academic standing, and coach recommendation.",
+    notes: "Applies approved aid directly to member dues as non-cash relief."
+  });
+  const [financialAidApplicationForm, setFinancialAidApplicationForm] = useState({
+    household_income: "24000.00",
+    household_size: 4,
+    government_assistance: true,
+    academic_summary: "Good school standing with regular attendance.",
+    athletic_summary: "Committed athlete with strong coach recommendation.",
+    financial_need_summary: "Family requested help with club dues for the season.",
+    personal_statement: "The player wants to stay active while the family stabilizes income.",
+    amount_requested: "300.00",
+    review_score: 88,
+    amount_awarded: "300.00",
+    decision_reason: "Need and commitment verified by committee."
   });
   const [marketProfileForm, setMarketProfileForm] = useState({
     name: "Kenya operating market",
@@ -4404,13 +4437,15 @@ export default function HomePage() {
   }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
-    const [plans, subscriptions, charges, paymentPlans, summary] = await Promise.all([
+    const [plans, subscriptions, charges, paymentPlans, aidPrograms, aidApplications, summary] = await Promise.all([
       apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
       apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
       apiRequest<MemberSubscriptionPaymentPlanRead[]>(
         `/organizations/${organizationId}/member-subscription-payment-plans`
       ),
+      apiRequest<OrganizationFinancialAidProgramRead[]>(`/organizations/${organizationId}/financial-aid-programs`),
+      apiRequest<OrganizationFinancialAidApplicationRead[]>(`/organizations/${organizationId}/financial-aid-applications`),
       apiRequest<MemberSubscriptionReceivablesSummaryRead>(
         `/organizations/${organizationId}/member-subscription-charges/summary`
       )
@@ -4419,6 +4454,8 @@ export default function HomePage() {
     setMemberSubscriptions(subscriptions);
     setMemberSubscriptionCharges(charges);
     setMemberDuesPaymentPlans(paymentPlans);
+    setFinancialAidPrograms(aidPrograms);
+    setFinancialAidApplications(aidApplications);
     setMemberDuesReceivablesSummary(summary);
     setSelectedMemberSubscriptionId((current) =>
       subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
@@ -6129,6 +6166,8 @@ export default function HomePage() {
       setMemberSubscriptions([]);
       setMemberSubscriptionCharges([]);
       setMemberDuesPaymentPlans([]);
+      setFinancialAidPrograms([]);
+      setFinancialAidApplications([]);
       setMemberDuesReceivablesSummary(null);
       setMemberDuesChargeRun(null);
       setMemberSubscriptionPayment(null);
@@ -7480,6 +7519,103 @@ export default function HomePage() {
           current.map((item) => (item.id === updatedPlan.id ? updatedPlan : item))
         );
         addLog(`${updatedPlan.name} payment plan ${status}`, "good");
+      }
+    );
+  };
+
+  const createFinancialAidProgram = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating financial aid", "bad");
+      return;
+    }
+    runAction(
+      "create-financial-aid-program",
+      () =>
+        apiRequest<OrganizationFinancialAidProgramRead>(
+          `/organizations/${selectedOrganizationId}/financial-aid-programs`,
+          {
+            method: "POST",
+            identity,
+            body: financialAidProgramForm
+          }
+        ),
+      (program) => {
+        setFinancialAidPrograms((current) => [program, ...current.filter((item) => item.id !== program.id)]);
+        addLog(`${program.name} financial aid program ready`, "good");
+      }
+    );
+  };
+
+  const createFinancialAidApplication = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating financial aid", "bad");
+      return;
+    }
+    const program = financialAidPrograms[0];
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!program || !subscriptionId) {
+      addLog("Create a financial aid program and select a dues account first", "bad");
+      return;
+    }
+    runAction(
+      "create-financial-aid-application",
+      () =>
+        apiRequest<OrganizationFinancialAidApplicationRead>(
+          `/organizations/${selectedOrganizationId}/financial-aid-applications`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              program_id: program.id,
+              member_subscription_id: subscriptionId,
+              ...financialAidApplicationForm,
+              currency: program.currency
+            }
+          }
+        ),
+      (application) => {
+        setFinancialAidApplications((current) => [
+          application,
+          ...current.filter((item) => item.id !== application.id)
+        ]);
+        addLog(`Financial aid eligibility ${application.eligibility_score}/100`, "good");
+      }
+    );
+  };
+
+  const approveFirstFinancialAidApplication = () => {
+    const application = financialAidApplications.find((item) => ["submitted", "waitlisted"].includes(item.status))
+      ?? financialAidApplications[0];
+    if (!application) {
+      addLog("Create a financial aid application before approval", "bad");
+      return;
+    }
+    runAction(
+      "approve-financial-aid-application",
+      () =>
+        apiRequest<OrganizationFinancialAidApplicationRead>(
+          `/organizations/financial-aid-applications/${application.id}/review`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status: "approved",
+              amount_awarded: financialAidApplicationForm.amount_awarded,
+              review_score: financialAidApplicationForm.review_score,
+              decision_reason: financialAidApplicationForm.decision_reason,
+              apply_to_member_dues: true
+            }
+          }
+        ),
+      async (updated) => {
+        setFinancialAidApplications((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
+        addLog(`Financial aid applied ${updated.amount_applied} ${updated.currency}`, "good");
       }
     );
   };
@@ -24649,6 +24785,9 @@ export default function HomePage() {
               <button type="button" onClick={runMemberDuesCharges} disabled={busyAction !== null}>Bill cycle</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
               <button type="button" onClick={createMemberDuesPaymentPlan} disabled={busyAction !== null}>Payment plan</button>
+              <button type="button" onClick={createFinancialAidProgram} disabled={busyAction !== null}>Aid program</button>
+              <button type="button" onClick={createFinancialAidApplication} disabled={busyAction !== null}>Aid app</button>
+              <button type="button" onClick={approveFirstFinancialAidApplication} disabled={busyAction !== null}>Approve aid</button>
               <button type="button" onClick={loadMemberDuesStatement} disabled={busyAction !== null}>Statement</button>
               <button type="button" onClick={() => downloadMemberDuesStatement("txt")} disabled={busyAction !== null}>Download</button>
               <button type="button" onClick={sendMemberDuesStatement} disabled={busyAction !== null}>Send</button>
@@ -24690,6 +24829,22 @@ export default function HomePage() {
               <label>
                 First due
                 <input type="date" value={memberDuesPaymentPlanForm.next_due_on} onChange={(event) => setMemberDuesPaymentPlanForm({ ...memberDuesPaymentPlanForm, next_due_on: event.target.value, starts_on: event.target.value })} />
+              </label>
+              <label>
+                Aid program
+                <input value={financialAidProgramForm.name} onChange={(event) => setFinancialAidProgramForm({ ...financialAidProgramForm, name: event.target.value })} />
+              </label>
+              <label>
+                Aid budget
+                <input value={financialAidProgramForm.annual_budget} onChange={(event) => setFinancialAidProgramForm({ ...financialAidProgramForm, annual_budget: event.target.value })} />
+              </label>
+              <label>
+                Aid requested
+                <input value={financialAidApplicationForm.amount_requested} onChange={(event) => setFinancialAidApplicationForm({ ...financialAidApplicationForm, amount_requested: event.target.value })} />
+              </label>
+              <label>
+                Aid award
+                <input value={financialAidApplicationForm.amount_awarded} onChange={(event) => setFinancialAidApplicationForm({ ...financialAidApplicationForm, amount_awarded: event.target.value })} />
               </label>
             </div>
             <div className="task-list">
@@ -24750,6 +24905,24 @@ export default function HomePage() {
                     ) : (
                       <button type="button" onClick={() => updateMemberDuesPaymentPlanStatus(paymentPlan, "cancelled")} disabled={busyAction !== null}>Cancel</button>
                     )}
+                  </div>
+                </article>
+              ))}
+              {financialAidPrograms.slice(0, 3).map((program) => (
+                <article key={program.id} className="task-card">
+                  <div>
+                    <strong>{program.name}</strong>
+                    <span>{program.budget_awarded}/{program.annual_budget} {program.currency} awarded · {program.awards_made}/{program.awards_available ?? "open"} awards</span>
+                    <small>{program.program_type.replaceAll("_", " ")} · minimum score {program.minimum_score} · {program.status}</small>
+                  </div>
+                </article>
+              ))}
+              {financialAidApplications.slice(0, 5).map((application) => (
+                <article key={application.id} className={`task-card ${application.status === "awarded" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{application.applicant_label ?? application.member_subscription_id} · {application.program_name}</strong>
+                    <span>{application.amount_applied}/{application.amount_awarded} {application.currency} applied · {application.status.replaceAll("_", " ")}</span>
+                    <small>Eligibility {application.eligibility_score}/100 · {application.committee_recommendation}</small>
                   </div>
                 </article>
               ))}

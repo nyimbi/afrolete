@@ -202,6 +202,8 @@ from app.models.organization import (  # noqa: F401,E402
     MemberSubscriptionPaymentPlan,
     MemberSubscriptionPlan,
     Membership,
+    OrganizationFinancialAidApplication,
+    OrganizationFinancialAidProgram,
     OrganizationAwardCategory,
     OrganizationAwardNomination,
     OrganizationAwardProgram,

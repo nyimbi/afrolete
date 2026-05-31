@@ -55,6 +55,8 @@ from app.models.organization import (
     MemberSubscriptionPaymentPlan,
     MemberSubscriptionPlan,
     Membership,
+    OrganizationFinancialAidApplication,
+    OrganizationFinancialAidProgram,
     OrganizationAwardCategory,
     OrganizationAwardNomination,
     OrganizationAwardProgram,
@@ -122,6 +124,11 @@ from app.schemas.organization import (
     OrganizationExternalReportRead,
     OrganizationExternalReportStatusUpdate,
     OrganizationExternalReportSummaryRead,
+    OrganizationFinancialAidApplicationCreate,
+    OrganizationFinancialAidApplicationRead,
+    OrganizationFinancialAidApplicationReview,
+    OrganizationFinancialAidProgramCreate,
+    OrganizationFinancialAidProgramRead,
     OrganizationGroupCreate,
     OrganizationGroupMemberAdd,
     OrganizationMarketProfileCreate,
@@ -4948,6 +4955,352 @@ async def update_member_subscription_payment_plan(
         payment_plan,
         await member_subject_label(db, subscription.subject_type, subscription.subject_id),
     )
+
+
+def organization_financial_aid_program_read(
+    program: OrganizationFinancialAidProgram,
+) -> OrganizationFinancialAidProgramRead:
+    return OrganizationFinancialAidProgramRead(
+        id=program.id,
+        organization_id=program.organization_id,
+        name=program.name,
+        program_type=program.program_type,
+        sport=program.sport,
+        age_group=program.age_group,
+        fund_source=program.fund_source,
+        annual_budget=program.annual_budget,
+        budget_awarded=program.budget_awarded,
+        currency=program.currency,
+        awards_available=program.awards_available,
+        awards_made=program.awards_made,
+        minimum_score=program.minimum_score,
+        application_opens_on=program.application_opens_on,
+        application_deadline_on=program.application_deadline_on,
+        awards_announced_on=program.awards_announced_on,
+        eligibility_criteria=program.eligibility_criteria,
+        status=program.status,
+        notes=program.notes,
+    )
+
+
+def organization_financial_aid_application_read(
+    application: OrganizationFinancialAidApplication,
+    program: OrganizationFinancialAidProgram,
+    applicant_label: str | None,
+) -> OrganizationFinancialAidApplicationRead:
+    return OrganizationFinancialAidApplicationRead(
+        id=application.id,
+        organization_id=application.organization_id,
+        program_id=application.program_id,
+        program_name=program.name,
+        applicant_person_id=application.applicant_person_id,
+        applicant_label=applicant_label,
+        athlete_profile_id=application.athlete_profile_id,
+        member_subscription_id=application.member_subscription_id,
+        household_income=application.household_income,
+        household_size=application.household_size,
+        government_assistance=application.government_assistance,
+        academic_summary=application.academic_summary,
+        athletic_summary=application.athletic_summary,
+        financial_need_summary=application.financial_need_summary,
+        personal_statement=application.personal_statement,
+        amount_requested=application.amount_requested,
+        amount_awarded=application.amount_awarded,
+        amount_applied=application.amount_applied,
+        currency=application.currency,
+        eligibility_score=application.eligibility_score,
+        review_score=application.review_score,
+        committee_recommendation=application.committee_recommendation,
+        decision_reason=application.decision_reason,
+        status=application.status,
+        submitted_on=application.submitted_on,
+        decided_on=application.decided_on,
+        decided_by_person_id=application.decided_by_person_id,
+        notes=application.notes,
+    )
+
+
+async def create_organization_financial_aid_program(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationFinancialAidProgramCreate,
+    authz: AuthorizationService,
+) -> OrganizationFinancialAidProgramRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    program = OrganizationFinancialAidProgram(
+        organization_id=organization_id,
+        name=payload.name,
+        program_type=payload.program_type,
+        sport=payload.sport,
+        age_group=payload.age_group,
+        fund_source=payload.fund_source,
+        annual_budget=payload.annual_budget,
+        budget_awarded=Decimal("0.00"),
+        currency=payload.currency.upper(),
+        awards_available=payload.awards_available,
+        awards_made=0,
+        minimum_score=payload.minimum_score,
+        application_opens_on=payload.application_opens_on,
+        application_deadline_on=payload.application_deadline_on,
+        awards_announced_on=payload.awards_announced_on,
+        eligibility_criteria=payload.eligibility_criteria,
+        notes=payload.notes,
+    )
+    db.add(program)
+    await db.commit()
+    await db.refresh(program)
+    return organization_financial_aid_program_read(program)
+
+
+async def list_organization_financial_aid_programs(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[OrganizationFinancialAidProgramRead]:
+    programs = (
+        await db.scalars(
+            select(OrganizationFinancialAidProgram)
+            .where(OrganizationFinancialAidProgram.organization_id == organization_id)
+            .order_by(OrganizationFinancialAidProgram.status, OrganizationFinancialAidProgram.name)
+        )
+    ).all()
+    return [organization_financial_aid_program_read(program) for program in programs]
+
+
+async def create_organization_financial_aid_application(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationFinancialAidApplicationCreate,
+    authz: AuthorizationService,
+) -> OrganizationFinancialAidApplicationRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    program = await db.get(OrganizationFinancialAidProgram, payload.program_id)
+    if program is None or program.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial aid program not found")
+    if program.status != "active":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Financial aid program is not active")
+    applicant_person_id = payload.applicant_person_id
+    athlete_profile_id = payload.athlete_profile_id
+    if payload.member_subscription_id is not None:
+        subscription = await db.get(MemberSubscription, payload.member_subscription_id)
+        if subscription is None or subscription.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+        if subscription.subject_type == MemberSubjectType.PERSON:
+            applicant_person_id = subscription.subject_id
+            athlete = await db.scalar(
+                select(AthleteProfile).where(AthleteProfile.person_id == subscription.subject_id)
+            )
+            athlete_profile_id = athlete.id if athlete is not None else athlete_profile_id
+    if applicant_person_id is not None and await db.get(Person, applicant_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Applicant person not found")
+    if athlete_profile_id is not None:
+        athlete = await db.get(AthleteProfile, athlete_profile_id)
+        if athlete is None or athlete.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete profile not found")
+    eligibility_score = financial_aid_eligibility_score(payload)
+    application = OrganizationFinancialAidApplication(
+        organization_id=organization_id,
+        program_id=program.id,
+        applicant_person_id=applicant_person_id,
+        athlete_profile_id=athlete_profile_id,
+        member_subscription_id=payload.member_subscription_id,
+        household_income=payload.household_income,
+        household_size=payload.household_size,
+        government_assistance=payload.government_assistance,
+        academic_summary=payload.academic_summary,
+        athletic_summary=payload.athletic_summary,
+        financial_need_summary=payload.financial_need_summary,
+        personal_statement=payload.personal_statement,
+        amount_requested=payload.amount_requested,
+        amount_awarded=Decimal("0.00"),
+        amount_applied=Decimal("0.00"),
+        currency=(payload.currency or program.currency).upper(),
+        eligibility_score=eligibility_score,
+        review_score=None,
+        committee_recommendation=financial_aid_recommendation(eligibility_score, program),
+        status="submitted",
+        submitted_on=payload.submitted_on or date.today(),
+        notes=payload.notes,
+    )
+    db.add(application)
+    await db.commit()
+    await db.refresh(application)
+    return organization_financial_aid_application_read(
+        application,
+        program,
+        await financial_aid_applicant_label(db, application),
+    )
+
+
+async def list_organization_financial_aid_applications(
+    db: AsyncSession,
+    organization_id: UUID,
+    program_id: UUID | None = None,
+) -> list[OrganizationFinancialAidApplicationRead]:
+    statement = (
+        select(OrganizationFinancialAidApplication, OrganizationFinancialAidProgram)
+        .join(OrganizationFinancialAidProgram, OrganizationFinancialAidProgram.id == OrganizationFinancialAidApplication.program_id)
+        .where(OrganizationFinancialAidApplication.organization_id == organization_id)
+        .order_by(OrganizationFinancialAidApplication.status, OrganizationFinancialAidApplication.submitted_on.desc())
+    )
+    if program_id is not None:
+        statement = statement.where(OrganizationFinancialAidApplication.program_id == program_id)
+    rows = (await db.execute(statement)).all()
+    return [
+        organization_financial_aid_application_read(
+            application,
+            program,
+            await financial_aid_applicant_label(db, application),
+        )
+        for application, program in rows
+    ]
+
+
+async def review_organization_financial_aid_application(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    application_id: UUID,
+    payload: OrganizationFinancialAidApplicationReview,
+    authz: AuthorizationService,
+) -> OrganizationFinancialAidApplicationRead:
+    application = await db.get(OrganizationFinancialAidApplication, application_id)
+    if application is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial aid application not found")
+    program = await db.get(OrganizationFinancialAidProgram, application.program_id)
+    if program is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial aid program not found")
+    await ensure_manage_organization(db, identity, application.organization_id, authz)
+    award_amount = (payload.amount_awarded or Decimal("0.00")).quantize(Decimal("0.01"))
+    if payload.status in {"approved", "conditionally_approved"} and award_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Approved financial aid requires an award amount")
+    if award_amount > application.amount_requested:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Award exceeds requested amount")
+    if program.annual_budget > 0 and (program.budget_awarded + award_amount) > program.annual_budget:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Financial aid award exceeds program budget")
+    if program.awards_available is not None and payload.status in {"approved", "conditionally_approved"}:
+        if program.awards_made >= program.awards_available and application.status not in {"approved", "conditionally_approved", "awarded"}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No financial aid awards remain")
+
+    previously_awarded = application.amount_awarded if application.status in {"approved", "conditionally_approved", "awarded"} else Decimal("0.00")
+    if previously_awarded:
+        program.budget_awarded = max(Decimal("0.00"), program.budget_awarded - previously_awarded).quantize(Decimal("0.01"))
+        program.awards_made = max(0, program.awards_made - 1)
+
+    application.status = payload.status
+    application.amount_awarded = award_amount
+    application.review_score = payload.review_score
+    application.decided_on = payload.decided_on or date.today()
+    application.decided_by_person_id = identity.person_id
+    application.decision_reason = payload.decision_reason
+    application.notes = payload.notes if payload.notes is not None else application.notes
+    if payload.status in {"approved", "conditionally_approved"}:
+        program.budget_awarded = (program.budget_awarded + award_amount).quantize(Decimal("0.01"))
+        program.awards_made += 1
+        if payload.apply_to_member_dues and application.member_subscription_id is not None:
+            application.amount_applied = await apply_financial_aid_to_member_dues(
+                db,
+                application,
+                award_amount,
+                identity.person_id,
+            )
+            application.status = "awarded"
+    await db.commit()
+    await db.refresh(application)
+    await db.refresh(program)
+    return organization_financial_aid_application_read(
+        application,
+        program,
+        await financial_aid_applicant_label(db, application),
+    )
+
+
+async def apply_financial_aid_to_member_dues(
+    db: AsyncSession,
+    application: OrganizationFinancialAidApplication,
+    amount: Decimal,
+    approver_person_id: UUID | None,
+) -> Decimal:
+    if application.member_subscription_id is None or amount <= 0:
+        return Decimal("0.00")
+    subscription = await db.get(MemberSubscription, application.member_subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+    remaining = min(amount, member_subscription_open_amount(subscription)).quantize(Decimal("0.01"))
+    applied = Decimal("0.00")
+    charges = (
+        await db.scalars(
+            select(MemberSubscriptionCharge)
+            .where(MemberSubscriptionCharge.subscription_id == subscription.id)
+            .where(MemberSubscriptionCharge.status.in_(["open", "partial"]))
+            .where(MemberSubscriptionCharge.balance_amount > Decimal("0"))
+            .order_by(MemberSubscriptionCharge.due_on.asc().nulls_last(), MemberSubscriptionCharge.created_at.asc())
+        )
+    ).all()
+    for charge in charges:
+        if remaining <= 0:
+            break
+        charge_balance = max(charge.balance_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+        relief = min(charge_balance, remaining).quantize(Decimal("0.01"))
+        charge.amount_waived = (charge.amount_waived + relief).quantize(Decimal("0.01"))
+        charge.balance_amount = (charge_balance - relief).quantize(Decimal("0.01"))
+        charge.waived_at = datetime.now(UTC)
+        charge.waived_by_person_id = approver_person_id
+        charge.waiver_reason = append_member_dues_note(
+            charge.waiver_reason,
+            f"Financial aid award {application.id}: {application.decision_reason or application.committee_recommendation}",
+        )
+        charge.status = "waived" if charge.balance_amount <= 0 else "partial"
+        remaining = (remaining - relief).quantize(Decimal("0.01"))
+        applied = (applied + relief).quantize(Decimal("0.01"))
+    subscription.balance_amount = max(Decimal("0.00"), subscription.balance_amount - applied).quantize(Decimal("0.01"))
+    if subscription.balance_amount <= 0 and subscription.status == "past_due":
+        subscription.balance_amount = Decimal("0.00")
+        subscription.status = "active"
+    return applied
+
+
+async def financial_aid_applicant_label(
+    db: AsyncSession,
+    application: OrganizationFinancialAidApplication,
+) -> str | None:
+    if application.applicant_person_id is None:
+        return None
+    person = await db.get(Person, application.applicant_person_id)
+    return person.display_name if person else None
+
+
+def financial_aid_eligibility_score(payload: OrganizationFinancialAidApplicationCreate) -> int:
+    score = 25
+    if payload.household_income is not None:
+        if payload.household_income <= Decimal("25000"):
+            score += 30
+        elif payload.household_income <= Decimal("60000"):
+            score += 20
+        else:
+            score += 8
+    if payload.household_size and payload.household_size >= 4:
+        score += 10
+    if payload.government_assistance:
+        score += 15
+    if payload.academic_summary:
+        score += 8
+    if payload.athletic_summary:
+        score += 8
+    if payload.personal_statement:
+        score += 4
+    return min(score, 100)
+
+
+def financial_aid_recommendation(
+    score: int,
+    program: OrganizationFinancialAidProgram,
+) -> str:
+    if score >= max(program.minimum_score, 75):
+        return "Strong financial aid candidate; recommend committee award review and dues relief if budget remains."
+    if score >= program.minimum_score:
+        return "Eligible financial aid candidate; committee should confirm documentation and award level."
+    return "Below automatic threshold; committee review, documentation, or waitlist decision required."
 
 
 async def list_member_subscription_charges(

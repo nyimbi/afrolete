@@ -1280,6 +1280,90 @@ class MemberSubscriptionPaymentPlanRead(BaseModel):
     notes: str | None
 
 
+class OrganizationFinancialAidProgramCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    program_type: str = Field(default="need_based", pattern="^(need_based|merit|athletic|academic|hardship|sponsor)$")
+    sport: str | None = Field(default=None, max_length=80)
+    age_group: str | None = Field(default=None, max_length=80)
+    fund_source: str | None = Field(default=None, max_length=180)
+    annual_budget: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="KES", min_length=3, max_length=3)
+    awards_available: int | None = Field(default=None, ge=1, le=10000)
+    minimum_score: int = Field(default=60, ge=0, le=100)
+    application_opens_on: date | None = None
+    application_deadline_on: date | None = None
+    awards_announced_on: date | None = None
+    eligibility_criteria: str | None = Field(default=None, max_length=8000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationFinancialAidProgramRead(OrganizationFinancialAidProgramCreate):
+    id: UUID
+    organization_id: UUID
+    budget_awarded: Decimal
+    awards_made: int
+    status: str
+
+
+class OrganizationFinancialAidApplicationCreate(BaseModel):
+    program_id: UUID
+    applicant_person_id: UUID | None = None
+    athlete_profile_id: UUID | None = None
+    member_subscription_id: UUID | None = None
+    household_income: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    household_size: int | None = Field(default=None, ge=1, le=50)
+    government_assistance: bool = False
+    academic_summary: str | None = Field(default=None, max_length=4000)
+    athletic_summary: str | None = Field(default=None, max_length=4000)
+    financial_need_summary: str | None = Field(default=None, max_length=4000)
+    personal_statement: str | None = Field(default=None, max_length=8000)
+    amount_requested: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    submitted_on: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationFinancialAidApplicationReview(BaseModel):
+    status: str = Field(pattern="^(approved|conditionally_approved|denied|waitlisted|cancelled)$")
+    amount_awarded: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    review_score: int | None = Field(default=None, ge=0, le=100)
+    decided_on: date | None = None
+    decision_reason: str | None = Field(default=None, max_length=4000)
+    apply_to_member_dues: bool = True
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationFinancialAidApplicationRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    program_id: UUID
+    program_name: str
+    applicant_person_id: UUID | None
+    applicant_label: str | None = None
+    athlete_profile_id: UUID | None
+    member_subscription_id: UUID | None
+    household_income: Decimal | None
+    household_size: int | None
+    government_assistance: bool
+    academic_summary: str | None
+    athletic_summary: str | None
+    financial_need_summary: str | None
+    personal_statement: str | None
+    amount_requested: Decimal
+    amount_awarded: Decimal
+    amount_applied: Decimal
+    currency: str
+    eligibility_score: int
+    review_score: int | None
+    committee_recommendation: str
+    decision_reason: str | None
+    status: str
+    submitted_on: date | None
+    decided_on: date | None
+    decided_by_person_id: UUID | None
+    notes: str | None
+
+
 class MemberSubscriptionChargeRead(BaseModel):
     id: UUID
     organization_id: UUID

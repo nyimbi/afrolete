@@ -70,6 +70,11 @@ from app.schemas.organization import (
     OrganizationExternalReportRead,
     OrganizationExternalReportStatusUpdate,
     OrganizationExternalReportSummaryRead,
+    OrganizationFinancialAidApplicationCreate,
+    OrganizationFinancialAidApplicationRead,
+    OrganizationFinancialAidApplicationReview,
+    OrganizationFinancialAidProgramCreate,
+    OrganizationFinancialAidProgramRead,
     OrganizationGroupCreate,
     OrganizationGroupMemberAdd,
     OrganizationGroupMembershipRead,
@@ -147,6 +152,8 @@ from app.services.organizations import (
     create_data_migration_project,
     create_data_migration_run,
     create_organization_external_report,
+    create_organization_financial_aid_application,
+    create_organization_financial_aid_program,
     create_recovery_drill,
     create_recovery_plan,
     add_organization_group_member,
@@ -189,6 +196,8 @@ from app.services.organizations import (
     list_compliance_documents,
     list_compliance_document_versions,
     list_organization_external_reports,
+    list_organization_financial_aid_applications,
+    list_organization_financial_aid_programs,
     list_organization_group_members,
     list_organization_groups,
     list_organization_programs,
@@ -222,6 +231,7 @@ from app.services.organizations import (
     update_member_subscription_payment_plan,
     update_member_subscription_plan,
     update_organization_external_report_status,
+    review_organization_financial_aid_application,
     waive_member_subscription_charge,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
@@ -2126,6 +2136,67 @@ async def update_member_subscription_payment_plan_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> MemberSubscriptionPaymentPlanRead:
     return await update_member_subscription_payment_plan(db, identity, payment_plan_id, payload, authz)
+
+
+@router.post(
+    "/{organization_id}/financial-aid-programs",
+    response_model=OrganizationFinancialAidProgramRead,
+    status_code=201,
+)
+async def create_organization_financial_aid_program_route(
+    organization_id: UUID,
+    payload: OrganizationFinancialAidProgramCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationFinancialAidProgramRead:
+    return await create_organization_financial_aid_program(db, identity, organization_id, payload, authz)
+
+
+@router.get("/{organization_id}/financial-aid-programs", response_model=list[OrganizationFinancialAidProgramRead])
+async def list_organization_financial_aid_programs_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationFinancialAidProgramRead]:
+    return await list_organization_financial_aid_programs(db, organization_id)
+
+
+@router.post(
+    "/{organization_id}/financial-aid-applications",
+    response_model=OrganizationFinancialAidApplicationRead,
+    status_code=201,
+)
+async def create_organization_financial_aid_application_route(
+    organization_id: UUID,
+    payload: OrganizationFinancialAidApplicationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationFinancialAidApplicationRead:
+    return await create_organization_financial_aid_application(db, identity, organization_id, payload, authz)
+
+
+@router.get("/{organization_id}/financial-aid-applications", response_model=list[OrganizationFinancialAidApplicationRead])
+async def list_organization_financial_aid_applications_route(
+    organization_id: UUID,
+    program_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationFinancialAidApplicationRead]:
+    return await list_organization_financial_aid_applications(db, organization_id, program_id)
+
+
+@router.patch(
+    "/financial-aid-applications/{application_id}/review",
+    response_model=OrganizationFinancialAidApplicationRead,
+)
+async def review_organization_financial_aid_application_route(
+    application_id: UUID,
+    payload: OrganizationFinancialAidApplicationReview,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationFinancialAidApplicationRead:
+    return await review_organization_financial_aid_application(db, identity, application_id, payload, authz)
 
 
 @router.get(

@@ -610,6 +610,151 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert Decimal(billing_summary["invoice_outstanding"]) == Decimal("0.00")
 
 
+def test_financial_aid_awards_apply_to_club_member_dues(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Aid Managed FC",
+            "organization_type": "club",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+
+    member = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "aid-member@example.com",
+            "display_name": "Aid Member",
+            "country_code": "KE",
+            "role": "athlete",
+            "title": "Youth player",
+        },
+    ).json()
+
+    plan = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-plans",
+        headers=identity_headers,
+        json={
+            "name": "Youth season dues",
+            "member_role": "athlete",
+            "amount": "1000.00",
+            "currency": "KES",
+            "billing_interval": "season",
+            "due_day": 5,
+            "grace_period_days": 10,
+        },
+    ).json()
+    subscription = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+        json={
+            "plan_id": plan["id"],
+            "membership_id": member["id"],
+            "starts_on": "2026-06-01",
+            "current_period_start": "2026-06-01",
+            "current_period_end": "2026-08-31",
+            "next_due_on": "2026-06-05",
+        },
+    ).json()
+
+    program_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-programs",
+        headers=identity_headers,
+        json={
+            "name": "Future Champions Aid",
+            "program_type": "need_based",
+            "sport": "football",
+            "age_group": "U-12 to U-18",
+            "fund_source": "Donor access fund",
+            "annual_budget": "2000.00",
+            "currency": "KES",
+            "awards_available": 2,
+            "minimum_score": 60,
+            "application_opens_on": "2026-01-01",
+            "application_deadline_on": "2026-03-31",
+            "awards_announced_on": "2026-05-15",
+            "eligibility_criteria": "Need, attendance, school standing, and coach recommendation.",
+        },
+    )
+    assert program_response.status_code == 201
+    program = program_response.json()
+    assert program["budget_awarded"] == "0.00"
+    assert program["awards_made"] == 0
+
+    application_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-applications",
+        headers=identity_headers,
+        json={
+            "program_id": program["id"],
+            "member_subscription_id": subscription["id"],
+            "household_income": "24000.00",
+            "household_size": 4,
+            "government_assistance": True,
+            "academic_summary": "Good school standing.",
+            "athletic_summary": "Strong coach recommendation.",
+            "financial_need_summary": "Family requested help with season dues.",
+            "personal_statement": "Player wants to remain in the program.",
+            "amount_requested": "400.00",
+            "currency": "KES",
+        },
+    )
+    assert application_response.status_code == 201
+    application = application_response.json()
+    assert application["applicant_person_id"] == member["subject_id"]
+    assert application["applicant_label"] == "Aid Member"
+    assert application["eligibility_score"] >= 60
+    assert "financial aid" in application["committee_recommendation"].lower()
+
+    review_response = client.patch(
+        f"/api/v1/organizations/financial-aid-applications/{application['id']}/review",
+        headers=identity_headers,
+        json={
+            "status": "approved",
+            "amount_awarded": "400.00",
+            "review_score": 91,
+            "decision_reason": "Need and participation verified.",
+            "apply_to_member_dues": True,
+        },
+    )
+    assert review_response.status_code == 200
+    awarded = review_response.json()
+    assert awarded["status"] == "awarded"
+    assert awarded["amount_awarded"] == "400.00"
+    assert awarded["amount_applied"] == "400.00"
+    assert awarded["decided_by_person_id"]
+
+    applications = client.get(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-applications",
+        headers=identity_headers,
+        params={"program_id": program["id"]},
+    ).json()
+    assert applications[0]["id"] == application["id"]
+
+    programs = client.get(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-programs",
+        headers=identity_headers,
+    ).json()
+    assert programs[0]["budget_awarded"] == "400.00"
+    assert programs[0]["awards_made"] == 1
+
+    charges = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
+        headers=identity_headers,
+    ).json()
+    assert charges[0]["amount_waived"] == "400.00"
+    assert charges[0]["balance_amount"] == "600.00"
+    assert "Financial aid award" in charges[0]["waiver_reason"]
+
+    subscriptions = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+    ).json()
+    assert subscriptions[0]["balance_amount"] == "600.00"
+
+
 def test_organization_market_profiles_localize_payments_tax_and_reporting(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",
