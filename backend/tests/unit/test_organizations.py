@@ -561,8 +561,65 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
         params={"as_of": "2026-06-30"},
     ).json()
     assert settled_summary["outstanding_balance"] == "0.00"
+    assert settled_summary["available_credit_amount"] == "0.00"
     assert settled_summary["paid_charge_count"] == 1
     assert settled_summary["next_actions"][0] == "No member dues receivables are currently outstanding."
+
+    overpayment_callback_response = client.post(
+        "/api/v1/organizations/member-dues-payment-webhooks",
+        json={
+            "organization_id": organization["id"],
+            "collection_rail_id": collection_rail["id"],
+            "provider": "mpesa",
+            "event_type": "mpesa.stk.callback",
+            "status": "succeeded",
+            "dues_reference": "club-dues-2026-06",
+            "currency": "KES",
+            "provider_payload": {
+                "Body": {
+                    "stkCallback": {
+                        "ResultCode": 0,
+                        "CheckoutRequestID": "ws_CO_member_dues_credit_001",
+                        "CallbackMetadata": {
+                            "Item": [
+                                {"Name": "Amount", "Value": "250.00"},
+                                {"Name": "MpesaReceiptNumber", "Value": "MPESA-CREDIT-001"},
+                                {"Name": "PhoneNumber", "Value": "254700000000"},
+                            ]
+                        },
+                    }
+                }
+            },
+        },
+    )
+    assert overpayment_callback_response.status_code == 200
+    overpayment_callback = overpayment_callback_response.json()
+    assert overpayment_callback["accepted"] is True
+    assert overpayment_callback["subscription_balance_amount"] == "0.00"
+    assert overpayment_callback["credit_amount"] == "250.00"
+    assert overpayment_callback["credit_id"]
+    assert overpayment_callback["platform_hosting_charge"] is False
+
+    credits_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-credits",
+        headers=identity_headers,
+        params={"subscription_id": subscription["id"]},
+    )
+    assert credits_response.status_code == 200
+    credits = credits_response.json()
+    assert len(credits) == 1
+    assert credits[0]["source_callback_id"] == overpayment_callback["callback_id"]
+    assert credits[0]["original_amount"] == "250.00"
+    assert credits[0]["remaining_amount"] == "250.00"
+    assert credits[0]["status"] == "available"
+
+    credited_summary = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
+        headers=identity_headers,
+        params={"as_of": "2026-06-30"},
+    ).json()
+    assert credited_summary["outstanding_balance"] == "0.00"
+    assert credited_summary["available_credit_amount"] == "250.00"
 
     charge_run_response = client.post(
         f"/api/v1/organizations/{organization['id']}/member-subscription-charges/run",
@@ -581,13 +638,22 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert charge_run["subscription_ids"] == [subscription["id"]]
     assert charge_run["items"][0]["period_start"] == "2026-07-01"
     assert charge_run["items"][0]["period_end"] == "2026-07-31"
+    assert "250.00 KES credit applied" in charge_run["items"][0]["reason"]
 
     charged_subscriptions = client.get(
         f"/api/v1/organizations/{organization['id']}/member-subscriptions",
         headers=identity_headers,
     ).json()
-    assert charged_subscriptions[0]["balance_amount"] == "1500.00"
+    assert charged_subscriptions[0]["balance_amount"] == "1250.00"
     assert charged_subscriptions[0]["next_due_on"] == "2026-07-05"
+
+    applied_credits = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-credits",
+        headers=identity_headers,
+        params={"subscription_id": subscription["id"]},
+    ).json()
+    assert applied_credits[0]["remaining_amount"] == "0.00"
+    assert applied_credits[0]["status"] == "applied"
 
     all_charges = client.get(
         f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
@@ -595,8 +661,9 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     ).json()
     assert len(all_charges) == 2
     assert all_charges[0]["source"] == "recurring_cycle"
-    assert all_charges[0]["status"] == "open"
-    assert all_charges[0]["balance_amount"] == "1500.00"
+    assert all_charges[0]["status"] == "partial"
+    assert all_charges[0]["amount_paid"] == "250.00"
+    assert all_charges[0]["balance_amount"] == "1250.00"
 
     aging_summary = client.get(
         f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
@@ -604,9 +671,10 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
         params={"as_of": "2026-07-01"},
     ).json()
     assert aging_summary["charge_count"] == 2
-    assert aging_summary["outstanding_balance"] == "1500.00"
-    assert aging_summary["current_balance"] == "1500.00"
+    assert aging_summary["outstanding_balance"] == "1250.00"
+    assert aging_summary["current_balance"] == "1250.00"
     assert aging_summary["overdue_balance"] == "0.00"
+    assert aging_summary["available_credit_amount"] == "0.00"
 
     waiver_response = client.post(
         f"/api/v1/organizations/member-subscription-charges/{all_charges[0]['id']}/waive",
@@ -617,10 +685,10 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     )
     assert waiver_response.status_code == 200
     waiver = waiver_response.json()
-    assert waiver["amount_waived"] == "1500.00"
+    assert waiver["amount_waived"] == "1250.00"
     assert waiver["subscription_balance_amount"] == "0.00"
     assert waiver["charge_status"] == "waived"
-    assert waiver["charge"]["amount_waived"] == "1500.00"
+    assert waiver["charge"]["amount_waived"] == "1250.00"
     assert waiver["charge"]["balance_amount"] == "0.00"
     assert waiver["charge"]["waived_at"] is not None
     assert waiver["charge"]["waived_by_person_id"]
@@ -632,7 +700,7 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
         params={"as_of": "2026-07-01"},
     ).json()
     assert waived_summary["outstanding_balance"] == "0.00"
-    assert waived_summary["total_waived"] == "1500.00"
+    assert waived_summary["total_waived"] == "1250.00"
     assert waived_summary["waived_charge_count"] == 1
 
     statement_response = client.get(
@@ -644,12 +712,12 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert statement["statement_reference"].startswith("DUES-STMT-")
     assert statement["subject_label"] == "Member Dues"
     assert statement["total_charged"] == "3000.00"
-    assert statement["total_paid"] == "1500.00"
-    assert statement["total_waived"] == "1500.00"
+    assert statement["total_paid"] == "1750.00"
+    assert statement["total_waived"] == "1250.00"
     assert statement["closing_balance"] == "0.00"
-    assert statement["line_count"] == 6
+    assert statement["line_count"] == 7
     assert [line["entry_type"] for line in statement["lines"]].count("charge") == 2
-    assert [line["entry_type"] for line in statement["lines"]].count("payment") == 3
+    assert [line["entry_type"] for line in statement["lines"]].count("payment") == 4
     assert [line["entry_type"] for line in statement["lines"]].count("waiver") == 1
     assert statement["lines"][-1]["balance_amount"] == "0.00"
 

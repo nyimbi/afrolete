@@ -186,7 +186,7 @@ Major capability areas include:
   auto-generated funder reports, grant portfolio utilization/impact/ROI
   analytics, financial budgeting, forecasting, management financial statements,
   club-managed member dues with tenant-configured M-Pesa/mobile-money/bank/cash collection rails,
-  recurring charge ledgers with payment allocation, receivables aging summaries, payment plans, renewal campaigns with early-bird offers, financial-aid programs, award application review, renewal tracking, appeal resolution, compliance/impact summaries, auditable waivers, downloadable and deliverable member account statements, hosted dues payment links, scheduled dues reminders, lifecycle controls for pausing/reactivating/cancelling member dues accounts and retiring dues plans, and venue
+  recurring charge ledgers with payment allocation, member account credits for over/early payments, receivables aging summaries, payment plans, renewal campaigns with early-bird offers, financial-aid programs, award application review, renewal tracking, appeal resolution, compliance/impact summaries, auditable waivers, downloadable and deliverable member account statements, hosted dues payment links, scheduled dues reminders, lifecycle controls for pausing/reactivating/cancelling member dues accounts and retiring dues plans, and venue
   digital-signage sponsor rotations with playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
@@ -206,7 +206,7 @@ Major capability areas include:
   billing summaries. Checkout payloads expose the tenant organization as the
   hosting payer so members are never treated as the AfroLete hosting payer.
   Member dues are a separate club-managed receivables workflow with recurring
-  charge cycles, per-period balances, payment allocation, aging summaries, payment plans, renewal campaigns with early-bird offers, financial-aid awards, renewals, appeals, and impact reporting, auditable waivers, downloadable/deliverable member account statements, payment links, reminders, lifecycle controls, and
+  charge cycles, per-period balances, payment allocation, over/early-payment credits that apply to future club dues, aging summaries, payment plans, renewal campaigns with early-bird offers, financial-aid awards, renewals, appeals, and impact reporting, auditable waivers, downloadable/deliverable member account statements, payment links, reminders, lifecycle controls, and
   M-Pesa/manual/provider settlements through tenant-configured collection
   rails. Those collection rails and signed provider callback audits declare
   themselves as member-dues rails, not AfroLete hosting payment rails.

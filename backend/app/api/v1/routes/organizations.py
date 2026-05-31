@@ -30,6 +30,7 @@ from app.schemas.organization import (
     MemberSubscriptionChargeRunRead,
     MemberSubscriptionChargeWaiverCreate,
     MemberSubscriptionChargeWaiverRead,
+    MemberSubscriptionCreditRead,
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
@@ -233,6 +234,7 @@ from app.services.organizations import (
     list_recovery_drills,
     list_recovery_plans,
     list_member_subscription_charges,
+    list_member_subscription_credits,
     list_member_dues_collection_rails,
     list_member_subscription_payment_plans,
     list_member_subscription_plans,
@@ -2093,6 +2095,15 @@ async def list_member_subscription_charges_route(
         to_member_subscription_charge_read(row)
         for row in await list_member_subscription_charges(db, organization_id, subscription_id)
     ]
+
+
+@router.get("/{organization_id}/member-subscription-credits", response_model=list[MemberSubscriptionCreditRead])
+async def list_member_subscription_credits_route(
+    organization_id: UUID,
+    subscription_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionCreditRead]:
+    return await list_member_subscription_credits(db, organization_id, subscription_id)
 
 
 @router.post(

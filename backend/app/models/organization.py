@@ -536,6 +536,26 @@ class MemberSubscriptionPayment(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class MemberSubscriptionCredit(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_credits"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    subscription_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    source_payment_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("member_subscription_payments.id"), index=True
+    )
+    source_callback_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("member_dues_payment_callbacks.id"), index=True
+    )
+    original_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    remaining_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    source: Mapped[str] = mapped_column(String(80), default="overpayment", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="available", nullable=False, index=True)
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class MemberDuesPaymentCallback(IdMixin, TimestampMixin, Base):
     __tablename__ = "member_dues_payment_callbacks"
     __table_args__ = (

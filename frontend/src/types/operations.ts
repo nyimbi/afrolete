@@ -1053,6 +1053,23 @@ export type MemberSubscriptionPaymentRead = {
   subscription_status: string;
 };
 
+export type MemberSubscriptionCreditRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  subject_label: string | null;
+  source_payment_id: UUID | null;
+  source_callback_id: UUID | null;
+  original_amount: string;
+  remaining_amount: string;
+  currency: string;
+  source: string;
+  status: string;
+  created_by_person_id: UUID | null;
+  notes: string | null;
+  created_at: string;
+};
+
 export type MemberSubscriptionPaymentPlanRead = {
   id: UUID;
   organization_id: UUID;
@@ -1348,6 +1365,7 @@ export type MemberSubscriptionReceivablesSummaryRead = {
   total_charged: string;
   total_collected: string;
   total_waived: string;
+  available_credit_amount: string;
   outstanding_balance: string;
   current_balance: string;
   overdue_balance: string;
@@ -1494,6 +1512,7 @@ export type MemberSubscriptionCheckoutSettlementRead = {
   subscription_status: string;
   amount_paid: string;
   open_amount: string;
+  credit_amount: string;
   session_status: string;
   message: string;
 };
@@ -1509,6 +1528,8 @@ export type MemberDuesPaymentWebhookRead = {
   external_payment_id: string | null;
   dues_reference: string | null;
   amount: string | null;
+  credit_id: UUID | null;
+  credit_amount: string | null;
   currency: string | null;
   method: string | null;
   payer_phone: string | null;

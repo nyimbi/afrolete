@@ -55,6 +55,7 @@ from app.models.organization import (
     MemberDuesPaymentCallback,
     MemberSubscription,
     MemberSubscriptionCharge,
+    MemberSubscriptionCredit,
     MemberSubscriptionPayment,
     MemberSubscriptionPaymentPlan,
     MemberSubscriptionPlan,
@@ -105,6 +106,7 @@ from app.schemas.organization import (
     MemberSubscriptionChargeRunRead,
     MemberSubscriptionChargeWaiverCreate,
     MemberSubscriptionChargeWaiverRead,
+    MemberSubscriptionCreditRead,
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
     MemberSubscriptionUpdate,
@@ -6365,6 +6367,54 @@ def member_subscription_charge_read(
     )
 
 
+async def list_member_subscription_credits(
+    db: AsyncSession,
+    organization_id: UUID,
+    subscription_id: UUID | None = None,
+) -> list[MemberSubscriptionCreditRead]:
+    statement = (
+        select(MemberSubscriptionCredit, MemberSubscription)
+        .join(MemberSubscription, MemberSubscription.id == MemberSubscriptionCredit.subscription_id)
+        .where(MemberSubscriptionCredit.organization_id == organization_id)
+        .order_by(
+            MemberSubscriptionCredit.status.asc(),
+            MemberSubscriptionCredit.created_at.desc(),
+        )
+    )
+    if subscription_id is not None:
+        statement = statement.where(MemberSubscriptionCredit.subscription_id == subscription_id)
+    rows = (await db.execute(statement)).all()
+    return [
+        member_subscription_credit_read(
+            credit,
+            await member_subject_label(db, subscription.subject_type, subscription.subject_id),
+        )
+        for credit, subscription in rows
+    ]
+
+
+def member_subscription_credit_read(
+    credit: MemberSubscriptionCredit,
+    subject_label: str | None,
+) -> MemberSubscriptionCreditRead:
+    return MemberSubscriptionCreditRead(
+        id=credit.id,
+        organization_id=credit.organization_id,
+        subscription_id=credit.subscription_id,
+        subject_label=subject_label,
+        source_payment_id=credit.source_payment_id,
+        source_callback_id=credit.source_callback_id,
+        original_amount=credit.original_amount,
+        remaining_amount=credit.remaining_amount,
+        currency=credit.currency,
+        source=credit.source,
+        status=credit.status,
+        created_by_person_id=credit.created_by_person_id,
+        notes=credit.notes,
+        created_at=credit.created_at,
+    )
+
+
 async def member_subscription_receivables_summary(
     db: AsyncSession,
     organization_id: UUID,
@@ -6378,6 +6428,14 @@ async def member_subscription_receivables_summary(
             )
         ).all()
     )
+    available_credit_amount = (
+        await db.scalar(
+            select(func.coalesce(func.sum(MemberSubscriptionCredit.remaining_amount), Decimal("0.00")))
+            .where(MemberSubscriptionCredit.organization_id == organization_id)
+            .where(MemberSubscriptionCredit.status.in_(["available", "partially_applied"]))
+            .where(MemberSubscriptionCredit.remaining_amount > Decimal("0"))
+        )
+    ) or Decimal("0.00")
     status_counts: dict[str, int] = {}
     aging_buckets = {
         "current": Decimal("0.00"),
@@ -6456,6 +6514,8 @@ async def member_subscription_receivables_summary(
         next_actions.append("Review balances older than 90 days for waiver, escalation, or payment plans.")
     if aging_buckets["undated"] > 0:
         next_actions.append("Set due dates on undated member dues charges.")
+    if available_credit_amount > 0:
+        next_actions.append("Available member account credits will apply to the next club dues charges.")
     if not charges:
         next_actions.append("Create a member dues plan and assign it to members.")
     if outstanding_balance > 0 and not next_actions:
@@ -6472,6 +6532,7 @@ async def member_subscription_receivables_summary(
         total_charged=total_charged,
         total_collected=total_collected,
         total_waived=total_waived,
+        available_credit_amount=available_credit_amount.quantize(Decimal("0.01")),
         outstanding_balance=outstanding_balance,
         current_balance=aging_buckets["current"],
         overdue_balance=overdue_balance,
@@ -6897,20 +6958,15 @@ async def record_member_subscription_payment(
     db.add(payment)
     if payload.status == "succeeded":
         await db.flush()
-        await apply_member_subscription_payment_to_charges(
+        await apply_succeeded_member_dues_payment(
             db,
             subscription,
+            payment,
             payload.amount,
-            payment.id,
-            payment.received_at,
+            payment_plan=payment_plan,
+            created_by_person_id=identity.person_id,
+            credit_notes="Member dues overpayment retained as club account credit.",
         )
-        subscription.balance_amount = max(Decimal("0"), subscription.balance_amount - payload.amount)
-        if subscription.balance_amount == Decimal("0") and subscription.status == "past_due":
-            subscription.status = "active"
-        if payment_plan is not None:
-            apply_member_subscription_payment_plan_payment(payment_plan, payload.amount)
-        await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
-        await complete_member_subscription_payment_plans_if_settled(db, subscription)
     await db.commit()
     await db.refresh(payment)
     await db.refresh(subscription)
@@ -6987,11 +7043,9 @@ async def settle_member_subscription_checkout(
     if currency != plan.currency.upper():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Currency mismatch")
     open_amount = member_subscription_open_amount(subscription)
-    if open_amount <= 0:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Member dues subscription is already paid")
     amount = (payload.amount or open_amount).quantize(Decimal("0.01"))
-    if amount <= 0 or amount > open_amount:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment exceeds dues balance")
+    if amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment amount must be positive")
 
     payment_id: UUID | None = None
     accepted = payload.status == "succeeded"
@@ -7010,27 +7064,21 @@ async def settle_member_subscription_checkout(
         notes=f"Hosted member dues checkout {session_id}",
     )
     db.add(payment)
+    credit_amount = Decimal("0.00")
     if accepted:
         await db.flush()
         payment_plan = await select_member_subscription_payment_plan_for_payment(db, subscription, None)
         if payment_plan is not None:
             payment.payment_plan_id = payment_plan.id
-        await apply_member_subscription_payment_to_charges(
+        credit = await apply_succeeded_member_dues_payment(
             db,
             subscription,
+            payment,
             amount,
-            payment.id,
-            payment.received_at,
+            payment_plan=payment_plan,
+            credit_notes=f"Hosted member dues checkout overpayment {session_id}.",
         )
-        subscription.balance_amount = member_subscription_open_amount(subscription) - amount
-        if subscription.balance_amount <= 0:
-            subscription.balance_amount = Decimal("0.00")
-            if subscription.status == "past_due":
-                subscription.status = "active"
-        if payment_plan is not None:
-            apply_member_subscription_payment_plan_payment(payment_plan, amount)
-        await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
-        await complete_member_subscription_payment_plans_if_settled(db, subscription)
+        credit_amount = credit.original_amount if credit is not None else Decimal("0.00")
     elif payload.status == "pending" and subscription.status == "active":
         subscription.notes = append_member_dues_note(subscription.notes, f"Pending hosted dues payment {session_id}.")
     await db.commit()
@@ -7045,6 +7093,7 @@ async def settle_member_subscription_checkout(
         subscription_status=subscription.status,
         amount_paid=(plan.amount - member_subscription_open_amount(subscription)).quantize(Decimal("0.01")),
         open_amount=member_subscription_open_amount(subscription),
+        credit_amount=credit_amount,
         session_status=member_subscription_checkout_session_status(subscription),
         message=(
             "Member dues payment recorded for the club."
@@ -7117,6 +7166,7 @@ async def ingest_member_dues_payment_webhook(
         raw_payload_json=raw_payload_json,
     )
     db.add(callback)
+    await db.flush()
 
     if normalized["status"] != "succeeded":
         callback.status = "ignored"
@@ -7131,17 +7181,10 @@ async def ingest_member_dues_payment_webhook(
         plan = await db.get(MemberSubscriptionPlan, subscription.plan_id)
         currency = (normalized["currency"] or (plan.currency if plan else "KES")).upper()
         expected_currency = (plan.currency if plan else currency).upper()
-        open_amount = member_subscription_open_amount(subscription)
         amount = normalized["amount"].quantize(Decimal("0.01"))
         if currency != expected_currency:
             callback.status = "failed"
             callback.failure_reason = f"Currency mismatch: expected {expected_currency}, received {currency}."
-        elif open_amount <= 0:
-            callback.status = "ignored"
-            callback.failure_reason = "Member dues account is already settled."
-        elif amount > open_amount:
-            callback.status = "failed"
-            callback.failure_reason = "Payment exceeds open member dues balance; credit handling is not yet configured."
         else:
             payment = MemberSubscriptionPayment(
                 organization_id=subscription.organization_id,
@@ -7162,22 +7205,15 @@ async def ingest_member_dues_payment_webhook(
             payment_plan = await select_member_subscription_payment_plan_for_payment(db, subscription, None)
             if payment_plan is not None:
                 payment.payment_plan_id = payment_plan.id
-            await apply_member_subscription_payment_to_charges(
+            await apply_succeeded_member_dues_payment(
                 db,
                 subscription,
+                payment,
                 amount,
-                payment.id,
-                payment.received_at,
+                payment_plan=payment_plan,
+                source_callback_id=callback.id,
+                credit_notes="Member dues provider callback overpayment retained as club account credit.",
             )
-            subscription.balance_amount = max(Decimal("0.00"), open_amount - amount).quantize(Decimal("0.01"))
-            if subscription.balance_amount <= 0:
-                subscription.balance_amount = Decimal("0.00")
-                if subscription.status == "past_due":
-                    subscription.status = "active"
-            if payment_plan is not None:
-                apply_member_subscription_payment_plan_payment(payment_plan, amount)
-            await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
-            await complete_member_subscription_payment_plans_if_settled(db, subscription)
             callback.payment_id = payment.id
             callback.subscription_id = subscription.id
             callback.accepted = True
@@ -7252,6 +7288,12 @@ async def member_dues_payment_callback_read(
     duplicate: bool | None = None,
 ) -> MemberDuesPaymentWebhookRead:
     subscription = await db.get(MemberSubscription, callback.subscription_id) if callback.subscription_id else None
+    credit = await db.scalar(
+        select(MemberSubscriptionCredit)
+        .where(MemberSubscriptionCredit.source_callback_id == callback.id)
+        .order_by(MemberSubscriptionCredit.created_at.asc())
+        .limit(1)
+    )
     return MemberDuesPaymentWebhookRead(
         callback_id=callback.id,
         organization_id=callback.organization_id,
@@ -7263,6 +7305,8 @@ async def member_dues_payment_callback_read(
         external_payment_id=callback.external_payment_id,
         dues_reference=callback.dues_reference,
         amount=callback.amount,
+        credit_id=credit.id if credit else None,
+        credit_amount=credit.original_amount if credit else None,
         currency=callback.currency,
         method=callback.method,
         payer_phone=callback.payer_phone,
@@ -7578,6 +7622,13 @@ async def run_member_subscription_charge_worker(
                 subscription.status = "past_due"
             else:
                 subscription.status = "active"
+            await db.flush()
+            credit_applied = await apply_member_subscription_credits_to_charge(
+                db,
+                subscription,
+                charge,
+                datetime.now(UTC),
+            )
             await db.commit()
             await db.refresh(charge)
             await db.refresh(subscription)
@@ -7591,7 +7642,11 @@ async def run_member_subscription_charge_worker(
                     subject_label,
                     charge,
                     action="charged",
-                    reason="Recurring club member dues charge created.",
+                    reason=(
+                        f"Recurring club member dues charge created; {credit_applied} {charge.currency} credit applied."
+                        if credit_applied > 0
+                        else "Recurring club member dues charge created."
+                    ),
                 )
             )
         except Exception:
@@ -7742,6 +7797,86 @@ def apply_member_subscription_payment_plan_payment(
         )
 
 
+async def apply_succeeded_member_dues_payment(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+    payment: MemberSubscriptionPayment,
+    amount: Decimal,
+    *,
+    payment_plan: MemberSubscriptionPaymentPlan | None = None,
+    source_callback_id: UUID | None = None,
+    created_by_person_id: UUID | None = None,
+    credit_notes: str | None = None,
+) -> MemberSubscriptionCredit | None:
+    payment_amount = amount.quantize(Decimal("0.01"))
+    open_amount = member_subscription_open_amount(subscription)
+    settlement_amount = min(payment_amount, open_amount).quantize(Decimal("0.01"))
+    credit_amount = max(Decimal("0.00"), payment_amount - settlement_amount).quantize(Decimal("0.01"))
+
+    if settlement_amount > 0:
+        await apply_member_subscription_payment_to_charges(
+            db,
+            subscription,
+            settlement_amount,
+            payment.id,
+            payment.received_at,
+        )
+        subscription.balance_amount = max(Decimal("0.00"), open_amount - settlement_amount).quantize(Decimal("0.01"))
+        if payment_plan is not None:
+            apply_member_subscription_payment_plan_payment(payment_plan, settlement_amount)
+        await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
+        await complete_member_subscription_payment_plans_if_settled(db, subscription)
+
+    if subscription.balance_amount <= 0:
+        subscription.balance_amount = Decimal("0.00")
+        if subscription.status == "past_due":
+            subscription.status = "active"
+
+    if credit_amount <= 0:
+        return None
+    return await create_member_subscription_credit(
+        db,
+        subscription=subscription,
+        amount=credit_amount,
+        currency=payment.currency,
+        source_payment_id=payment.id,
+        source_callback_id=source_callback_id,
+        created_by_person_id=created_by_person_id,
+        notes=credit_notes,
+    )
+
+
+async def create_member_subscription_credit(
+    db: AsyncSession,
+    *,
+    subscription: MemberSubscription,
+    amount: Decimal,
+    currency: str,
+    source_payment_id: UUID | None = None,
+    source_callback_id: UUID | None = None,
+    created_by_person_id: UUID | None = None,
+    source: str = "overpayment",
+    notes: str | None = None,
+) -> MemberSubscriptionCredit:
+    credit_amount = amount.quantize(Decimal("0.01"))
+    credit = MemberSubscriptionCredit(
+        organization_id=subscription.organization_id,
+        subscription_id=subscription.id,
+        source_payment_id=source_payment_id,
+        source_callback_id=source_callback_id,
+        original_amount=credit_amount,
+        remaining_amount=credit_amount,
+        currency=currency.upper(),
+        source=source,
+        status="available",
+        created_by_person_id=created_by_person_id,
+        notes=notes,
+    )
+    db.add(credit)
+    await db.flush()
+    return credit
+
+
 async def complete_member_subscription_payment_plans_if_settled(
     db: AsyncSession,
     subscription: MemberSubscription,
@@ -7812,6 +7947,58 @@ async def apply_member_subscription_payment_to_charges(
         remaining = (remaining - applied).quantize(Decimal("0.01"))
         allocated = (allocated + applied).quantize(Decimal("0.01"))
     return allocated
+
+
+async def apply_member_subscription_credits_to_charge(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+    charge: MemberSubscriptionCharge,
+    applied_at: datetime,
+) -> Decimal:
+    remaining_charge_balance = max(charge.balance_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+    applied_total = Decimal("0.00")
+    if remaining_charge_balance <= 0:
+        return applied_total
+    credits = (
+        await db.scalars(
+            select(MemberSubscriptionCredit)
+            .where(MemberSubscriptionCredit.subscription_id == subscription.id)
+            .where(MemberSubscriptionCredit.status.in_(["available", "partially_applied"]))
+            .where(MemberSubscriptionCredit.remaining_amount > Decimal("0"))
+            .where(MemberSubscriptionCredit.currency == charge.currency.upper())
+            .order_by(MemberSubscriptionCredit.created_at.asc())
+        )
+    ).all()
+    for credit in credits:
+        if remaining_charge_balance <= 0:
+            break
+        credit_balance = max(credit.remaining_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+        if credit_balance <= 0:
+            credit.remaining_amount = Decimal("0.00")
+            credit.status = "applied"
+            continue
+        applied = min(remaining_charge_balance, credit_balance).quantize(Decimal("0.01"))
+        charge.amount_paid = (charge.amount_paid + applied).quantize(Decimal("0.01"))
+        charge.balance_amount = max(Decimal("0.00"), charge.balance_amount - applied).quantize(Decimal("0.01"))
+        charge.last_payment_id = credit.source_payment_id or charge.last_payment_id
+        credit.remaining_amount = max(Decimal("0.00"), credit.remaining_amount - applied).quantize(Decimal("0.01"))
+        credit.status = "applied" if credit.remaining_amount <= 0 else "partially_applied"
+        remaining_charge_balance = (remaining_charge_balance - applied).quantize(Decimal("0.01"))
+        applied_total = (applied_total + applied).quantize(Decimal("0.01"))
+
+    if applied_total <= 0:
+        return applied_total
+    subscription.balance_amount = max(Decimal("0.00"), subscription.balance_amount - applied_total).quantize(Decimal("0.01"))
+    if charge.balance_amount <= 0:
+        charge.balance_amount = Decimal("0.00")
+        charge.status = "paid"
+        charge.paid_at = applied_at
+    else:
+        charge.status = "partial"
+    if subscription.balance_amount <= 0 and subscription.status == "past_due":
+        subscription.balance_amount = Decimal("0.00")
+        subscription.status = "active"
+    return applied_total
 
 
 async def mark_member_subscription_charges_paid_if_settled(

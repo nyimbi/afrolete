@@ -374,6 +374,7 @@ import type {
   MemberSubscriptionChargeRunRead,
   MemberSubscriptionChargeWaiverRead,
   MemberSubscriptionCheckoutLinkRead,
+  MemberSubscriptionCreditRead,
   MemberSubscriptionPaymentRead,
   MemberSubscriptionPaymentPlanRead,
   MemberSubscriptionPlanRead,
@@ -1909,6 +1910,7 @@ export default function HomePage() {
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
+  const [memberSubscriptionCredits, setMemberSubscriptionCredits] = useState<MemberSubscriptionCreditRead[]>([]);
   const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
   const [memberDuesCollectionRails, setMemberDuesCollectionRails] = useState<MemberDuesCollectionRailRead[]>([]);
   const [memberRenewalCampaigns, setMemberRenewalCampaigns] = useState<MemberSubscriptionRenewalCampaignRead[]>([]);
@@ -4524,6 +4526,7 @@ export default function HomePage() {
       plans,
       subscriptions,
       charges,
+      credits,
       paymentPlans,
       collectionRails,
       renewalCampaigns,
@@ -4538,6 +4541,7 @@ export default function HomePage() {
       apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
       apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
+      apiRequest<MemberSubscriptionCreditRead[]>(`/organizations/${organizationId}/member-subscription-credits`),
       apiRequest<MemberSubscriptionPaymentPlanRead[]>(
         `/organizations/${organizationId}/member-subscription-payment-plans`
       ),
@@ -4562,6 +4566,7 @@ export default function HomePage() {
     setMemberSubscriptionPlans(plans);
     setMemberSubscriptions(subscriptions);
     setMemberSubscriptionCharges(charges);
+    setMemberSubscriptionCredits(credits);
     setMemberDuesPaymentPlans(paymentPlans);
     setMemberDuesCollectionRails(collectionRails);
     setMemberRenewalCampaigns(renewalCampaigns);
@@ -25586,7 +25591,7 @@ export default function HomePage() {
                   <div>
                     <strong>Receivables aging</strong>
                     <span>
-                      {memberDuesReceivablesSummary.outstanding_balance} open · {memberDuesReceivablesSummary.overdue_balance} overdue · {memberDuesReceivablesSummary.total_waived} waived
+                      {memberDuesReceivablesSummary.outstanding_balance} open · {memberDuesReceivablesSummary.overdue_balance} overdue · {memberDuesReceivablesSummary.available_credit_amount} credit
                     </span>
                     <small>
                       {memberDuesReceivablesSummary.collection_rate_percent}% collected · {memberDuesReceivablesSummary.waived_charge_count} waived · oldest {memberDuesReceivablesSummary.oldest_open_due_on ?? "none"}
@@ -25634,6 +25639,15 @@ export default function HomePage() {
                     <small>{subscription.dues_reminder_count} reminder(s) · last {subscription.dues_last_reminded_at ? new Date(subscription.dues_last_reminded_at).toLocaleString() : "not sent"}</small>
                   </div>
                   <button type="button" onClick={() => setSelectedMemberSubscriptionId(subscription.id)}>Select</button>
+                </article>
+              ))}
+              {memberSubscriptionCredits.slice(0, 5).map((credit) => (
+                <article key={credit.id} className={`task-card ${Number(credit.remaining_amount) > 0 ? "selected" : ""}`}>
+                  <div>
+                    <strong>{credit.subject_label ?? credit.subscription_id} · account credit</strong>
+                    <span>{credit.remaining_amount}/{credit.original_amount} {credit.currency} remaining · {credit.status.replaceAll("_", " ")}</span>
+                    <small>{credit.source.replaceAll("_", " ")} · {credit.notes ?? "Club-held dues credit for future member charges."}</small>
+                  </div>
                 </article>
               ))}
               {memberDuesCollectionRails.slice(0, 5).map((rail) => (
@@ -25809,7 +25823,7 @@ export default function HomePage() {
                       {memberDuesPaymentCallback.amount ?? "0.00"} {memberDuesPaymentCallback.currency ?? "KES"} · balance {memberDuesPaymentCallback.subscription_balance_amount ?? "unmatched"}
                     </span>
                     <small>
-                      {memberDuesPaymentCallback.duplicate ? "duplicate" : "new"} · {memberDuesPaymentCallback.platform_hosting_charge ? "hosting" : "not hosting"} · {memberDuesPaymentCallback.message}
+                      {memberDuesPaymentCallback.duplicate ? "duplicate" : "new"} · {memberDuesPaymentCallback.credit_amount ? `${memberDuesPaymentCallback.credit_amount} credit` : "no credit"} · {memberDuesPaymentCallback.platform_hosting_charge ? "hosting" : "not hosting"} · {memberDuesPaymentCallback.message}
                     </small>
                   </div>
                 </article>

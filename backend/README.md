@@ -109,7 +109,9 @@ member dues accounts, and retired dues plans stop producing future recurring
 club receivable charges. Managers can also approve installment, hardship,
 family, or scholarship-style payment plans for outstanding balances; linked
 M-Pesa/manual/hosted payments reduce both the dues ledger and the active
-arrangement balance. Tenant financial-aid programs can approve need-based,
+arrangement balance; overpayments and early payments become member account
+credits held by the club and automatically apply to future dues charges.
+Tenant financial-aid programs can approve need-based,
 hardship, athletic, academic, or sponsor-funded awards and apply them as
 auditable non-cash dues relief against open member charges. Approved waivers
 reduce open member-dues balances without recording fake cash and retain waiver
@@ -130,7 +132,8 @@ callbacks to `/api/v1/organizations/member-dues-payment-webhooks`; the endpoint
 optionally enforces `X-Afrolete-Member-Dues-Timestamp` and
 `X-Afrolete-Member-Dues-Signature`, normalizes M-Pesa STK callback metadata,
 records callback audits, ignores duplicate provider receipts, and settles only
-club-managed member dues receivables, never AfroLete hosting invoices. The
+club-managed member dues receivables, creating member account credits for
+excess payments and never paying AfroLete hosting invoices. The
 communication escalation lane scans unresolved urgent messages and creates
 quiet-hours-override escalation messages with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with

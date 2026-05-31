@@ -1291,6 +1291,23 @@ class MemberSubscriptionPaymentRead(BaseModel):
     subscription_status: str
 
 
+class MemberSubscriptionCreditRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    subscription_id: UUID
+    subject_label: str | None = None
+    source_payment_id: UUID | None
+    source_callback_id: UUID | None
+    original_amount: Decimal
+    remaining_amount: Decimal
+    currency: str
+    source: str
+    status: str
+    created_by_person_id: UUID | None
+    notes: str | None
+    created_at: datetime
+
+
 class MemberSubscriptionPaymentPlanCreate(BaseModel):
     name: str = Field(default="Member dues payment plan", min_length=2, max_length=180)
     plan_type: str = Field(default="installment", pattern="^(installment|hardship|family|scholarship)$")
@@ -1743,6 +1760,7 @@ class MemberSubscriptionReceivablesSummaryRead(BaseModel):
     total_charged: Decimal
     total_collected: Decimal
     total_waived: Decimal
+    available_credit_amount: Decimal
     outstanding_balance: Decimal
     current_balance: Decimal
     overdue_balance: Decimal
@@ -1849,6 +1867,7 @@ class MemberSubscriptionCheckoutSettlementRead(BaseModel):
     subscription_status: str
     amount_paid: Decimal
     open_amount: Decimal
+    credit_amount: Decimal = Decimal("0.00")
     session_status: str
     message: str
 
@@ -1881,6 +1900,8 @@ class MemberDuesPaymentWebhookRead(BaseModel):
     external_payment_id: str | None
     dues_reference: str | None
     amount: Decimal | None
+    credit_id: UUID | None = None
+    credit_amount: Decimal | None = None
     currency: str | None
     method: str | None
     payer_phone: str | None
