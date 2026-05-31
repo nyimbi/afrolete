@@ -30,6 +30,7 @@ from app.models.commercial import (
     FinancialForecastScenario,
     FinancialStatementPackage,
     FundraisingCampaign,
+    GrantApplicationApproval,
     GrantApplication,
     GrantOpportunity,
     GrantReport,
@@ -95,6 +96,9 @@ from app.schemas.commercial import (
     FinancialStatementLineRead,
     FinancialStatementPackageRead,
     FundraisingCampaignCreate,
+    GrantApplicationApprovalCreate,
+    GrantApplicationApprovalDecision,
+    GrantApplicationApprovalRead,
     GrantApplicationCreate,
     GrantDashboardRead,
     GrantOpportunityCreate,
@@ -1015,6 +1019,86 @@ async def list_grant_applications(db: AsyncSession, organization_id: UUID) -> li
         )
     ).all()
     return [(application, opportunity) for application, opportunity in rows]
+
+
+async def create_grant_application_approval(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantApplicationApprovalCreate,
+    authz: AuthorizationService,
+) -> GrantApplicationApprovalRead:
+    application = await get_grant_application_for_organization(
+        db,
+        payload.grant_application_id,
+        payload.organization_id,
+    )
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    approval = GrantApplicationApproval(
+        organization_id=payload.organization_id,
+        grant_application_id=application.id,
+        approval_level=payload.approval_level,
+        reviewer_name=payload.reviewer_name,
+        reviewer_email=payload.reviewer_email.lower() if payload.reviewer_email else None,
+        request_notes=payload.request_notes,
+        status="pending",
+        requested_at=datetime.now(UTC),
+    )
+    application.status = "internal_review" if application.status == "draft" else application.status
+    db.add(approval)
+    await db.commit()
+    await db.refresh(approval)
+    return await grant_application_approval_read(db, approval)
+
+
+async def list_grant_application_approvals(
+    db: AsyncSession,
+    organization_id: UUID,
+    grant_application_id: UUID | None = None,
+) -> list[GrantApplicationApprovalRead]:
+    query = select(GrantApplicationApproval).where(GrantApplicationApproval.organization_id == organization_id)
+    if grant_application_id is not None:
+        query = query.where(GrantApplicationApproval.grant_application_id == grant_application_id)
+    approvals = (
+        await db.scalars(query.order_by(GrantApplicationApproval.requested_at.desc()))
+    ).all()
+    return [await grant_application_approval_read(db, approval) for approval in approvals]
+
+
+async def decide_grant_application_approval(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    approval_id: UUID,
+    payload: GrantApplicationApprovalDecision,
+    authz: AuthorizationService,
+) -> GrantApplicationApprovalRead:
+    approval = await db.get(GrantApplicationApproval, approval_id)
+    if approval is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grant approval not found")
+    await ensure_manage_commercial(authz, identity, approval.organization_id)
+    approval.status = payload.status
+    approval.decision_notes = payload.decision_notes
+    approval.decided_at = datetime.now(UTC)
+    application = await get_grant_application_for_organization(
+        db,
+        approval.grant_application_id,
+        approval.organization_id,
+    )
+    approvals = list(
+        (
+            await db.scalars(
+                select(GrantApplicationApproval).where(
+                    GrantApplicationApproval.grant_application_id == approval.grant_application_id,
+                )
+            )
+        ).all()
+    )
+    if payload.status == "rejected":
+        application.status = "approval_rejected"
+    elif approvals and all(item.status == "approved" for item in approvals):
+        application.status = "approved_for_submission"
+    await db.commit()
+    await db.refresh(approval)
+    return await grant_application_approval_read(db, approval)
 
 
 async def create_grant_report(
@@ -2591,6 +2675,60 @@ def financial_statement_lines_load(value: str) -> list[FinancialStatementLineRea
                 )
             )
     return lines
+
+
+async def grant_application_approval_read(
+    db: AsyncSession,
+    approval: GrantApplicationApproval,
+) -> GrantApplicationApprovalRead:
+    application = await db.get(GrantApplication, approval.grant_application_id)
+    opportunity = (
+        await db.get(GrantOpportunity, application.grant_opportunity_id)
+        if application is not None
+        else None
+    )
+    return GrantApplicationApprovalRead(
+        id=approval.id,
+        organization_id=approval.organization_id,
+        grant_application_id=approval.grant_application_id,
+        approval_level=approval.approval_level,
+        reviewer_name=approval.reviewer_name,
+        reviewer_email=approval.reviewer_email,
+        request_notes=approval.request_notes,
+        status=approval.status,
+        decision_notes=approval.decision_notes,
+        requested_at=approval.requested_at,
+        decided_at=approval.decided_at,
+        project_title=application.project_title if application else None,
+        funder_name=opportunity.funder_name if opportunity else None,
+    )
+
+
+async def grant_application_approval_counts(
+    db: AsyncSession,
+    grant_application_id: UUID,
+) -> tuple[str, int, int, int]:
+    approvals = list(
+        (
+            await db.scalars(
+                select(GrantApplicationApproval).where(
+                    GrantApplicationApproval.grant_application_id == grant_application_id,
+                )
+            )
+        ).all()
+    )
+    pending = sum(1 for approval in approvals if approval.status == "pending")
+    approved = sum(1 for approval in approvals if approval.status == "approved")
+    rejected = sum(1 for approval in approvals if approval.status == "rejected")
+    if not approvals:
+        status_value = "not_requested"
+    elif rejected:
+        status_value = "rejected"
+    elif pending:
+        status_value = "pending"
+    else:
+        status_value = "approved"
+    return status_value, pending, approved, rejected
 
 
 def commercial_json_dumps_list(values: list[str]) -> str:

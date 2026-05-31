@@ -404,6 +404,82 @@ def test_financial_statement_package_generates_pl_balance_sheet_and_cash_flow(cl
     assert list_response.json()[0]["id"] == statement["id"]
 
 
+def test_grant_application_internal_approval_workflow(client, identity_headers) -> None:
+    organization, _, _ = create_commercial_context(client, identity_headers)
+
+    opportunity = client.post(
+        "/api/v1/commercial/grants/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "funder_name": "Youth Sport Foundation",
+            "program_name": "Access Grant",
+            "category": "youth_development",
+            "impact_area": "Scholarship access",
+            "award_ceiling": "25000.00",
+            "matching_required": "2500.00",
+            "due_on": "2026-08-01",
+        },
+    ).json()
+    application = client.post(
+        "/api/v1/commercial/grants/applications",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "grant_opportunity_id": opportunity["id"],
+            "project_title": "Scholarship expansion",
+            "requested_amount": "18000.00",
+            "status": "draft",
+            "narrative": "Expand access to training and travel support.",
+            "budget_summary": "Scholarship awards, coach education, travel.",
+            "impact_metrics": "50 athletes served.",
+        },
+    ).json()
+    assert application["approval_status"] == "not_requested"
+
+    approval_response = client.post(
+        "/api/v1/commercial/grants/application-approvals",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "grant_application_id": application["id"],
+            "approval_level": "board",
+            "reviewer_name": "Board Treasurer",
+            "reviewer_email": "treasurer@example.com",
+            "request_notes": "Confirm matching funds and safeguarding requirements before submission.",
+        },
+    )
+    assert approval_response.status_code == 201
+    approval = approval_response.json()
+    assert approval["status"] == "pending"
+    assert approval["project_title"] == "Scholarship expansion"
+
+    applications = client.get(
+        f"/api/v1/commercial/grants/applications?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert applications[0]["approval_status"] == "pending"
+    assert applications[0]["approval_pending_count"] == 1
+
+    decided_response = client.patch(
+        f"/api/v1/commercial/grants/application-approvals/{approval['id']}",
+        headers=identity_headers,
+        json={"status": "approved", "decision_notes": "Board approves match funding and submission."},
+    )
+    assert decided_response.status_code == 200
+    decided = decided_response.json()
+    assert decided["status"] == "approved"
+    assert decided["decided_at"] is not None
+
+    applications = client.get(
+        f"/api/v1/commercial/grants/applications?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert applications[0]["status"] == "approved_for_submission"
+    assert applications[0]["approval_status"] == "approved"
+    assert applications[0]["approval_approved_count"] == 1
+
+
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,
     identity_headers,

@@ -300,6 +300,7 @@ import type {
   FixtureMatchEventRead,
   FixtureOfficialAssignmentRead,
   FundraisingCampaignRead,
+  GrantApplicationApprovalRead,
   GrantApplicationRead,
   GrantDashboardRead,
   GrantOpportunityRead,
@@ -2335,6 +2336,7 @@ export default function HomePage() {
   const [donorDashboard, setDonorDashboard] = useState<DonorDashboardRead | null>(null);
   const [grantOpportunities, setGrantOpportunities] = useState<GrantOpportunityRead[]>([]);
   const [grantApplications, setGrantApplications] = useState<GrantApplicationRead[]>([]);
+  const [grantApplicationApprovals, setGrantApplicationApprovals] = useState<GrantApplicationApprovalRead[]>([]);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
@@ -3763,6 +3765,11 @@ export default function HomePage() {
     narrative: "Train volunteer coaches, subsidize participation, and expand safe access.",
     budget_summary: "Coach education, equipment, travel support, and safeguarding.",
     impact_metrics: "60 athletes served; 12 coaches certified; 20 scholarship places.",
+    approval_level: "board",
+    reviewer_name: "Board Treasurer",
+    reviewer_email: "treasurer@example.com",
+    approval_request_notes: "Confirm matching funds, safeguarding controls, and reporting capacity before submission.",
+    approval_decision_notes: "Approved for submission with match-funding commitment.",
     report_type: "quarterly",
     report_due_on: "2026-09-30",
     report_status: "draft",
@@ -5578,6 +5585,7 @@ export default function HomePage() {
       donorDashboardData,
       grantOpportunityData,
       grantApplicationData,
+      grantApprovalData,
       grantReportData,
       grantDashboardData,
       merchandiseProductData,
@@ -5620,6 +5628,7 @@ export default function HomePage() {
       apiRequest<DonorDashboardRead>(`/commercial/donor-dashboard?organization_id=${organizationId}`),
       apiRequest<GrantOpportunityRead[]>(`/commercial/grants/opportunities?organization_id=${organizationId}`),
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
+      apiRequest<GrantApplicationApprovalRead[]>(`/commercial/grants/application-approvals?organization_id=${organizationId}`),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
       apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
       apiRequest<MerchandiseProductRead[]>(`/commercial/merchandise/products?organization_id=${organizationId}`),
@@ -5662,6 +5671,7 @@ export default function HomePage() {
     setDonorDashboard(donorDashboardData);
     setGrantOpportunities(grantOpportunityData);
     setGrantApplications(grantApplicationData);
+    setGrantApplicationApprovals(grantApprovalData);
     setGrantReports(grantReportData);
     setGrantDashboard(grantDashboardData);
     setMerchandiseProducts(merchandiseProductData);
@@ -6317,6 +6327,7 @@ export default function HomePage() {
       setDonorDashboard(null);
       setGrantOpportunities([]);
       setGrantApplications([]);
+      setGrantApplicationApprovals([]);
       setGrantReports([]);
       setGrantDashboard(null);
       setMerchandiseProducts([]);
@@ -20232,6 +20243,62 @@ export default function HomePage() {
     );
   };
 
+  const requestGrantApplicationApproval = () => {
+    if (!selectedOrganizationId || !selectedGrantApplicationId) {
+      addLog("Create or select a grant application first", "bad");
+      return;
+    }
+    runAction(
+      "request-grant-approval",
+      () =>
+        apiRequest<GrantApplicationApprovalRead>("/commercial/grants/application-approvals", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            grant_application_id: selectedGrantApplicationId,
+            approval_level: grantForm.approval_level,
+            reviewer_name: grantForm.reviewer_name,
+            reviewer_email: grantForm.reviewer_email,
+            request_notes: grantForm.approval_request_notes
+          }
+        }),
+      (approval) => {
+        setGrantApplicationApprovals((current) => [
+          approval,
+          ...current.filter((item) => item.id !== approval.id)
+        ]);
+        addLog(`${approval.approval_level} grant approval requested`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const decideGrantApplicationApproval = (approval: GrantApplicationApprovalRead, statusValue: "approved" | "rejected") => {
+    runAction(
+      `grant-approval-${approval.id}-${statusValue}`,
+      () =>
+        apiRequest<GrantApplicationApprovalRead>(`/commercial/grants/application-approvals/${approval.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: statusValue,
+            decision_notes: grantForm.approval_decision_notes
+          }
+        }),
+      (updated) => {
+        setGrantApplicationApprovals((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`Grant approval ${updated.status}`, updated.status === "approved" ? "good" : "bad");
+        if (selectedOrganizationId) {
+          void loadCommercial(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
   const createMerchandiseProductAndOrder = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -27036,6 +27103,7 @@ export default function HomePage() {
                 <button type="button" onClick={completeSelectedDonorStewardshipPlan} disabled={busyAction !== null}>Complete donor</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
+                <button type="button" onClick={requestGrantApplicationApproval} disabled={busyAction !== null}>Approve grant</button>
                 <button type="button" onClick={createMerchandiseProductAndOrder} disabled={busyAction !== null}>Store</button>
                 <button type="button" onClick={fulfillSelectedMerchandiseOrder} disabled={busyAction !== null}>Fulfill</button>
               </div>
@@ -27288,11 +27356,33 @@ export default function HomePage() {
                 App status
                 <select value={grantForm.application_status} onChange={(event) => setGrantForm({ ...grantForm, application_status: event.target.value })}>
                   <option value="draft">Draft</option>
+                  <option value="internal_review">Internal review</option>
+                  <option value="approved_for_submission">Approved for submission</option>
                   <option value="submitted">Submitted</option>
                   <option value="under_review">Under review</option>
                   <option value="awarded">Awarded</option>
                   <option value="rejected">Rejected</option>
                 </select>
+              </label>
+              <label>
+                Approval level
+                <input value={grantForm.approval_level} onChange={(event) => setGrantForm({ ...grantForm, approval_level: event.target.value })} />
+              </label>
+              <label>
+                Reviewer
+                <input value={grantForm.reviewer_name} onChange={(event) => setGrantForm({ ...grantForm, reviewer_name: event.target.value })} />
+              </label>
+              <label>
+                Reviewer email
+                <input value={grantForm.reviewer_email} onChange={(event) => setGrantForm({ ...grantForm, reviewer_email: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Approval request
+                <input value={grantForm.approval_request_notes} onChange={(event) => setGrantForm({ ...grantForm, approval_request_notes: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Decision notes
+                <input value={grantForm.approval_decision_notes} onChange={(event) => setGrantForm({ ...grantForm, approval_decision_notes: event.target.value })} />
               </label>
               <label>
                 Report due
@@ -27408,6 +27498,19 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {grantApplicationApprovals.slice(0, 3).map((approval) => (
+                <article key={approval.id} className="task-card">
+                  <div>
+                    <strong>{approval.project_title ?? "Grant"} · {approval.approval_level}</strong>
+                    <span>{approval.status} · {approval.reviewer_name} · {approval.funder_name ?? "funder"}</span>
+                    <small>{approval.decision_notes ?? approval.request_notes ?? "No approval notes"}</small>
+                  </div>
+                  <div className="mini-actions">
+                    <button type="button" onClick={() => decideGrantApplicationApproval(approval, "approved")}>Approve</button>
+                    <button type="button" onClick={() => decideGrantApplicationApproval(approval, "rejected")}>Reject</button>
+                  </div>
+                </article>
+              ))}
               {sponsorActivationDashboard ? (
                 <article className="task-card">
                   <div>
@@ -27594,6 +27697,9 @@ export default function HomePage() {
                   <div>
                     <strong>{application.project_title}</strong>
                     <span>{application.status} · {application.requested_amount} requested · {application.awarded_amount} awarded</span>
+                    <small>
+                      Approval {application.approval_status.replaceAll("_", " ")} · {application.approval_pending_count} pending · {application.approval_approved_count} approved · {application.approval_rejected_count} rejected
+                    </small>
                   </div>
                 </button>
               ))}

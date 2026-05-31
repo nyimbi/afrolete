@@ -46,6 +46,9 @@ from app.schemas.commercial import (
     FinancialStatementPackageRead,
     FundraisingCampaignCreate,
     FundraisingCampaignRead,
+    GrantApplicationApprovalCreate,
+    GrantApplicationApprovalDecision,
+    GrantApplicationApprovalRead,
     GrantApplicationCreate,
     GrantApplicationRead,
     GrantDashboardRead,
@@ -115,6 +118,7 @@ from app.services.commercial import (
     create_donor_profile,
     create_donor_stewardship_plan,
     create_grant_application,
+    create_grant_application_approval,
     create_grant_opportunity,
     create_grant_report,
     create_invoice,
@@ -137,6 +141,7 @@ from app.services.commercial import (
     create_ticket_resale_listing,
     deliver_commercial_tax_filing,
     complete_donor_stewardship_plan,
+    decide_grant_application_approval,
     donor_dashboard,
     execute_payment_settlement_payout,
     generate_financial_statement_package,
@@ -154,9 +159,11 @@ from app.services.commercial import (
     list_financial_budgets,
     list_financial_forecast_scenarios,
     list_financial_statement_packages,
+    list_grant_application_approvals,
     list_grant_applications,
     list_grant_opportunities,
     list_grant_reports,
+    grant_application_approval_counts,
     list_invoices,
     list_commercial_payment_sessions,
     list_sponsors,
@@ -227,11 +234,16 @@ def grant_opportunity_read(opportunity) -> GrantOpportunityRead:
     return GrantOpportunityRead(**fields(opportunity, GrantOpportunityRead))
 
 
-def grant_application_read(application, opportunity=None) -> GrantApplicationRead:
+async def grant_application_read(db: AsyncSession, application, opportunity=None) -> GrantApplicationRead:
+    approval_status, pending, approved, rejected = await grant_application_approval_counts(db, application.id)
     return GrantApplicationRead(
         **fields(application, GrantApplicationRead),
         funder_name=opportunity.funder_name if opportunity else None,
         program_name=opportunity.program_name if opportunity else None,
+        approval_status=approval_status,
+        approval_pending_count=pending,
+        approval_approved_count=approved,
+        approval_rejected_count=rejected,
     )
 
 
@@ -680,7 +692,7 @@ async def create_grant_application_route(
     application = await create_grant_application(db, identity, payload, authz)
     opportunity = await list_grant_opportunities(db, payload.organization_id)
     opportunity_by_id = {item.id: item for item in opportunity}
-    return grant_application_read(application, opportunity_by_id.get(application.grant_opportunity_id))
+    return await grant_application_read(db, application, opportunity_by_id.get(application.grant_opportunity_id))
 
 
 @router.get("/grants/applications", response_model=list[GrantApplicationRead])
@@ -689,9 +701,39 @@ async def list_grant_applications_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[GrantApplicationRead]:
     return [
-        grant_application_read(application, opportunity)
+        await grant_application_read(db, application, opportunity)
         for application, opportunity in await list_grant_applications(db, organization_id)
     ]
+
+
+@router.post("/grants/application-approvals", response_model=GrantApplicationApprovalRead, status_code=status.HTTP_201_CREATED)
+async def create_grant_application_approval_route(
+    payload: GrantApplicationApprovalCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantApplicationApprovalRead:
+    return await create_grant_application_approval(db, identity, payload, authz)
+
+
+@router.get("/grants/application-approvals", response_model=list[GrantApplicationApprovalRead])
+async def list_grant_application_approvals_route(
+    organization_id: UUID = Query(),
+    grant_application_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantApplicationApprovalRead]:
+    return await list_grant_application_approvals(db, organization_id, grant_application_id)
+
+
+@router.patch("/grants/application-approvals/{approval_id}", response_model=GrantApplicationApprovalRead)
+async def decide_grant_application_approval_route(
+    approval_id: UUID,
+    payload: GrantApplicationApprovalDecision,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantApplicationApprovalRead:
+    return await decide_grant_application_approval(db, identity, approval_id, payload, authz)
 
 
 @router.post("/grants/reports", response_model=GrantReportRead, status_code=status.HTTP_201_CREATED)

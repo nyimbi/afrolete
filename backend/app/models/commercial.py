@@ -335,6 +335,24 @@ class GrantApplication(IdMixin, TimestampMixin, Base):
     external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
 
 
+class GrantApplicationApproval(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_application_approvals"
+    __table_args__ = (
+        UniqueConstraint("grant_application_id", "approval_level", name="uq_grant_application_approvals_level"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    grant_application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("grant_applications.id"), index=True)
+    approval_level: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    reviewer_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    reviewer_email: Mapped[str | None] = mapped_column(String(320), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    request_notes: Mapped[str | None] = mapped_column(Text)
+    decision_notes: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class GrantReport(IdMixin, TimestampMixin, Base):
     __tablename__ = "grant_reports"
 

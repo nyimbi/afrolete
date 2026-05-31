@@ -517,6 +517,34 @@ class GrantApplicationRead(GrantApplicationCreate):
     id: UUID
     funder_name: str | None = None
     program_name: str | None = None
+    approval_status: str = "not_requested"
+    approval_pending_count: int = 0
+    approval_approved_count: int = 0
+    approval_rejected_count: int = 0
+
+
+class GrantApplicationApprovalCreate(BaseModel):
+    organization_id: UUID
+    grant_application_id: UUID
+    approval_level: str = Field(default="board", min_length=2, max_length=80)
+    reviewer_name: str = Field(min_length=2, max_length=180)
+    reviewer_email: str | None = Field(default=None, max_length=320)
+    request_notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantApplicationApprovalDecision(BaseModel):
+    status: str = Field(pattern="^(approved|rejected|cancelled)$")
+    decision_notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantApplicationApprovalRead(GrantApplicationApprovalCreate):
+    id: UUID
+    status: str
+    decision_notes: str | None = None
+    requested_at: datetime
+    decided_at: datetime | None = None
+    project_title: str | None = None
+    funder_name: str | None = None
 
 
 class GrantReportCreate(BaseModel):

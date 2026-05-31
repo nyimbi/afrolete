@@ -4373,6 +4373,26 @@ export type GrantApplicationRead = {
   external_reference: string | null;
   funder_name: string | null;
   program_name: string | null;
+  approval_status: string;
+  approval_pending_count: number;
+  approval_approved_count: number;
+  approval_rejected_count: number;
+};
+
+export type GrantApplicationApprovalRead = {
+  id: UUID;
+  organization_id: UUID;
+  grant_application_id: UUID;
+  approval_level: string;
+  reviewer_name: string;
+  reviewer_email: string | null;
+  request_notes: string | null;
+  status: string;
+  decision_notes: string | null;
+  requested_at: string;
+  decided_at: string | null;
+  project_title: string | null;
+  funder_name: string | null;
 };
 
 export type GrantReportRead = {
