@@ -333,6 +333,11 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert collection_rail["method"] == "mpesa_stk"
     assert collection_rail["status"] == "active"
     assert collection_rail["till_number"] == "123456"
+    assert collection_rail["collection_scope"] == "member_dues"
+    assert collection_rail["receivable_collector_type"] == "club"
+    assert collection_rail["platform_hosting_charge"] is False
+    assert collection_rail["hosting_payer_type"] == "club_or_tenant_organization"
+    assert collection_rail["mpesa_collection_supported"] is True
 
     collection_rails = client.get(
         f"/api/v1/organizations/{organization['id']}/member-dues-collection-rails",
@@ -362,6 +367,7 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert public_checkout["title"] == "Senior player monthly dues for Member Dues"
     assert public_checkout["payment_methods"] == ["mpesa_stk"]
     assert public_checkout["collection_rails"][0]["till_number"] == "123456"
+    assert public_checkout["dues_payer_type"] == "member_or_guardian"
     assert public_checkout["platform_hosting_charge"] is False
     assert public_checkout["receivable_owner_type"] == "tenant_organization"
     assert public_checkout["receivable_collector_type"] == "club"

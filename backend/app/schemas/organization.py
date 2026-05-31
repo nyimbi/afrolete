@@ -1142,6 +1142,11 @@ class MemberDuesCollectionRailRead(MemberDuesCollectionRailCreate):
     id: UUID
     organization_id: UUID
     status: str
+    collection_scope: str
+    receivable_collector_type: str
+    platform_hosting_charge: bool
+    hosting_payer_type: str
+    mpesa_collection_supported: bool
 
 
 class MemberSubscriptionPlanCreate(BaseModel):
@@ -1789,6 +1794,7 @@ class MemberSubscriptionHostedCheckoutRead(BaseModel):
     organization_id: UUID
     plan_id: UUID
     plan_name: str
+    dues_payer_type: str
     receivable_owner_type: str
     receivable_collector_type: str
     receivable_note: str

@@ -3,19 +3,24 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.enums import CommunicationChannel, CommunicationMessageType, CommunicationScopeType, MemberSubjectType, MembershipRole
 from app.models.coach_education import CoachEducationActivity, CoachEducationEnrollment
 from app.models.identity import Person
-from app.models.organization import Organization
+from app.models.organization import Membership, Organization
 from app.schemas.coach_education import (
     CoachEducationActivityCreate,
     CoachEducationCertificationReviewCreate,
     CoachEducationEnrollmentCreate,
+    CoachEducationRenewalReminderItemRead,
+    CoachEducationRenewalReminderRunCreate,
+    CoachEducationRenewalReminderRunRead,
 )
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
+from app.services.communications import create_message_for_recipients, destination_for_channel
 from app.services.training import ensure_manage_training
 
 
@@ -343,11 +348,286 @@ async def coach_education_enrollment_read(
         "last_reviewed_by_person_id": enrollment.last_reviewed_by_person_id,
         "last_reviewed_at": enrollment.last_reviewed_at,
         "review_notes": enrollment.review_notes,
+        "renewal_last_reminded_at": enrollment.renewal_last_reminded_at,
+        "renewal_reminder_message_id": enrollment.renewal_reminder_message_id,
+        "renewal_reminder_count": enrollment.renewal_reminder_count,
         "progress_percent": progress_percent,
         "next_module": next_module,
         "last_activity_at": enrollment.last_activity_at,
         "created_at": enrollment.created_at,
     }
+
+
+async def run_coach_education_renewal_reminders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: CoachEducationRenewalReminderRunCreate,
+    authz: AuthorizationService,
+) -> CoachEducationRenewalReminderRunRead:
+    await ensure_manage_training(authz, identity, payload.organization_id)
+    return await run_coach_education_renewal_reminder_worker(
+        db,
+        organization_id=payload.organization_id,
+        channel=CommunicationChannel(payload.channel),
+        as_of=payload.as_of,
+        horizon_days=payload.horizon_days,
+        repeat_after_days=payload.repeat_after_days,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_coach_education_renewal_reminder_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    as_of: date | None = None,
+    horizon_days: int = 45,
+    repeat_after_days: int = 14,
+    limit: int = 100,
+    dry_run: bool = False,
+) -> CoachEducationRenewalReminderRunRead:
+    effective_as_of = as_of or date.today()
+    rows = await coach_education_enrollments_due_for_renewal_reminder(
+        db,
+        organization_id=organization_id,
+        as_of=effective_as_of,
+        horizon_days=horizon_days,
+        limit=limit,
+    )
+    enrollment_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+    items: list[CoachEducationRenewalReminderItemRead] = []
+    executed_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for enrollment, person in rows:
+        executed_count += 1
+        state = coach_education_certification_state(enrollment)
+        if coach_education_recently_reminded(enrollment, repeat_after_days):
+            skipped_count += 1
+            items.append(
+                coach_education_renewal_reminder_item(
+                    enrollment,
+                    person,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"Coach certification renewal reminder already sent within {repeat_after_days} days.",
+                    message_id=enrollment.renewal_reminder_message_id,
+                )
+            )
+            continue
+        recipients = await coach_education_manager_recipients(db, enrollment.organization_id, channel)
+        if not recipients:
+            skipped_count += 1
+            items.append(
+                coach_education_renewal_reminder_item(
+                    enrollment,
+                    person,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"No organization manager has a destination for {channel.value}.",
+                )
+            )
+            continue
+        if dry_run:
+            skipped_count += 1
+            items.append(
+                coach_education_renewal_reminder_item(
+                    enrollment,
+                    person,
+                    effective_as_of,
+                    action="dry_run",
+                    reason=f"Would remind {len(recipients)} manager(s); certification state is {state}.",
+                    recipient_count=len(recipients),
+                )
+            )
+            continue
+        try:
+            message = await create_message_for_recipients(
+                db,
+                organization_id=enrollment.organization_id,
+                message_type=CommunicationMessageType.REMINDER,
+                channel=channel,
+                scope_type=CommunicationScopeType.PERSON,
+                scope_id=enrollment.person_id,
+                recipient_person_ids=[recipient.id for recipient in recipients],
+                subject=f"Coach certification renewal due: {enrollment.program_title}",
+                body=coach_education_renewal_reminder_body(enrollment, person, effective_as_of),
+                urgent=state in {"expired", "renewal_due"},
+                created_by_person_id=None,
+            )
+            now = datetime.now(UTC)
+            enrollment.renewal_last_reminded_at = now
+            enrollment.renewal_reminder_message_id = message.id
+            enrollment.renewal_reminder_count = int(enrollment.renewal_reminder_count or 0) + 1
+            await db.commit()
+            await db.refresh(enrollment)
+            enrollment_ids.append(enrollment.id)
+            message_ids.append(message.id)
+            items.append(
+                coach_education_renewal_reminder_item(
+                    enrollment,
+                    person,
+                    effective_as_of,
+                    action="reminded",
+                    reason=f"Coach certification renewal reminder sent to {len(recipients)} manager(s).",
+                    recipient_count=len(recipients),
+                    message_id=message.id,
+                )
+            )
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+            items.append(
+                coach_education_renewal_reminder_item(
+                    enrollment,
+                    person,
+                    effective_as_of,
+                    action="failed",
+                    reason="Failed to create coach certification renewal reminder message.",
+                    recipient_count=len(recipients),
+                )
+            )
+
+    return CoachEducationRenewalReminderRunRead(
+        organization_id=organization_id,
+        channel=channel.value,
+        as_of=effective_as_of,
+        horizon_days=horizon_days,
+        repeat_after_days=repeat_after_days,
+        eligible_count=len(rows),
+        executed_count=executed_count,
+        reminded_count=len(message_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        enrollment_ids=enrollment_ids,
+        message_ids=message_ids,
+        items=items,
+    )
+
+
+async def coach_education_enrollments_due_for_renewal_reminder(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    as_of: date,
+    horizon_days: int,
+    limit: int,
+) -> list[tuple[CoachEducationEnrollment, Person]]:
+    horizon = as_of + timedelta(days=horizon_days)
+    statement = (
+        select(CoachEducationEnrollment, Person)
+        .join(Person, Person.id == CoachEducationEnrollment.person_id)
+        .where(CoachEducationEnrollment.status == "certified")
+        .where(
+            or_(
+                CoachEducationEnrollment.renewal_due_on <= horizon,
+                CoachEducationEnrollment.certification_expires_on <= horizon,
+            )
+        )
+        .order_by(
+            CoachEducationEnrollment.renewal_due_on.asc().nulls_last(),
+            CoachEducationEnrollment.certification_expires_on.asc().nulls_last(),
+            Person.display_name.asc(),
+        )
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(CoachEducationEnrollment.organization_id == organization_id)
+    return [(enrollment, person) for enrollment, person in (await db.execute(statement)).all()]
+
+
+def coach_education_recently_reminded(enrollment: CoachEducationEnrollment, repeat_after_days: int) -> bool:
+    if enrollment.renewal_last_reminded_at is None or repeat_after_days <= 0:
+        return False
+    last_reminded = (
+        enrollment.renewal_last_reminded_at.replace(tzinfo=UTC)
+        if enrollment.renewal_last_reminded_at.tzinfo is None
+        else enrollment.renewal_last_reminded_at.astimezone(UTC)
+    )
+    return last_reminded >= datetime.now(UTC) - timedelta(days=repeat_after_days)
+
+
+async def coach_education_manager_recipients(
+    db: AsyncSession,
+    organization_id: UUID,
+    channel: CommunicationChannel,
+) -> list[Person]:
+    rows = (
+        await db.scalars(
+            select(Person)
+            .join(Membership, Membership.subject_id == Person.id)
+            .where(Membership.organization_id == organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(Membership.role.in_([MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.STAFF]))
+            .where(Membership.status == "active")
+            .order_by(Membership.role.asc(), Person.display_name.asc())
+        )
+    ).all()
+    return [
+        person
+        for person in rows
+        if channel == CommunicationChannel.IN_APP or destination_for_channel(person, channel) is not None
+    ]
+
+
+def coach_education_renewal_reminder_body(
+    enrollment: CoachEducationEnrollment,
+    person: Person,
+    as_of: date,
+) -> str:
+    cpd_gap = max(float(enrollment.cpd_hours_required or 0.0) - float(enrollment.cpd_hours_completed or 0.0), 0.0)
+    days_until_expiry = (
+        (enrollment.certification_expires_on - as_of).days if enrollment.certification_expires_on else "unknown"
+    )
+    return "\n".join(
+        [
+            f"{person.display_name}'s {enrollment.program_title} certification needs renewal review.",
+            f"State: {coach_education_certification_state(enrollment)}. Certificate: {enrollment.certificate_number or 'not issued'}.",
+            f"Accreditor: {enrollment.accreditation_provider or 'not recorded'}.",
+            f"Renewal due: {enrollment.renewal_due_on.isoformat() if enrollment.renewal_due_on else 'not recorded'}.",
+            f"Expires: {enrollment.certification_expires_on.isoformat() if enrollment.certification_expires_on else 'not recorded'} ({days_until_expiry} days).",
+            f"CPD: {enrollment.cpd_hours_completed}/{enrollment.cpd_hours_required} hours; gap {cpd_gap}.",
+            f"Portfolio evidence: {enrollment.portfolio_evidence_ref or 'not attached'}.",
+            "Record CPD evidence, renew the certificate, or restrict coaching duties before the credential lapses.",
+        ]
+    )
+
+
+def coach_education_renewal_reminder_item(
+    enrollment: CoachEducationEnrollment,
+    person: Person,
+    as_of: date,
+    *,
+    action: str,
+    reason: str,
+    recipient_count: int = 0,
+    message_id: UUID | None = None,
+) -> CoachEducationRenewalReminderItemRead:
+    cpd_gap = max(float(enrollment.cpd_hours_required or 0.0) - float(enrollment.cpd_hours_completed or 0.0), 0.0)
+    days_until_expiry = (
+        (enrollment.certification_expires_on - as_of).days if enrollment.certification_expires_on else None
+    )
+    return CoachEducationRenewalReminderItemRead(
+        enrollment_id=enrollment.id,
+        person_id=person.id,
+        person_name=person.display_name,
+        program_key=enrollment.program_key,
+        program_title=enrollment.program_title,
+        certification_state=coach_education_certification_state(enrollment),
+        renewal_due_on=enrollment.renewal_due_on,
+        certification_expires_on=enrollment.certification_expires_on,
+        days_until_expiry=days_until_expiry,
+        cpd_gap_hours=cpd_gap,
+        recipient_count=recipient_count,
+        action=action,
+        reason=reason,
+        message_id=message_id,
+    )
 
 
 async def review_coach_education_certification(

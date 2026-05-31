@@ -1099,6 +1099,11 @@ export type MemberDuesCollectionRailRead = {
   supports_stk_push: boolean;
   supports_manual_reconciliation: boolean;
   notes: string | null;
+  collection_scope: string;
+  receivable_collector_type: string;
+  platform_hosting_charge: boolean;
+  hosting_payer_type: string;
+  mpesa_collection_supported: boolean;
 };
 
 export type MemberSubscriptionRenewalCampaignRead = {
@@ -1446,6 +1451,7 @@ export type MemberSubscriptionHostedCheckoutRead = {
   organization_id: UUID;
   plan_id: UUID;
   plan_name: string;
+  dues_payer_type: string;
   receivable_owner_type: string;
   receivable_collector_type: string;
   receivable_note: string;
@@ -10436,6 +10442,9 @@ export type CoachEducationEnrollmentRead = {
   last_reviewed_by_person_id: UUID | null;
   last_reviewed_at: string | null;
   review_notes: string | null;
+  renewal_last_reminded_at: string | null;
+  renewal_reminder_message_id: UUID | null;
+  renewal_reminder_count: number;
   progress_percent: number;
   next_module: CoachEducationModuleRead | null;
   last_activity_at: string | null;
@@ -10468,6 +10477,40 @@ export type CoachEducationCertificationReviewRead = {
   cpd_gap_hours: number;
   renewed: boolean;
   message: string;
+};
+
+export type CoachEducationRenewalReminderItemRead = {
+  enrollment_id: UUID;
+  person_id: UUID;
+  person_name: string;
+  program_key: string;
+  program_title: string;
+  certification_state: string;
+  renewal_due_on: string | null;
+  certification_expires_on: string | null;
+  days_until_expiry: number | null;
+  cpd_gap_hours: number;
+  recipient_count: number;
+  action: string;
+  reason: string;
+  message_id: UUID | null;
+};
+
+export type CoachEducationRenewalReminderRunRead = {
+  organization_id: UUID | null;
+  channel: string;
+  as_of: string;
+  horizon_days: number;
+  repeat_after_days: number;
+  eligible_count: number;
+  executed_count: number;
+  reminded_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  enrollment_ids: UUID[];
+  message_ids: UUID[];
+  items: CoachEducationRenewalReminderItemRead[];
 };
 
 export type CoachEducationDashboardRead = {

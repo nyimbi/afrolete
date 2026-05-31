@@ -83,6 +83,9 @@ class CoachEducationEnrollmentRead(BaseModel):
     last_reviewed_by_person_id: UUID | None
     last_reviewed_at: datetime | None
     review_notes: str | None
+    renewal_last_reminded_at: datetime | None
+    renewal_reminder_message_id: UUID | None
+    renewal_reminder_count: int
     progress_percent: int
     next_module: CoachEducationModuleRead | None
     last_activity_at: datetime | None
@@ -136,6 +139,50 @@ class CoachEducationCertificationReviewRead(BaseModel):
     cpd_gap_hours: float
     renewed: bool
     message: str
+
+
+class CoachEducationRenewalReminderRunCreate(BaseModel):
+    organization_id: UUID
+    channel: str = Field(default="email", pattern="^(email|sms|whatsapp|telegram|push|in_app)$")
+    as_of: date | None = None
+    horizon_days: int = Field(default=45, ge=0, le=730)
+    repeat_after_days: int = Field(default=14, ge=0, le=365)
+    limit: int = Field(default=100, ge=1, le=500)
+    dry_run: bool = False
+
+
+class CoachEducationRenewalReminderItemRead(BaseModel):
+    enrollment_id: UUID
+    person_id: UUID
+    person_name: str
+    program_key: str
+    program_title: str
+    certification_state: str
+    renewal_due_on: date | None
+    certification_expires_on: date | None
+    days_until_expiry: int | None
+    cpd_gap_hours: float
+    recipient_count: int
+    action: str
+    reason: str
+    message_id: UUID | None = None
+
+
+class CoachEducationRenewalReminderRunRead(BaseModel):
+    organization_id: UUID | None
+    channel: str
+    as_of: date
+    horizon_days: int
+    repeat_after_days: int
+    eligible_count: int
+    executed_count: int
+    reminded_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool
+    enrollment_ids: list[UUID]
+    message_ids: list[UUID]
+    items: list[CoachEducationRenewalReminderItemRead]
 
 
 class CoachEducationDashboardRead(BaseModel):

@@ -429,6 +429,7 @@ import type {
   CoachEducationCertificationReviewRead,
   CoachEducationDashboardRead,
   CoachEducationEnrollmentRead,
+  CoachEducationRenewalReminderRunRead,
   CoachVoiceCommandSessionRead,
   CoachVoiceCommandShortcutRead,
   ProductExperienceCatalogRead,
@@ -2230,6 +2231,8 @@ export default function HomePage() {
   const [coachEducationActivity, setCoachEducationActivity] = useState<CoachEducationActivityRead | null>(null);
   const [coachEducationCertificationReview, setCoachEducationCertificationReview] =
     useState<CoachEducationCertificationReviewRead | null>(null);
+  const [coachEducationRenewalReminderRun, setCoachEducationRenewalReminderRun] =
+    useState<CoachEducationRenewalReminderRunRead | null>(null);
   const [productExperienceCatalog, setProductExperienceCatalog] = useState<ProductExperienceCatalogRead | null>(null);
   const [productExperienceDashboard, setProductExperienceDashboard] =
     useState<ProductExperienceDashboardRead | null>(null);
@@ -6470,6 +6473,7 @@ export default function HomePage() {
       setCoachEducationEnrollments([]);
       setCoachEducationActivity(null);
       setCoachEducationCertificationReview(null);
+      setCoachEducationRenewalReminderRun(null);
       setSelectedCoachEducationEnrollmentId("");
       setProductExperienceCatalog(null);
       setProductExperienceDashboard(null);
@@ -16065,6 +16069,33 @@ export default function HomePage() {
     );
   };
 
+  const runCoachEducationRenewalReminders = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running coach renewal reminders", "bad");
+      return;
+    }
+    runAction(
+      "coach-education-renewal-reminders",
+      () =>
+        apiRequest<CoachEducationRenewalReminderRunRead>("/coach-education/renewal-reminders/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            channel: "in_app",
+            horizon_days: 60,
+            repeat_after_days: 14,
+            limit: 50
+          }
+        }),
+      (run) => {
+        setCoachEducationRenewalReminderRun(run);
+        addLog(`${run.reminded_count} coach certification renewal reminder(s) sent`, run.failed_count ? "bad" : "good");
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
   const startProductTour = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -25555,7 +25586,10 @@ export default function HomePage() {
                     <small>
                       {rail.till_number ? `Till ${rail.till_number}` : rail.paybill_number ? `Paybill ${rail.paybill_number}` : rail.account_number ?? "No account reference"} · priority {rail.checkout_priority}
                     </small>
-                    <small>{rail.instructions ?? "Club-owned collection rail for member dues, separate from AfroLete hosting."}</small>
+                    <small>
+                      {rail.collection_scope.replaceAll("_", " ")} · {rail.platform_hosting_charge ? "hosting" : "not hosting"} ·{" "}
+                      {rail.instructions ?? "Club-owned collection rail for member dues, separate from AfroLete hosting."}
+                    </small>
                   </div>
                   <button
                     type="button"
@@ -27367,6 +27401,7 @@ export default function HomePage() {
                 <button type="button" onClick={completeCoachEducationModule} disabled={busyAction !== null}>Complete</button>
                 <button type="button" onClick={() => reviewCoachEducationCertification("record_cpd")} disabled={busyAction !== null}>Record CPD</button>
                 <button type="button" onClick={() => reviewCoachEducationCertification("renew")} disabled={busyAction !== null}>Renew</button>
+                <button type="button" onClick={runCoachEducationRenewalReminders} disabled={busyAction !== null}>Remind</button>
               </div>
             </div>
             <div className="score-summary">
@@ -27446,6 +27481,15 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {coachEducationRenewalReminderRun ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{coachEducationRenewalReminderRun.reminded_count} renewal reminder(s) sent</strong>
+                    <span>{coachEducationRenewalReminderRun.eligible_count} eligible · {coachEducationRenewalReminderRun.skipped_count} skipped · {coachEducationRenewalReminderRun.failed_count} failed</span>
+                    <small>{coachEducationRenewalReminderRun.items[0]?.reason ?? "No coach certification renewals due"}</small>
+                  </div>
+                </article>
+              ) : null}
               {coachEducationCertificationReview ? (
                 <article className="task-card">
                   <div>
@@ -27485,8 +27529,9 @@ export default function HomePage() {
                     <small>
                       {enrollment.next_module
                         ? `${enrollment.next_module.title}: ${enrollment.next_module.practice_task}`
-                        : `${enrollment.certificate_number ?? "Certificate pending"} · CPD gap ${enrollment.cpd_gap_hours}`}
+                        : `${enrollment.certificate_number ?? "Certificate pending"} · CPD gap ${enrollment.cpd_gap_hours} · ${enrollment.renewal_reminder_count} reminder(s)`}
                     </small>
+                    <small>{enrollment.renewal_last_reminded_at ? `Last reminded ${new Date(enrollment.renewal_last_reminded_at).toLocaleString()}` : "No renewal reminder sent"}</small>
                     <small>{enrollment.accreditation_provider ?? "Accreditation pending"} · expires {enrollment.certification_expires_on ?? "not issued"}</small>
                   </div>
                 </button>

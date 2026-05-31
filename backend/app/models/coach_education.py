@@ -43,6 +43,11 @@ class CoachEducationEnrollment(IdMixin, TimestampMixin, Base):
     last_reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
     last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     review_notes: Mapped[str | None] = mapped_column(Text)
+    renewal_last_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    renewal_reminder_message_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("communication_messages.id"), index=True
+    )
+    renewal_reminder_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 

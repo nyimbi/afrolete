@@ -19,6 +19,7 @@ from app.services.billing import (
     run_payment_retry_worker,
     run_recurring_invoice_worker,
 )
+from app.services.coach_education import run_coach_education_renewal_reminder_worker
 from app.services.commercial import run_grant_saved_search_alert_worker
 from app.services.communications import (
     run_digest_scheduler_worker,
@@ -57,6 +58,7 @@ WORKER_LANES = (
     "communication-digests",
     "communication-escalations",
     "communication-scheduled-dispatch",
+    "coach-education-renewal-reminders",
     "commercial-grant-alerts",
     "compliance-credential-renewal-reminders",
     "compliance-reconciliation",
@@ -120,6 +122,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run-communication-escalations", action="store_true")
     parser.add_argument("--communication-scheduled-dispatch-limit", type=int, default=None)
     parser.add_argument("--dry-run-communication-scheduled-dispatch", action="store_true")
+    parser.add_argument("--coach-education-renewal-reminder-limit", type=int, default=None)
+    parser.add_argument("--coach-education-renewal-reminder-as-of", type=date_from_isoformat, default=None)
+    parser.add_argument("--coach-education-renewal-reminder-horizon-days", type=int, default=45)
+    parser.add_argument("--coach-education-renewal-reminder-repeat-after-days", type=int, default=14)
+    parser.add_argument(
+        "--coach-education-renewal-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.EMAIL.value,
+    )
+    parser.add_argument("--dry-run-coach-education-renewal-reminders", action="store_true")
     parser.add_argument("--commercial-grant-alert-limit", type=int, default=None)
     parser.add_argument("--dry-run-commercial-grant-alerts", action="store_true")
     parser.add_argument(
@@ -357,6 +369,12 @@ async def run_due_workers(
     dry_run_communication_escalations: bool = False,
     communication_scheduled_dispatch_limit: int | None = None,
     dry_run_communication_scheduled_dispatch: bool = False,
+    coach_education_renewal_reminder_limit: int | None = None,
+    coach_education_renewal_reminder_as_of: date | None = None,
+    coach_education_renewal_reminder_horizon_days: int = 45,
+    coach_education_renewal_reminder_repeat_after_days: int = 14,
+    coach_education_renewal_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    dry_run_coach_education_renewal_reminders: bool = False,
     commercial_grant_alert_limit: int | None = None,
     dry_run_commercial_grant_alerts: bool = False,
     compliance_reconciliation_limit: int | None = None,
@@ -536,6 +554,19 @@ async def run_due_workers(
                 organization_id=organization_id,
                 limit=communication_scheduled_dispatch_limit or limit,
                 dry_run=dry_run_communication_scheduled_dispatch,
+            )
+        ).model_dump(mode="json")
+    if "coach-education-renewal-reminders" in active_lanes:
+        results["coach_education_renewal_reminders"] = (
+            await run_coach_education_renewal_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=coach_education_renewal_reminder_channel,
+                as_of=coach_education_renewal_reminder_as_of,
+                horizon_days=coach_education_renewal_reminder_horizon_days,
+                repeat_after_days=coach_education_renewal_reminder_repeat_after_days,
+                limit=coach_education_renewal_reminder_limit or limit,
+                dry_run=dry_run_coach_education_renewal_reminders,
             )
         ).model_dump(mode="json")
     if "commercial-grant-alerts" in active_lanes:
@@ -862,6 +893,14 @@ async def run() -> None:
             dry_run_communication_escalations=args.dry_run_communication_escalations,
             communication_scheduled_dispatch_limit=args.communication_scheduled_dispatch_limit,
             dry_run_communication_scheduled_dispatch=args.dry_run_communication_scheduled_dispatch,
+            coach_education_renewal_reminder_limit=args.coach_education_renewal_reminder_limit,
+            coach_education_renewal_reminder_as_of=args.coach_education_renewal_reminder_as_of,
+            coach_education_renewal_reminder_horizon_days=args.coach_education_renewal_reminder_horizon_days,
+            coach_education_renewal_reminder_repeat_after_days=args.coach_education_renewal_reminder_repeat_after_days,
+            coach_education_renewal_reminder_channel=CommunicationChannel(
+                args.coach_education_renewal_reminder_channel
+            ),
+            dry_run_coach_education_renewal_reminders=args.dry_run_coach_education_renewal_reminders,
             commercial_grant_alert_limit=args.commercial_grant_alert_limit,
             dry_run_commercial_grant_alerts=args.dry_run_commercial_grant_alerts,
             compliance_reconciliation_limit=args.compliance_reconciliation_limit,

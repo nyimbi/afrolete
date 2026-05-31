@@ -62,6 +62,7 @@ Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, 
 `--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
 `--lane compliance-credential-renewal-reminders`,
+`--lane coach-education-renewal-reminders`,
 `--lane insurance-renewal-reminders`,
 `--lane member-dues-charges`,
 `--lane member-dues-reminders`,
@@ -87,7 +88,12 @@ sends repeat-suppressed reminders to organization managers for verified,
 expiring, or expired staff/coach credentials inside the configured renewal
 window; tune with `--compliance-credential-renewal-reminder-horizon-days`,
 `--compliance-credential-renewal-reminder-repeat-after-days`, and
-`--dry-run-compliance-credential-renewal-reminders`. The insurance renewal lane
+`--dry-run-compliance-credential-renewal-reminders`. The coach education
+renewal lane sends repeat-suppressed reminders to organization managers for
+certified coach enrollments that are due for renewal, expired, or carrying CPD
+gaps; tune with `--coach-education-renewal-reminder-horizon-days`,
+`--coach-education-renewal-reminder-repeat-after-days`, and
+`--dry-run-coach-education-renewal-reminders`. The insurance renewal lane
 sends repeat-suppressed reminders to organization managers for active or
 expiring policies inside each policy renewal-notice window; tune with
 `--insurance-renewal-reminder-horizon-days`,

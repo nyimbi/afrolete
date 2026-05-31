@@ -4855,6 +4855,11 @@ def member_dues_collection_rail_read(rail: MemberDuesCollectionRail) -> MemberDu
         supports_stk_push=rail.supports_stk_push,
         supports_manual_reconciliation=rail.supports_manual_reconciliation,
         notes=rail.notes,
+        collection_scope="member_dues",
+        receivable_collector_type="club",
+        platform_hosting_charge=False,
+        hosting_payer_type="club_or_tenant_organization",
+        mpesa_collection_supported=rail.provider.strip().lower() == "mpesa",
     )
 
 
@@ -7518,10 +7523,12 @@ def member_subscription_hosted_checkout_read(
         organization_id=subscription.organization_id,
         plan_id=plan.id,
         plan_name=plan.name,
+        dues_payer_type="member_or_guardian",
         receivable_owner_type="tenant_organization",
         receivable_collector_type="club",
         receivable_note=(
-            "This is a club-managed member dues receivable collected for the tenant organization; "
+            "This is a club-managed member dues receivable collected for the tenant organization "
+            "through its own rails such as M-Pesa, mobile money, bank transfer, or cash office; "
             "it does not pay AfroLete platform hosting."
         ),
         hosting_payer_type="club_or_tenant_organization",

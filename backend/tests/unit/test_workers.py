@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.models.agent import Agent, AgentRunRecord, AgentTask
 from app.models.assets import EmergencyActionPlan, EmergencyPlanActivation
 from app.models.billing import BillingPlan, SaaSInvoice, TenantSubscription
+from app.models.coach_education import CoachEducationEnrollment
 from app.models.communication import CommunicationMessage, MessageRecipient, NotificationPreference
 from app.models.commercial import GrantOpportunity, GrantSavedSearch, GrantSavedSearchRun
 from app.models.enums import (
@@ -114,6 +115,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["communication_digests"]["eligible_count"] == 0
     assert result["results"]["communication_escalations"]["eligible_count"] == 0
     assert result["results"]["communication_scheduled_dispatch"]["eligible_count"] == 0
+    assert result["results"]["coach_education_renewal_reminders"]["eligible_count"] == 0
     assert result["results"]["commercial_grant_alerts"]["eligible_count"] == 0
     assert result["results"]["compliance_credential_renewal_reminders"]["eligible_count"] == 0
     assert result["results"]["compliance_reconciliation"]["eligible_count"] == 1
@@ -146,6 +148,80 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 def test_selected_lanes_expands_all() -> None:
     assert selected_lanes(("all",)) == set(WORKER_LANES)
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
+
+
+async def test_due_worker_sends_coach_education_renewal_reminders(db_session) -> None:
+    organization = Organization(
+        name="Coach Renewal Worker Club",
+        slug="coach-renewal-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    manager = Person(display_name="Academy Manager", primary_email="academy-manager@example.com")
+    coach = Person(display_name="Certified Coach", primary_email="certified-coach@example.com")
+    db_session.add_all([organization, manager, coach])
+    await db_session.flush()
+    db_session.add(
+        Membership(
+            organization_id=organization.id,
+            subject_type=MemberSubjectType.PERSON,
+            subject_id=manager.id,
+            role=MembershipRole.OWNER,
+        )
+    )
+    enrollment = CoachEducationEnrollment(
+        organization_id=organization.id,
+        person_id=coach.id,
+        program_key="foundation_coach",
+        program_title="Foundation Coach",
+        level=1,
+        role="coach",
+        skill_level="intermediate",
+        learning_style="hands_on",
+        xp_points=480,
+        completed_modules_json='["platform_basics","player_management","basic_analytics"]',
+        badges_json='["Foundation Coach Badge"]',
+        status="certified",
+        accreditation_provider="AfroLete Coach Academy",
+        certificate_number="CE-FOUNDATION-COACH-20260531-worker",
+        certification_issued_on=date(2026, 5, 31),
+        certification_expires_on=date(2027, 5, 31),
+        renewal_due_on=date(2027, 5, 1),
+        cpd_hours_required=20,
+        cpd_hours_completed=8,
+        portfolio_evidence_ref="coach-portfolio://worker",
+    )
+    db_session.add(enrollment)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("coach-education-renewal-reminders",),
+        limit=10,
+        coach_education_renewal_reminder_as_of=date(2027, 5, 10),
+        coach_education_renewal_reminder_horizon_days=45,
+        coach_education_renewal_reminder_channel=CommunicationChannel.EMAIL,
+    )
+
+    reminders = result["results"]["coach_education_renewal_reminders"]
+    assert reminders["eligible_count"] == 1
+    assert reminders["reminded_count"] == 1
+    assert reminders["enrollment_ids"] == [str(enrollment.id)]
+    assert reminders["items"][0]["person_name"] == "Certified Coach"
+    assert reminders["items"][0]["cpd_gap_hours"] == 12
+    assert result["summary"]["processed_count"] == 1
+
+    await db_session.refresh(enrollment)
+    assert enrollment.renewal_reminder_count == 1
+    assert str(enrollment.renewal_reminder_message_id) == reminders["message_ids"][0]
+    message_count = await db_session.scalar(
+        select(func.count(CommunicationMessage.id)).where(
+            CommunicationMessage.organization_id == organization.id,
+            CommunicationMessage.subject == "Coach certification renewal due: Foundation Coach",
+        )
+    )
+    assert message_count == 1
 
 
 def test_video_pose_worker_uses_configured_endpoint_headers() -> None:

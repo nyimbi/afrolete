@@ -207,7 +207,9 @@ Major capability areas include:
   hosting payer so members are never treated as the AfroLete hosting payer.
   Member dues are a separate club-managed receivables workflow with recurring
   charge cycles, per-period balances, payment allocation, aging summaries, payment plans, renewal campaigns with early-bird offers, financial-aid awards, renewals, appeals, and impact reporting, auditable waivers, downloadable/deliverable member account statements, payment links, reminders, lifecycle controls, and
-  M-Pesa/manual/provider settlements through tenant-configured collection rails, not AfroLete platform hosting.
+  M-Pesa/manual/provider settlements through tenant-configured collection
+  rails. Those collection rails declare themselves as member-dues rails, not
+  AfroLete hosting payment rails.
 - Offline/PWA operation: installable frontend shell, service worker caching,
   encrypted travel-manifest cache, signed offline artifacts, offline mutation
   outbox, and replay controls.

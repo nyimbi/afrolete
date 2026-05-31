@@ -61,6 +61,54 @@ def test_coach_education_certification_dashboard(client, identity_headers) -> No
     assert enrollment["certification_state"] == "current"
     assert enrollment["cpd_hours_completed"] == 12
     assert enrollment["cpd_gap_hours"] == 8
+    assert enrollment["renewal_reminder_count"] == 0
+
+    reminder_response = client.post(
+        "/api/v1/coach-education/renewal-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2027-05-10",
+            "horizon_days": 45,
+            "repeat_after_days": 14,
+            "limit": 10,
+        },
+    )
+    assert reminder_response.status_code == 200
+    reminder_run = reminder_response.json()
+    assert reminder_run["eligible_count"] == 1
+    assert reminder_run["reminded_count"] == 1
+    assert reminder_run["enrollment_ids"] == [enrollment["id"]]
+    assert reminder_run["items"][0]["action"] == "reminded"
+    assert reminder_run["items"][0]["person_name"] == "Owner Example"
+    assert reminder_run["items"][0]["cpd_gap_hours"] == 8
+
+    repeated_reminder_response = client.post(
+        "/api/v1/coach-education/renewal-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2027-05-10",
+            "horizon_days": 45,
+            "repeat_after_days": 14,
+            "limit": 10,
+        },
+    )
+    assert repeated_reminder_response.status_code == 200
+    repeated_run = repeated_reminder_response.json()
+    assert repeated_run["eligible_count"] == 1
+    assert repeated_run["reminded_count"] == 0
+    assert repeated_run["skipped_count"] == 1
+
+    listed_enrollments = client.get(
+        f"/api/v1/coach-education/enrollments?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert listed_enrollments[0]["renewal_reminder_count"] == 1
+    assert listed_enrollments[0]["renewal_reminder_message_id"] == reminder_run["message_ids"][0]
+    assert listed_enrollments[0]["renewal_last_reminded_at"] is not None
 
     cpd_response = client.post(
         f"/api/v1/coach-education/enrollments/{enrollment['id']}/certification-review",

@@ -13,6 +13,8 @@ from app.schemas.coach_education import (
     CoachEducationDashboardRead,
     CoachEducationEnrollmentCreate,
     CoachEducationEnrollmentRead,
+    CoachEducationRenewalReminderRunCreate,
+    CoachEducationRenewalReminderRunRead,
 )
 from app.services.auth.dependencies import get_current_identity
 from app.services.auth.identity_bridge import CurrentIdentity
@@ -25,6 +27,7 @@ from app.services.coach_education import (
     list_coach_education_enrollments,
     record_coach_education_activity,
     review_coach_education_certification,
+    run_coach_education_renewal_reminders,
 )
 
 router = APIRouter(prefix="/coach-education", tags=["coach-education"])
@@ -106,6 +109,16 @@ async def review_coach_education_certification_route(
     return CoachEducationCertificationReviewRead(
         **await review_coach_education_certification(db, identity, enrollment_id, payload, authz)
     )
+
+
+@router.post("/renewal-reminders/run", response_model=CoachEducationRenewalReminderRunRead)
+async def run_coach_education_renewal_reminders_route(
+    payload: CoachEducationRenewalReminderRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CoachEducationRenewalReminderRunRead:
+    return await run_coach_education_renewal_reminders(db, identity, payload, authz)
 
 
 @router.get("/dashboard", response_model=CoachEducationDashboardRead)
