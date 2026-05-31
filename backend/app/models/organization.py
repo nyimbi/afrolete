@@ -476,10 +476,14 @@ class MemberSubscriptionCharge(IdMixin, TimestampMixin, Base):
     period_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     due_on: Mapped[date | None] = mapped_column(Date, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    balance_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(80), default="recurring_cycle", nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_payment_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("member_subscription_payments.id"), index=True)
     created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
 
 

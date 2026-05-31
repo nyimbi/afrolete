@@ -1209,10 +1209,14 @@ class MemberSubscriptionChargeRead(BaseModel):
     period_end: date
     due_on: date | None
     amount: Decimal
+    amount_paid: Decimal
+    balance_amount: Decimal
     currency: str
     status: str
     source: str
     description: str | None
+    paid_at: datetime | None
+    last_payment_id: UUID | None
     created_by_person_id: UUID | None
     created_at: datetime
 

@@ -24454,8 +24454,8 @@ export default function HomePage() {
                 <article key={charge.id} className="task-card">
                   <div>
                     <strong>{charge.subject_label ?? charge.subscription_id} · {charge.plan_name}</strong>
-                    <span>{charge.amount} {charge.currency} · {charge.status.replaceAll("_", " ")} · {charge.source.replaceAll("_", " ")}</span>
-                    <small>{charge.period_start} to {charge.period_end} · due {charge.due_on ?? "not set"}</small>
+                    <span>{charge.balance_amount} {charge.currency} open · {charge.amount_paid} paid · {charge.status.replaceAll("_", " ")}</span>
+                    <small>{charge.period_start} to {charge.period_end} · due {charge.due_on ?? "not set"} · {charge.source.replaceAll("_", " ")}</small>
                   </div>
                 </article>
               ))}

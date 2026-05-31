@@ -1273,12 +1273,16 @@ async def test_due_worker_generates_member_dues_charges(db_session) -> None:
     assert subscription.current_period_end == date(2026, 7, 31)
     assert subscription.next_due_on == date(2026, 7, 5)
     assert subscription.balance_amount == Decimal("1500.00")
-    charge_count = await db_session.scalar(
-        select(func.count(MemberSubscriptionCharge.id)).where(
+    charge = await db_session.scalar(
+        select(MemberSubscriptionCharge).where(
             MemberSubscriptionCharge.subscription_id == subscription.id
         )
     )
-    assert charge_count == 1
+    assert charge is not None
+    assert charge.amount == Decimal("1500.00")
+    assert charge.amount_paid == Decimal("0.00")
+    assert charge.balance_amount == Decimal("1500.00")
+    assert charge.status == "open"
 
 
 async def test_due_worker_sends_member_dues_reminders(db_session) -> None:

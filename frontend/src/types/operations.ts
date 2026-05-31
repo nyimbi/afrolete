@@ -1063,10 +1063,14 @@ export type MemberSubscriptionChargeRead = {
   period_end: string;
   due_on: string | null;
   amount: string;
+  amount_paid: string;
+  balance_amount: string;
   currency: string;
   status: string;
   source: string;
   description: string | null;
+  paid_at: string | null;
+  last_payment_id: UUID | null;
   created_by_person_id: UUID | null;
   created_at: string;
 };

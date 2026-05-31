@@ -4710,6 +4710,8 @@ async def create_member_subscription(
                 period_end=subscription.current_period_end,
                 due_on=subscription.next_due_on,
                 amount=initial_balance,
+                amount_paid=Decimal("0.00"),
+                balance_amount=initial_balance,
                 currency=plan.currency.upper(),
                 status="open",
                 source="initial_subscription",
@@ -4796,10 +4798,18 @@ async def record_member_subscription_payment(
     )
     db.add(payment)
     if payload.status == "succeeded":
+        await db.flush()
+        await apply_member_subscription_payment_to_charges(
+            db,
+            subscription,
+            payload.amount,
+            payment.id,
+            payment.received_at,
+        )
         subscription.balance_amount = max(Decimal("0"), subscription.balance_amount - payload.amount)
         if subscription.balance_amount == Decimal("0") and subscription.status == "past_due":
             subscription.status = "active"
-        await mark_member_subscription_charges_paid_if_settled(db, subscription)
+        await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
     await db.commit()
     await db.refresh(payment)
     await db.refresh(subscription)
@@ -4895,12 +4905,20 @@ async def settle_member_subscription_checkout(
     )
     db.add(payment)
     if accepted:
+        await db.flush()
+        await apply_member_subscription_payment_to_charges(
+            db,
+            subscription,
+            amount,
+            payment.id,
+            payment.received_at,
+        )
         subscription.balance_amount = member_subscription_open_amount(subscription) - amount
         if subscription.balance_amount <= 0:
             subscription.balance_amount = Decimal("0.00")
             if subscription.status == "past_due":
                 subscription.status = "active"
-            await mark_member_subscription_charges_paid_if_settled(db, subscription)
+            await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
     elif payload.status == "pending" and subscription.status == "active":
         subscription.notes = append_member_dues_note(subscription.notes, f"Pending hosted dues payment {session_id}.")
     await db.commit()
@@ -5030,6 +5048,8 @@ async def run_member_subscription_charge_worker(
                 period_end=period_end,
                 due_on=due_on,
                 amount=plan.amount,
+                amount_paid=Decimal("0.00"),
+                balance_amount=plan.amount,
                 currency=plan.currency.upper(),
                 status="open",
                 source="recurring_cycle",
@@ -5160,9 +5180,52 @@ def member_subscription_charge_due_on(
     return due_on
 
 
+async def apply_member_subscription_payment_to_charges(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+    amount: Decimal,
+    payment_id: UUID,
+    paid_at: datetime,
+) -> Decimal:
+    remaining = amount.quantize(Decimal("0.01"))
+    allocated = Decimal("0.00")
+    if remaining <= 0:
+        return allocated
+    charges = (
+        await db.scalars(
+            select(MemberSubscriptionCharge)
+            .where(MemberSubscriptionCharge.subscription_id == subscription.id)
+            .where(MemberSubscriptionCharge.status.in_(["open", "partial"]))
+            .where(MemberSubscriptionCharge.balance_amount > Decimal("0"))
+            .order_by(MemberSubscriptionCharge.due_on.asc().nulls_last(), MemberSubscriptionCharge.created_at.asc())
+        )
+    ).all()
+    for charge in charges:
+        if remaining <= 0:
+            break
+        charge_balance = max(charge.balance_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+        if charge_balance <= 0:
+            continue
+        applied = min(charge_balance, remaining).quantize(Decimal("0.01"))
+        charge.amount_paid = (charge.amount_paid + applied).quantize(Decimal("0.01"))
+        charge.balance_amount = (charge_balance - applied).quantize(Decimal("0.01"))
+        charge.last_payment_id = payment_id
+        if charge.balance_amount <= 0:
+            charge.balance_amount = Decimal("0.00")
+            charge.status = "paid"
+            charge.paid_at = paid_at
+        else:
+            charge.status = "partial"
+        remaining = (remaining - applied).quantize(Decimal("0.01"))
+        allocated = (allocated + applied).quantize(Decimal("0.01"))
+    return allocated
+
+
 async def mark_member_subscription_charges_paid_if_settled(
     db: AsyncSession,
     subscription: MemberSubscription,
+    payment_id: UUID | None = None,
+    paid_at: datetime | None = None,
 ) -> None:
     if member_subscription_open_amount(subscription) > 0:
         return
@@ -5170,11 +5233,15 @@ async def mark_member_subscription_charges_paid_if_settled(
         await db.scalars(
             select(MemberSubscriptionCharge)
             .where(MemberSubscriptionCharge.subscription_id == subscription.id)
-            .where(MemberSubscriptionCharge.status == "open")
+            .where(MemberSubscriptionCharge.status.in_(["open", "partial"]))
         )
     ).all()
     for charge in charges:
+        charge.amount_paid = charge.amount
+        charge.balance_amount = Decimal("0.00")
         charge.status = "paid"
+        charge.last_payment_id = payment_id or charge.last_payment_id
+        charge.paid_at = paid_at or charge.paid_at
 
 
 def member_subscription_charge_run_item(
