@@ -4,6 +4,7 @@ import json
 import re
 from base64 import b64decode
 from binascii import Error as BinasciiError
+from calendar import monthrange
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
@@ -49,6 +50,7 @@ from app.models.organization import (
     Committee,
     CommitteeMembership,
     MemberSubscription,
+    MemberSubscriptionCharge,
     MemberSubscriptionPayment,
     MemberSubscriptionPlan,
     Membership,
@@ -81,6 +83,9 @@ from app.schemas.organization import (
     MemberSubscriptionCheckoutLinkRead,
     MemberSubscriptionCheckoutSettlementCreate,
     MemberSubscriptionCheckoutSettlementRead,
+    MemberSubscriptionChargeRunCreate,
+    MemberSubscriptionChargeRunItemRead,
+    MemberSubscriptionChargeRunRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionReminderItemRead,
@@ -4693,6 +4698,25 @@ async def create_member_subscription(
         notes=payload.notes,
     )
     db.add(subscription)
+    await db.flush()
+    initial_balance = subscription.balance_amount.quantize(Decimal("0.01"))
+    if initial_balance > 0:
+        db.add(
+            MemberSubscriptionCharge(
+                organization_id=organization_id,
+                subscription_id=subscription.id,
+                plan_id=plan.id,
+                period_start=subscription.current_period_start,
+                period_end=subscription.current_period_end,
+                due_on=subscription.next_due_on,
+                amount=initial_balance,
+                currency=plan.currency.upper(),
+                status="open",
+                source="initial_subscription",
+                description=f"Initial member dues charge for {plan.name}",
+                created_by_person_id=identity.person_id,
+            )
+        )
     await db.commit()
     await db.refresh(subscription)
     return subscription
@@ -4713,6 +4737,34 @@ async def list_member_subscriptions(
     result: list[tuple[MemberSubscription, MemberSubscriptionPlan, str | None]] = []
     for subscription, plan in rows:
         result.append((subscription, plan, await member_subject_label(db, subscription.subject_type, subscription.subject_id)))
+    return result
+
+
+async def list_member_subscription_charges(
+    db: AsyncSession,
+    organization_id: UUID,
+    subscription_id: UUID | None = None,
+) -> list[tuple[MemberSubscriptionCharge, MemberSubscription, MemberSubscriptionPlan, str | None]]:
+    statement = (
+        select(MemberSubscriptionCharge, MemberSubscription, MemberSubscriptionPlan)
+        .join(MemberSubscription, MemberSubscription.id == MemberSubscriptionCharge.subscription_id)
+        .join(MemberSubscriptionPlan, MemberSubscriptionPlan.id == MemberSubscriptionCharge.plan_id)
+        .where(MemberSubscriptionCharge.organization_id == organization_id)
+        .order_by(MemberSubscriptionCharge.due_on.desc(), MemberSubscriptionCharge.created_at.desc())
+    )
+    if subscription_id is not None:
+        statement = statement.where(MemberSubscriptionCharge.subscription_id == subscription_id)
+    rows = (await db.execute(statement)).all()
+    result: list[tuple[MemberSubscriptionCharge, MemberSubscription, MemberSubscriptionPlan, str | None]] = []
+    for charge, subscription, plan in rows:
+        result.append(
+            (
+                charge,
+                subscription,
+                plan,
+                await member_subject_label(db, subscription.subject_type, subscription.subject_id),
+            )
+        )
     return result
 
 
@@ -4747,6 +4799,7 @@ async def record_member_subscription_payment(
         subscription.balance_amount = max(Decimal("0"), subscription.balance_amount - payload.amount)
         if subscription.balance_amount == Decimal("0") and subscription.status == "past_due":
             subscription.status = "active"
+        await mark_member_subscription_charges_paid_if_settled(db, subscription)
     await db.commit()
     await db.refresh(payment)
     await db.refresh(subscription)
@@ -4847,6 +4900,7 @@ async def settle_member_subscription_checkout(
             subscription.balance_amount = Decimal("0.00")
             if subscription.status == "past_due":
                 subscription.status = "active"
+            await mark_member_subscription_charges_paid_if_settled(db, subscription)
     elif payload.status == "pending" and subscription.status == "active":
         subscription.notes = append_member_dues_note(subscription.notes, f"Pending hosted dues payment {session_id}.")
     await db.commit()
@@ -4867,6 +4921,283 @@ async def settle_member_subscription_checkout(
             if accepted
             else f"Member dues payment marked {payload.status}."
         ),
+    )
+
+
+async def run_member_subscription_charge_generation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: MemberSubscriptionChargeRunCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionChargeRunRead:
+    await ensure_manage_organization(db, identity, payload.organization_id, authz)
+    return await run_member_subscription_charge_worker(
+        db,
+        organization_id=payload.organization_id,
+        charge_on=payload.charge_on,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+        created_by_person_id=identity.person_id,
+    )
+
+
+async def run_member_subscription_charge_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    charge_on: date | None = None,
+    limit: int = 100,
+    dry_run: bool = False,
+    created_by_person_id: UUID | None = None,
+) -> MemberSubscriptionChargeRunRead:
+    effective_charge_on = charge_on or date.today()
+    rows = await member_subscriptions_due_for_charge(
+        db,
+        organization_id=organization_id,
+        charge_on=effective_charge_on,
+        limit=limit,
+    )
+    items: list[MemberSubscriptionChargeRunItemRead] = []
+    subscription_ids: list[UUID] = []
+    charge_ids: list[UUID] = []
+    total_charged = Decimal("0.00")
+    executed_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for subscription, plan in rows:
+        executed_count += 1
+        subject_label = await member_subject_label(db, subscription.subject_type, subscription.subject_id)
+        if plan.billing_interval == "one_time":
+            skipped_count += 1
+            items.append(
+                member_subscription_charge_run_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    None,
+                    action="skipped",
+                    reason="One-time member dues plans do not generate recurring charges.",
+                )
+            )
+            continue
+        period_start, period_end = next_member_subscription_period(subscription, plan)
+        due_on = member_subscription_charge_due_on(plan, period_start, period_end)
+        existing = await db.scalar(
+            select(MemberSubscriptionCharge).where(
+                MemberSubscriptionCharge.subscription_id == subscription.id,
+                MemberSubscriptionCharge.period_start == period_start,
+                MemberSubscriptionCharge.period_end == period_end,
+            )
+        )
+        if existing is not None:
+            skipped_count += 1
+            items.append(
+                member_subscription_charge_run_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    existing,
+                    action="skipped",
+                    reason="Charge already exists for this member dues period.",
+                )
+            )
+            continue
+        if dry_run:
+            skipped_count += 1
+            items.append(
+                MemberSubscriptionChargeRunItemRead(
+                    subscription_id=subscription.id,
+                    charge_id=None,
+                    plan_name=plan.name,
+                    subject_label=subject_label,
+                    period_start=period_start,
+                    period_end=period_end,
+                    due_on=due_on,
+                    amount=plan.amount.quantize(Decimal("0.01")),
+                    currency=plan.currency.upper(),
+                    action="dry_run",
+                    reason="Would create a club-managed member dues charge.",
+                )
+            )
+            continue
+        try:
+            charge = MemberSubscriptionCharge(
+                organization_id=subscription.organization_id,
+                subscription_id=subscription.id,
+                plan_id=plan.id,
+                period_start=period_start,
+                period_end=period_end,
+                due_on=due_on,
+                amount=plan.amount,
+                currency=plan.currency.upper(),
+                status="open",
+                source="recurring_cycle",
+                description=f"Recurring member dues charge for {plan.name}",
+                created_by_person_id=created_by_person_id,
+            )
+            db.add(charge)
+            open_before = member_subscription_open_amount(subscription)
+            subscription.current_period_start = period_start
+            subscription.current_period_end = period_end
+            subscription.next_due_on = due_on
+            subscription.balance_amount = (open_before + plan.amount).quantize(Decimal("0.01"))
+            if subscription.status == "past_due" and open_before > 0:
+                subscription.status = "past_due"
+            else:
+                subscription.status = "active"
+            await db.commit()
+            await db.refresh(charge)
+            await db.refresh(subscription)
+            subscription_ids.append(subscription.id)
+            charge_ids.append(charge.id)
+            total_charged += charge.amount
+            items.append(
+                member_subscription_charge_run_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    charge,
+                    action="charged",
+                    reason="Recurring club member dues charge created.",
+                )
+            )
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+            items.append(
+                MemberSubscriptionChargeRunItemRead(
+                    subscription_id=subscription.id,
+                    charge_id=None,
+                    plan_name=plan.name,
+                    subject_label=subject_label,
+                    period_start=period_start,
+                    period_end=period_end,
+                    due_on=due_on,
+                    amount=plan.amount.quantize(Decimal("0.01")),
+                    currency=plan.currency.upper(),
+                    action="failed",
+                    reason="Failed to create member dues charge.",
+                )
+            )
+
+    return MemberSubscriptionChargeRunRead(
+        organization_id=organization_id,
+        charge_on=effective_charge_on,
+        eligible_count=len(rows),
+        executed_count=executed_count,
+        charged_count=len(charge_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        subscription_ids=subscription_ids,
+        charge_ids=charge_ids,
+        total_charged=total_charged.quantize(Decimal("0.01")),
+        items=items,
+    )
+
+
+async def member_subscriptions_due_for_charge(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    charge_on: date,
+    limit: int,
+) -> list[tuple[MemberSubscription, MemberSubscriptionPlan]]:
+    statement = (
+        select(MemberSubscription, MemberSubscriptionPlan)
+        .join(MemberSubscriptionPlan, MemberSubscriptionPlan.id == MemberSubscription.plan_id)
+        .where(MemberSubscription.status.in_(["trialing", "active", "past_due"]))
+        .where(MemberSubscriptionPlan.billing_interval != "one_time")
+        .where(MemberSubscription.current_period_end < charge_on)
+        .order_by(MemberSubscription.current_period_end.asc(), MemberSubscription.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(MemberSubscription.organization_id == organization_id)
+    return list((await db.execute(statement)).all())
+
+
+def next_member_subscription_period(
+    subscription: MemberSubscription,
+    plan: MemberSubscriptionPlan,
+) -> tuple[date, date]:
+    period_start = subscription.current_period_end + timedelta(days=1)
+    interval = plan.billing_interval
+    if interval == "weekly":
+        return period_start, period_start + timedelta(days=6)
+    months = {
+        "monthly": 1,
+        "quarterly": 3,
+        "term": 3,
+        "season": 12,
+        "annual": 12,
+    }.get(interval, 1)
+    return period_start, add_months(period_start, months) - timedelta(days=1)
+
+
+def add_months(value: date, months: int) -> date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def member_subscription_charge_due_on(
+    plan: MemberSubscriptionPlan,
+    period_start: date,
+    period_end: date,
+) -> date:
+    if plan.due_day is None:
+        return period_start
+    due_day = min(plan.due_day, monthrange(period_start.year, period_start.month)[1])
+    due_on = date(period_start.year, period_start.month, due_day)
+    if due_on < period_start:
+        return period_start
+    if due_on > period_end:
+        return period_end
+    return due_on
+
+
+async def mark_member_subscription_charges_paid_if_settled(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+) -> None:
+    if member_subscription_open_amount(subscription) > 0:
+        return
+    charges = (
+        await db.scalars(
+            select(MemberSubscriptionCharge)
+            .where(MemberSubscriptionCharge.subscription_id == subscription.id)
+            .where(MemberSubscriptionCharge.status == "open")
+        )
+    ).all()
+    for charge in charges:
+        charge.status = "paid"
+
+
+def member_subscription_charge_run_item(
+    subscription: MemberSubscription,
+    plan: MemberSubscriptionPlan,
+    subject_label: str | None,
+    charge: MemberSubscriptionCharge | None,
+    *,
+    action: str,
+    reason: str,
+) -> MemberSubscriptionChargeRunItemRead:
+    return MemberSubscriptionChargeRunItemRead(
+        subscription_id=subscription.id,
+        charge_id=charge.id if charge else None,
+        plan_name=plan.name,
+        subject_label=subject_label,
+        period_start=charge.period_start if charge else None,
+        period_end=charge.period_end if charge else None,
+        due_on=charge.due_on if charge else None,
+        amount=(charge.amount if charge else plan.amount).quantize(Decimal("0.01")),
+        currency=(charge.currency if charge else plan.currency).upper(),
+        action=action,
+        reason=reason,
     )
 
 

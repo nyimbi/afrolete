@@ -197,6 +197,7 @@ from app.models.organization import (  # noqa: F401,E402
     Committee,
     CommitteeMembership,
     MemberSubscription,
+    MemberSubscriptionCharge,
     MemberSubscriptionPayment,
     MemberSubscriptionPlan,
     Membership,

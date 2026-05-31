@@ -62,6 +62,7 @@ Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, 
 `--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
 `--lane insurance-renewal-reminders`,
+`--lane member-dues-charges`,
 `--lane member-dues-reminders`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
 `--lane performance-review-escalations`, `--lane performance-injury-risk-alerts`,
@@ -85,10 +86,15 @@ repeat-suppressed reminders to organization managers for active or expiring
 policies inside each policy renewal-notice window; tune with
 `--insurance-renewal-reminder-horizon-days`,
 `--insurance-renewal-reminder-repeat-after-days`, and
-`--dry-run-insurance-renewal-reminders`. The member dues lane sends
-repeat-suppressed reminders for due or overdue club-managed subscription
-balances, marks accounts past due after the plan grace period, and keeps those
+`--dry-run-insurance-renewal-reminders`. The member dues charge lane generates
+recurring club-owned receivable charges for due subscription cycles, advances
+the subscription period, increments the member balance, and keeps those
 receivables separate from AfroLete hosting invoices; tune with
+`--member-dues-charge-on` and `--dry-run-member-dues-charges`. The member dues
+reminder lane sends repeat-suppressed reminders for due or overdue
+club-managed subscription balances, marks accounts past due after the plan
+grace period, and keeps those receivables separate from AfroLete hosting
+invoices; tune with
 `--member-dues-reminder-due-within-days`,
 `--member-dues-reminder-repeat-after-days`, and
 `--dry-run-member-dues-reminders`. The

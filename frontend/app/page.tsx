@@ -367,6 +367,8 @@ import type {
   MessageDeliveryStatus,
   MessageRecipientRead,
   MembershipRead,
+  MemberSubscriptionChargeRead,
+  MemberSubscriptionChargeRunRead,
   MemberSubscriptionCheckoutLinkRead,
   MemberSubscriptionPaymentRead,
   MemberSubscriptionPlanRead,
@@ -1884,6 +1886,8 @@ export default function HomePage() {
   const [awardVote, setAwardVote] = useState<OrganizationAwardVoteRead | null>(null);
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
+  const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
+  const [memberDuesChargeRun, setMemberDuesChargeRun] = useState<MemberSubscriptionChargeRunRead | null>(null);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
   const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
   const [memberDuesReminderRun, setMemberDuesReminderRun] = useState<MemberSubscriptionReminderRunRead | null>(null);
@@ -4377,12 +4381,14 @@ export default function HomePage() {
   }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
-    const [plans, subscriptions] = await Promise.all([
+    const [plans, subscriptions, charges] = await Promise.all([
       apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
-      apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`)
+      apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
+      apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`)
     ]);
     setMemberSubscriptionPlans(plans);
     setMemberSubscriptions(subscriptions);
+    setMemberSubscriptionCharges(charges);
     setSelectedMemberSubscriptionId((current) =>
       subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
     );
@@ -6087,6 +6093,8 @@ export default function HomePage() {
       setSelectedAwardNominationId("");
       setMemberSubscriptionPlans([]);
       setMemberSubscriptions([]);
+      setMemberSubscriptionCharges([]);
+      setMemberDuesChargeRun(null);
       setMemberSubscriptionPayment(null);
       setMemberDuesCheckoutLink(null);
       setMemberDuesReminderRun(null);
@@ -7392,6 +7400,36 @@ export default function HomePage() {
         if (typeof window !== "undefined") {
           window.open(link.checkout_url, "_blank", "noopener,noreferrer");
         }
+      }
+    );
+  };
+
+  const runMemberDuesCharges = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running member dues charges", "bad");
+      return;
+    }
+    runAction(
+      "run-member-dues-charges",
+      () =>
+        apiRequest<MemberSubscriptionChargeRunRead>(
+          `/organizations/${selectedOrganizationId}/member-subscription-charges/run`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              limit: 50
+            }
+          }
+        ),
+      async (run) => {
+        setMemberDuesChargeRun(run);
+        await loadMemberDues(selectedOrganizationId);
+        addLog(
+          `${run.charged_count} member dues cycle charge(s) created (${run.total_charged} total)`,
+          run.failed_count ? "neutral" : "good"
+        );
       }
     );
   };
@@ -24359,6 +24397,7 @@ export default function HomePage() {
             </div>
             <div className="event-toolbar">
               <button type="button" onClick={createMemberDuesSubscription} disabled={busyAction !== null}>Assign selected member</button>
+              <button type="button" onClick={runMemberDuesCharges} disabled={busyAction !== null}>Bill cycle</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
               <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
               <button type="button" onClick={runMemberDuesReminders} disabled={busyAction !== null}>Remind due</button>
@@ -24400,6 +24439,24 @@ export default function HomePage() {
                     <small>{subscription.dues_reminder_count} reminder(s) · last {subscription.dues_last_reminded_at ? new Date(subscription.dues_last_reminded_at).toLocaleString() : "not sent"}</small>
                   </div>
                   <button type="button" onClick={() => setSelectedMemberSubscriptionId(subscription.id)}>Select</button>
+                </article>
+              ))}
+              {memberDuesChargeRun ? (
+                <article className={`task-card ${memberDuesChargeRun.failed_count ? "risk-card" : "selected"}`}>
+                  <div>
+                    <strong>Member dues cycle billing</strong>
+                    <span>{memberDuesChargeRun.charged_count} charged · {memberDuesChargeRun.total_charged} total · {memberDuesChargeRun.skipped_count} skipped</span>
+                    <small>{memberDuesChargeRun.items[0]?.reason ?? "No member dues cycles were due"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {memberSubscriptionCharges.slice(0, 5).map((charge) => (
+                <article key={charge.id} className="task-card">
+                  <div>
+                    <strong>{charge.subject_label ?? charge.subscription_id} · {charge.plan_name}</strong>
+                    <span>{charge.amount} {charge.currency} · {charge.status.replaceAll("_", " ")} · {charge.source.replaceAll("_", " ")}</span>
+                    <small>{charge.period_start} to {charge.period_end} · due {charge.due_on ?? "not set"}</small>
+                  </div>
                 </article>
               ))}
               {memberDuesReminderRun ? (

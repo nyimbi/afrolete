@@ -1052,6 +1052,54 @@ export type MemberSubscriptionPaymentRead = {
   subscription_status: string;
 };
 
+export type MemberSubscriptionChargeRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  plan_id: UUID;
+  plan_name: string;
+  subject_label: string | null;
+  period_start: string;
+  period_end: string;
+  due_on: string | null;
+  amount: string;
+  currency: string;
+  status: string;
+  source: string;
+  description: string | null;
+  created_by_person_id: UUID | null;
+  created_at: string;
+};
+
+export type MemberSubscriptionChargeRunItemRead = {
+  subscription_id: UUID;
+  charge_id: UUID | null;
+  plan_name: string;
+  subject_label: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  due_on: string | null;
+  amount: string;
+  currency: string;
+  action: string;
+  reason: string;
+};
+
+export type MemberSubscriptionChargeRunRead = {
+  organization_id: UUID | null;
+  charge_on: string;
+  eligible_count: number;
+  executed_count: number;
+  charged_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  subscription_ids: UUID[];
+  charge_ids: UUID[];
+  total_charged: string;
+  items: MemberSubscriptionChargeRunItemRead[];
+};
+
 export type MemberSubscriptionHostedCheckoutRead = {
   subscription_id: UUID;
   organization_id: UUID;

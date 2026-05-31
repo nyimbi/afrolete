@@ -19,6 +19,9 @@ from app.schemas.organization import (
     MemberSubscriptionCheckoutLinkRead,
     MemberSubscriptionCheckoutSettlementCreate,
     MemberSubscriptionCheckoutSettlementRead,
+    MemberSubscriptionChargeRead,
+    MemberSubscriptionChargeRunCreate,
+    MemberSubscriptionChargeRunRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionPaymentCreate,
@@ -137,6 +140,7 @@ from app.services.organizations import (
     create_member_subscription,
     create_member_subscription_checkout_link,
     create_member_subscription_plan,
+    run_member_subscription_charge_generation,
     create_organization_group,
     create_organization_market_profile,
     create_organization_program,
@@ -175,6 +179,7 @@ from app.services.organizations import (
     list_organization_seasons,
     list_recovery_drills,
     list_recovery_plans,
+    list_member_subscription_charges,
     list_member_subscription_plans,
     list_member_subscriptions,
     list_organization_market_profiles,
@@ -1844,6 +1849,28 @@ def to_member_subscription_read(item) -> MemberSubscriptionRead:
     )
 
 
+def to_member_subscription_charge_read(item) -> MemberSubscriptionChargeRead:
+    charge, _subscription, plan, subject_label = item
+    return MemberSubscriptionChargeRead(
+        id=charge.id,
+        organization_id=charge.organization_id,
+        subscription_id=charge.subscription_id,
+        plan_id=charge.plan_id,
+        plan_name=plan.name,
+        subject_label=subject_label,
+        period_start=charge.period_start,
+        period_end=charge.period_end,
+        due_on=charge.due_on,
+        amount=charge.amount,
+        currency=charge.currency,
+        status=charge.status,
+        source=charge.source,
+        description=charge.description,
+        created_by_person_id=charge.created_by_person_id,
+        created_at=charge.created_at,
+    )
+
+
 @router.post(
     "/{organization_id}/member-subscription-plans",
     response_model=MemberSubscriptionPlanRead,
@@ -1895,6 +1922,34 @@ async def list_member_subscriptions_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[MemberSubscriptionRead]:
     return [to_member_subscription_read(row) for row in await list_member_subscriptions(db, organization_id)]
+
+
+@router.get("/{organization_id}/member-subscription-charges", response_model=list[MemberSubscriptionChargeRead])
+async def list_member_subscription_charges_route(
+    organization_id: UUID,
+    subscription_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionChargeRead]:
+    return [
+        to_member_subscription_charge_read(row)
+        for row in await list_member_subscription_charges(db, organization_id, subscription_id)
+    ]
+
+
+@router.post(
+    "/{organization_id}/member-subscription-charges/run",
+    response_model=MemberSubscriptionChargeRunRead,
+)
+async def run_member_subscription_charges_route(
+    organization_id: UUID,
+    payload: MemberSubscriptionChargeRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionChargeRunRead:
+    if payload.organization_id != organization_id:
+        raise HTTPException(status_code=422, detail="organization_id mismatch")
+    return await run_member_subscription_charge_generation(db, identity, payload, authz)
 
 
 @router.post(

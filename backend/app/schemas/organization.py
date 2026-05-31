@@ -1198,6 +1198,61 @@ class MemberSubscriptionPaymentRead(BaseModel):
     subscription_status: str
 
 
+class MemberSubscriptionChargeRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    subscription_id: UUID
+    plan_id: UUID
+    plan_name: str
+    subject_label: str | None = None
+    period_start: date
+    period_end: date
+    due_on: date | None
+    amount: Decimal
+    currency: str
+    status: str
+    source: str
+    description: str | None
+    created_by_person_id: UUID | None
+    created_at: datetime
+
+
+class MemberSubscriptionChargeRunCreate(BaseModel):
+    organization_id: UUID
+    charge_on: date | None = None
+    limit: int = Field(default=100, ge=1, le=1000)
+    dry_run: bool = False
+
+
+class MemberSubscriptionChargeRunItemRead(BaseModel):
+    subscription_id: UUID
+    charge_id: UUID | None = None
+    plan_name: str
+    subject_label: str | None
+    period_start: date | None = None
+    period_end: date | None = None
+    due_on: date | None = None
+    amount: Decimal
+    currency: str
+    action: str
+    reason: str
+
+
+class MemberSubscriptionChargeRunRead(BaseModel):
+    organization_id: UUID | None
+    charge_on: date
+    eligible_count: int
+    executed_count: int
+    charged_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool
+    subscription_ids: list[UUID]
+    charge_ids: list[UUID]
+    total_charged: Decimal
+    items: list[MemberSubscriptionChargeRunItemRead]
+
+
 class MemberSubscriptionHostedCheckoutRead(BaseModel):
     subscription_id: UUID
     organization_id: UUID

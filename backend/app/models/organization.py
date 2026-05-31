@@ -458,6 +458,31 @@ class MemberSubscription(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class MemberSubscriptionCharge(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_charges"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "period_start",
+            "period_end",
+            name="uq_member_subscription_charges_period",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    subscription_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscription_plans.id"), index=True)
+    period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    due_on: Mapped[date | None] = mapped_column(Date, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(80), default="recurring_cycle", nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+
+
 class MemberSubscriptionPayment(IdMixin, TimestampMixin, Base):
     __tablename__ = "member_subscription_payments"
 

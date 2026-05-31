@@ -165,6 +165,17 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert subscription["plan_name"] == "Senior player monthly dues"
     assert subscription["balance_amount"] == "1500.00"
 
+    initial_charges_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
+        headers=identity_headers,
+    )
+    assert initial_charges_response.status_code == 200
+    initial_charges = initial_charges_response.json()
+    assert len(initial_charges) == 1
+    assert initial_charges[0]["subscription_id"] == subscription["id"]
+    assert initial_charges[0]["amount"] == "1500.00"
+    assert initial_charges[0]["source"] == "initial_subscription"
+
     payment_response = client.post(
         f"/api/v1/organizations/member-subscriptions/{subscription['id']}/payments",
         headers=identity_headers,
@@ -277,6 +288,46 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     )
     assert subscriptions_response.status_code == 200
     assert subscriptions_response.json()[0]["balance_amount"] == "0.00"
+
+    paid_charges_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
+        headers=identity_headers,
+    )
+    assert paid_charges_response.status_code == 200
+    assert paid_charges_response.json()[0]["status"] == "paid"
+
+    charge_run_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "charge_on": "2026-07-01",
+            "limit": 10,
+        },
+    )
+    assert charge_run_response.status_code == 200
+    charge_run = charge_run_response.json()
+    assert charge_run["eligible_count"] == 1
+    assert charge_run["charged_count"] == 1
+    assert charge_run["total_charged"] == "1500.00"
+    assert charge_run["subscription_ids"] == [subscription["id"]]
+    assert charge_run["items"][0]["period_start"] == "2026-07-01"
+    assert charge_run["items"][0]["period_end"] == "2026-07-31"
+
+    charged_subscriptions = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+    ).json()
+    assert charged_subscriptions[0]["balance_amount"] == "1500.00"
+    assert charged_subscriptions[0]["next_due_on"] == "2026-07-05"
+
+    all_charges = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
+        headers=identity_headers,
+    ).json()
+    assert len(all_charges) == 2
+    assert all_charges[0]["source"] == "recurring_cycle"
+    assert all_charges[0]["status"] == "open"
 
     billing_summary_response = client.get(
         f"/api/v1/billing/summary?organization_id={organization['id']}",

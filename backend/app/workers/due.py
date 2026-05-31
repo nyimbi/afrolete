@@ -27,7 +27,7 @@ from app.services.communications import (
 )
 from app.services.developer import run_developer_webhook_retry_due
 from app.services.events import run_event_travel_consent_reminder_worker
-from app.services.organizations import run_member_subscription_reminder_worker
+from app.services.organizations import run_member_subscription_charge_worker, run_member_subscription_reminder_worker
 from app.services.performance import (
     run_assessment_review_escalation_worker,
     run_performance_achievement_worker,
@@ -64,6 +64,7 @@ WORKER_LANES = (
     "family-coordination-digests",
     "family-portal-invite-reminders",
     "insurance-renewal-reminders",
+    "member-dues-charges",
     "member-dues-reminders",
     "object-storage-lifecycle",
     "performance-achievements",
@@ -175,6 +176,9 @@ def parse_args() -> argparse.Namespace:
         default=CommunicationChannel.EMAIL.value,
     )
     parser.add_argument("--dry-run-insurance-renewal-reminders", action="store_true")
+    parser.add_argument("--member-dues-charge-limit", type=int, default=None)
+    parser.add_argument("--member-dues-charge-on", type=date_from_isoformat, default=None)
+    parser.add_argument("--dry-run-member-dues-charges", action="store_true")
     parser.add_argument("--member-dues-reminder-limit", type=int, default=None)
     parser.add_argument("--member-dues-reminder-as-of", type=date_from_isoformat, default=None)
     parser.add_argument("--member-dues-reminder-due-within-days", type=int, default=7)
@@ -370,6 +374,9 @@ async def run_due_workers(
     insurance_renewal_reminder_repeat_after_days: int = 14,
     insurance_renewal_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
     dry_run_insurance_renewal_reminders: bool = False,
+    member_dues_charge_limit: int | None = None,
+    member_dues_charge_on: date | None = None,
+    dry_run_member_dues_charges: bool = False,
     member_dues_reminder_limit: int | None = None,
     member_dues_reminder_as_of: date | None = None,
     member_dues_reminder_due_within_days: int = 7,
@@ -579,6 +586,16 @@ async def run_due_workers(
                 dry_run=dry_run_insurance_renewal_reminders,
             )
         ).model_dump(mode="json")
+    if "member-dues-charges" in active_lanes:
+        results["member_dues_charges"] = (
+            await run_member_subscription_charge_worker(
+                db,
+                organization_id=organization_id,
+                charge_on=member_dues_charge_on,
+                limit=member_dues_charge_limit or limit,
+                dry_run=dry_run_member_dues_charges,
+            )
+        ).model_dump(mode="json")
     if "member-dues-reminders" in active_lanes:
         results["member_dues_reminders"] = (
             await run_member_subscription_reminder_worker(
@@ -748,6 +765,7 @@ def worker_summary(results: dict[str, object]) -> dict[str, int]:
             or result.get("dispatched_count")
             or result.get("alerted_count")
             or result.get("invoiced_count")
+            or result.get("charged_count")
             or result.get("fee_count")
             or result.get("retry_count")
             or result.get("notice_count")
@@ -850,6 +868,9 @@ async def run() -> None:
                 args.insurance_renewal_reminder_channel
             ),
             dry_run_insurance_renewal_reminders=args.dry_run_insurance_renewal_reminders,
+            member_dues_charge_limit=args.member_dues_charge_limit,
+            member_dues_charge_on=args.member_dues_charge_on,
+            dry_run_member_dues_charges=args.dry_run_member_dues_charges,
             member_dues_reminder_limit=args.member_dues_reminder_limit,
             member_dues_reminder_as_of=args.member_dues_reminder_as_of,
             member_dues_reminder_due_within_days=args.member_dues_reminder_due_within_days,
