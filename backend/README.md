@@ -61,6 +61,7 @@ uv run python -m app.workers.due --limit 25
 Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, `--lane billing-payment-retries`, `--lane billing-recurring-invoices`, `--lane commercial-grant-alerts`, `--lane communication-digests`,
 `--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
+`--lane compliance-credential-renewal-reminders`,
 `--lane insurance-renewal-reminders`,
 `--lane member-dues-charges`,
 `--lane member-dues-reminders`,
@@ -81,9 +82,14 @@ max-attempt limits. The communication digest lane creates daily/weekly digests
 for people with matching notification preferences and unread inbox items. The
 commercial grant alert lane executes due saved searches, persists run evidence,
 updates last-run match counts, and leaves outbound funder/channel delivery to
-the later provider integration layer. The insurance renewal lane sends
-repeat-suppressed reminders to organization managers for active or expiring
-policies inside each policy renewal-notice window; tune with
+the later provider integration layer. The compliance credential renewal lane
+sends repeat-suppressed reminders to organization managers for verified,
+expiring, or expired staff/coach credentials inside the configured renewal
+window; tune with `--compliance-credential-renewal-reminder-horizon-days`,
+`--compliance-credential-renewal-reminder-repeat-after-days`, and
+`--dry-run-compliance-credential-renewal-reminders`. The insurance renewal lane
+sends repeat-suppressed reminders to organization managers for active or
+expiring policies inside each policy renewal-notice window; tune with
 `--insurance-renewal-reminder-horizon-days`,
 `--insurance-renewal-reminder-repeat-after-days`, and
 `--dry-run-insurance-renewal-reminders`. The member dues charge lane generates

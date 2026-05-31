@@ -728,6 +728,11 @@ class ComplianceCredential(IdMixin, TimestampMixin, Base):
     issued_at: Mapped[date | None] = mapped_column(Date)
     expires_at: Mapped[date | None] = mapped_column(Date, index=True)
     renewal_due_at: Mapped[date | None] = mapped_column(Date, index=True)
+    renewal_last_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    renewal_reminder_message_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("communication_messages.id"), index=True
+    )
+    renewal_reminder_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     verification_url: Mapped[str | None] = mapped_column(String(500))
     evidence_object_key: Mapped[str | None] = mapped_column(String(500), index=True)
     notes: Mapped[str | None] = mapped_column(Text)

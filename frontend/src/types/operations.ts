@@ -7072,6 +7072,9 @@ export type ComplianceCredentialRead = {
   issued_at: string | null;
   expires_at: string | null;
   renewal_due_at: string | null;
+  renewal_last_reminded_at: string | null;
+  renewal_reminder_message_id: UUID | null;
+  renewal_reminder_count: number;
   verification_url: string | null;
   evidence_object_key: string | null;
   notes: string | null;
@@ -7149,6 +7152,39 @@ export type ComplianceReconciliationRead = {
   background_checks_expired: number;
   credentials_expired: number;
   credentials_expiring_soon: number;
+};
+
+export type ComplianceCredentialRenewalReminderItemRead = {
+  credential_id: UUID;
+  person_id: UUID;
+  person_name: string | null;
+  title: string;
+  credential_type: ComplianceCredentialType;
+  status: ComplianceCredentialStatus;
+  renewal_due_at: string | null;
+  expires_at: string | null;
+  days_until_due: number | null;
+  recipient_count: number;
+  action: string;
+  reason: string;
+  message_id: UUID | null;
+};
+
+export type ComplianceCredentialRenewalReminderRunRead = {
+  organization_id: UUID | null;
+  channel: CommunicationChannel;
+  as_of: string;
+  horizon_days: number;
+  repeat_after_days: number;
+  eligible_count: number;
+  executed_count: number;
+  reminded_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  credential_ids: UUID[];
+  message_ids: UUID[];
+  items: ComplianceCredentialRenewalReminderItemRead[];
 };
 
 export type IncidentReportPackageRead = {

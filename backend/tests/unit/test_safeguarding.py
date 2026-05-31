@@ -135,6 +135,102 @@ def test_guardian_can_consent_by_known_sms_number(client, identity_headers, athl
     assert consent_response.json()["capture_channel"] == "sms"
 
 
+def test_compliance_credentials_send_renewal_reminders(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Credential Renewal Club",
+            "organization_type": "club",
+            "primary_sport": "football",
+        },
+    ).json()
+    coach = client.post(
+        f"/api/v1/organizations/{organization['id']}/members",
+        headers=identity_headers,
+        json={
+            "email": "credential-coach@example.com",
+            "display_name": "Credential Coach",
+            "role": "staff",
+        },
+    ).json()
+
+    credential_response = client.post(
+        "/api/v1/safeguarding/credentials",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "person_id": coach["subject_id"],
+            "credential_type": "coaching_license",
+            "title": "CAF C License",
+            "issuing_body": "CAF",
+            "credential_number": "CAF-C-2026",
+            "issued_at": "2025-06-15",
+            "expires_at": "2026-07-01",
+            "renewal_due_at": "2026-06-15",
+            "notes": "Coach-facing license tracked before expiry.",
+        },
+    )
+    assert credential_response.status_code == 201
+    credential = credential_response.json()
+
+    verify_response = client.patch(
+        f"/api/v1/safeguarding/credentials/{credential['id']}",
+        headers=identity_headers,
+        json={"status": "verified"},
+    )
+    assert verify_response.status_code == 200
+
+    reminder_response = client.post(
+        "/api/v1/safeguarding/credentials/renewal-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2026-06-01",
+            "horizon_days": 90,
+            "repeat_after_days": 14,
+            "limit": 10,
+        },
+    )
+    assert reminder_response.status_code == 200
+    reminder_run = reminder_response.json()
+    assert reminder_run["eligible_count"] == 1
+    assert reminder_run["reminded_count"] == 1
+    assert reminder_run["credential_ids"] == [credential["id"]]
+    assert reminder_run["message_ids"][0]
+    assert reminder_run["items"][0]["action"] == "reminded"
+    assert reminder_run["items"][0]["person_name"] == "Credential Coach"
+    assert reminder_run["items"][0]["recipient_count"] == 2
+
+    listed_credentials = client.get(
+        f"/api/v1/safeguarding/credentials?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    reminded_credential = listed_credentials[0]
+    assert reminded_credential["renewal_reminder_count"] == 1
+    assert reminded_credential["renewal_reminder_message_id"] == reminder_run["message_ids"][0]
+    assert reminded_credential["renewal_last_reminded_at"] is not None
+
+    repeat_response = client.post(
+        "/api/v1/safeguarding/credentials/renewal-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2026-06-01",
+            "horizon_days": 90,
+            "repeat_after_days": 14,
+            "limit": 10,
+        },
+    )
+    assert repeat_response.status_code == 200
+    repeat_run = repeat_response.json()
+    assert repeat_run["eligible_count"] == 1
+    assert repeat_run["reminded_count"] == 0
+    assert repeat_run["skipped_count"] == 1
+
+
 async def test_guardian_account_readiness_maps_portal_onboarding_status(
     client,
     identity_headers,

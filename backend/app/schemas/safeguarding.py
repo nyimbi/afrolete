@@ -1010,6 +1010,9 @@ class ComplianceCredentialRead(BaseModel):
     issued_at: date | None
     expires_at: date | None
     renewal_due_at: date | None
+    renewal_last_reminded_at: datetime | None = None
+    renewal_reminder_message_id: UUID | None = None
+    renewal_reminder_count: int = 0
     verification_url: str | None
     evidence_object_key: str | None
     notes: str | None
@@ -1055,6 +1058,49 @@ class ComplianceReconciliationRead(BaseModel):
     background_checks_expired: int
     credentials_expired: int
     credentials_expiring_soon: int
+
+
+class ComplianceCredentialRenewalReminderRunCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    as_of: date | None = None
+    horizon_days: int = Field(default=60, ge=0, le=730)
+    repeat_after_days: int = Field(default=14, ge=0, le=365)
+    limit: int = Field(default=100, ge=1, le=500)
+    dry_run: bool = False
+
+
+class ComplianceCredentialRenewalReminderItemRead(BaseModel):
+    credential_id: UUID
+    person_id: UUID
+    person_name: str | None = None
+    title: str
+    credential_type: ComplianceCredentialType
+    status: ComplianceCredentialStatus
+    renewal_due_at: date | None = None
+    expires_at: date | None = None
+    days_until_due: int | None = None
+    recipient_count: int = 0
+    action: str
+    reason: str
+    message_id: UUID | None = None
+
+
+class ComplianceCredentialRenewalReminderRunRead(BaseModel):
+    organization_id: UUID | None
+    channel: CommunicationChannel
+    as_of: date
+    horizon_days: int
+    repeat_after_days: int
+    eligible_count: int
+    executed_count: int
+    reminded_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    credential_ids: list[UUID]
+    message_ids: list[UUID]
+    items: list[ComplianceCredentialRenewalReminderItemRead]
 
 
 class ComplianceReconciliationWorkerRunRead(BaseModel):

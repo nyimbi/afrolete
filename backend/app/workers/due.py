@@ -38,6 +38,7 @@ from app.services.performance import (
     run_wearable_pull_retry_worker,
 )
 from app.services.safeguarding import (
+    run_compliance_credential_renewal_reminder_worker,
     run_compliance_reconciliation_worker,
     run_family_coordination_digest_worker,
     run_guardian_portal_invite_reminder_worker,
@@ -57,6 +58,7 @@ WORKER_LANES = (
     "communication-escalations",
     "communication-scheduled-dispatch",
     "commercial-grant-alerts",
+    "compliance-credential-renewal-reminders",
     "compliance-reconciliation",
     "developer-webhooks",
     "emergency-escalations",
@@ -126,6 +128,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument("--compliance-reconciliation-limit", type=int, default=None)
+    parser.add_argument("--compliance-credential-renewal-reminder-limit", type=int, default=None)
+    parser.add_argument("--compliance-credential-renewal-reminder-as-of", type=date_from_isoformat, default=None)
+    parser.add_argument("--compliance-credential-renewal-reminder-horizon-days", type=int, default=60)
+    parser.add_argument("--compliance-credential-renewal-reminder-repeat-after-days", type=int, default=14)
+    parser.add_argument(
+        "--compliance-credential-renewal-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.EMAIL.value,
+    )
+    parser.add_argument("--dry-run-compliance-credential-renewal-reminders", action="store_true")
     parser.add_argument(
         "--communication-digest-frequency",
         choices=[NotificationFrequency.DAILY_DIGEST.value, NotificationFrequency.WEEKLY_DIGEST.value],
@@ -348,6 +360,12 @@ async def run_due_workers(
     commercial_grant_alert_limit: int | None = None,
     dry_run_commercial_grant_alerts: bool = False,
     compliance_reconciliation_limit: int | None = None,
+    compliance_credential_renewal_reminder_limit: int | None = None,
+    compliance_credential_renewal_reminder_as_of: date | None = None,
+    compliance_credential_renewal_reminder_horizon_days: int = 60,
+    compliance_credential_renewal_reminder_repeat_after_days: int = 14,
+    compliance_credential_renewal_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    dry_run_compliance_credential_renewal_reminders: bool = False,
     webhook_limit: int | None = None,
     emergency_escalation_limit: int | None = None,
     emergency_escalation_unresolved_after_minutes: int = 15,
@@ -535,6 +553,19 @@ async def run_due_workers(
                 db,
                 organization_id=organization_id,
                 limit=compliance_reconciliation_limit or limit,
+            )
+        ).model_dump(mode="json")
+    if "compliance-credential-renewal-reminders" in active_lanes:
+        results["compliance_credential_renewal_reminders"] = (
+            await run_compliance_credential_renewal_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=compliance_credential_renewal_reminder_channel,
+                as_of=compliance_credential_renewal_reminder_as_of,
+                horizon_days=compliance_credential_renewal_reminder_horizon_days,
+                repeat_after_days=compliance_credential_renewal_reminder_repeat_after_days,
+                limit=compliance_credential_renewal_reminder_limit or limit,
+                dry_run=dry_run_compliance_credential_renewal_reminders,
             )
         ).model_dump(mode="json")
     if "event-travel-consent-reminders" in active_lanes:
@@ -834,6 +865,14 @@ async def run() -> None:
             commercial_grant_alert_limit=args.commercial_grant_alert_limit,
             dry_run_commercial_grant_alerts=args.dry_run_commercial_grant_alerts,
             compliance_reconciliation_limit=args.compliance_reconciliation_limit,
+            compliance_credential_renewal_reminder_limit=args.compliance_credential_renewal_reminder_limit,
+            compliance_credential_renewal_reminder_as_of=args.compliance_credential_renewal_reminder_as_of,
+            compliance_credential_renewal_reminder_horizon_days=args.compliance_credential_renewal_reminder_horizon_days,
+            compliance_credential_renewal_reminder_repeat_after_days=args.compliance_credential_renewal_reminder_repeat_after_days,
+            compliance_credential_renewal_reminder_channel=CommunicationChannel(
+                args.compliance_credential_renewal_reminder_channel
+            ),
+            dry_run_compliance_credential_renewal_reminders=args.dry_run_compliance_credential_renewal_reminders,
             webhook_limit=args.webhook_limit,
             emergency_escalation_limit=args.emergency_escalation_limit,
             emergency_escalation_unresolved_after_minutes=args.emergency_escalation_unresolved_after_minutes,

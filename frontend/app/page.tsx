@@ -537,6 +537,7 @@ import type {
   SafeguardingIncidentStatus,
   SafeguardingIncidentType,
   ComplianceCredentialRead,
+  ComplianceCredentialRenewalReminderRunRead,
   ComplianceCredentialStatus,
   ComplianceCredentialType,
   ComplianceReconciliationRead,
@@ -2535,6 +2536,8 @@ export default function HomePage() {
     useState<BackgroundCheckProviderSubmissionRead | null>(null);
   const [backgroundCheckProviderResult, setBackgroundCheckProviderResult] = useState<BackgroundCheckProviderResultRead | null>(null);
   const [complianceCredentials, setComplianceCredentials] = useState<ComplianceCredentialRead[]>([]);
+  const [credentialRenewalReminderRun, setCredentialRenewalReminderRun] =
+    useState<ComplianceCredentialRenewalReminderRunRead | null>(null);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummaryRead | null>(null);
   const [incidentReportPackages, setIncidentReportPackages] = useState<IncidentReportPackageRead[]>([]);
   const [incidentReportPackageArtifact, setIncidentReportPackageArtifact] = useState<IncidentReportPackageArtifactRead | null>(null);
@@ -6524,6 +6527,7 @@ export default function HomePage() {
       setBackgroundCheckProviderSubmission(null);
       setBackgroundCheckProviderResult(null);
       setComplianceCredentials([]);
+      setCredentialRenewalReminderRun(null);
       setComplianceSummary(null);
       setIncidentReportPackages([]);
       setIncidentReportPackageArtifact(null);
@@ -11783,6 +11787,42 @@ export default function HomePage() {
         addLog(
           `Compliance reconciled: ${result.background_checks_expired} checks expired, ${result.credentials_expired} credentials expired, ${result.credentials_expiring_soon} renewals flagged`,
           "good"
+        );
+      }
+    );
+  };
+
+  const runCredentialRenewalReminders = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running credential renewal reminders", "bad");
+      return;
+    }
+    runAction(
+      "run-credential-renewal-reminders",
+      () =>
+        apiRequest<ComplianceCredentialRenewalReminderRunRead>(
+          "/safeguarding/credentials/renewal-reminders/run",
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              horizon_days: 90,
+              repeat_after_days: 14,
+              limit: 50
+            }
+          }
+        ),
+      async (run) => {
+        setCredentialRenewalReminderRun(run);
+        if (selectedOrganizationId) {
+          await loadComplianceCredentials(selectedOrganizationId);
+          await loadComplianceSummary(selectedOrganizationId);
+        }
+        addLog(
+          `${run.reminded_count} credential renewal reminders sent (${run.skipped_count} skipped)`,
+          run.failed_count ? "neutral" : "good"
         );
       }
     );
@@ -37189,6 +37229,7 @@ export default function HomePage() {
               <button type="button" onClick={requestConsent} disabled={busyAction !== null}>Request consent</button>
               <button type="button" onClick={createBackgroundCheck} disabled={busyAction !== null}>Request check</button>
               <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
+              <button type="button" onClick={runCredentialRenewalReminders} disabled={busyAction !== null}>Credential reminders</button>
               <button type="button" onClick={createSafeguardingIncident} disabled={busyAction !== null}>Log incident</button>
               <button type="button" onClick={createInsurancePolicy} disabled={busyAction !== null}>Policy</button>
               <button type="button" onClick={runInsuranceRenewalReminders} disabled={busyAction !== null}>Renewals</button>
@@ -37968,12 +38009,29 @@ export default function HomePage() {
                 </div>
               </article>
             ) : null}
+            {credentialRenewalReminderRun ? (
+              <article className={`task-card ${credentialRenewalReminderRun.failed_count ? "risk-card" : "selected"}`}>
+                <div>
+                  <strong>Credential renewal reminders</strong>
+                  <span>
+                    {credentialRenewalReminderRun.reminded_count} sent · {credentialRenewalReminderRun.skipped_count} skipped · {credentialRenewalReminderRun.failed_count} failed
+                  </span>
+                  <span>
+                    {credentialRenewalReminderRun.channel} · horizon {credentialRenewalReminderRun.horizon_days}d · repeat {credentialRenewalReminderRun.repeat_after_days}d
+                  </span>
+                  <span>{credentialRenewalReminderRun.items[0]?.reason ?? "No credential renewals due"}</span>
+                </div>
+              </article>
+            ) : null}
             {complianceCredentials.slice(0, 4).map((credential) => (
               <article key={credential.id} className="task-card">
                 <div>
                   <strong>{credential.title}</strong>
                   <span>{credential.credential_type} · {credential.status} · {credential.issuing_body ?? "issuer pending"}</span>
                   <span>Renew {credential.renewal_due_at ?? "not set"} · expires {credential.expires_at ?? "not set"}</span>
+                  <span>
+                    {credential.renewal_reminder_count} renewal reminders · last {credential.renewal_last_reminded_at ? new Date(credential.renewal_last_reminded_at).toLocaleString() : "not sent"}
+                  </span>
                   {credential.notes ? <span>{credential.notes}</span> : null}
                 </div>
                 <div className="event-toolbar">

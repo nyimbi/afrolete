@@ -67,7 +67,7 @@ from app.models.performance import (
 from app.models.team import AthleteProfile, GuardianRelationship
 from app.services import performance as performance_service
 from app.services.storage.objects import put_object
-from app.workers.due import performance_video_pose_request_headers, run_due_workers, selected_lanes
+from app.workers.due import WORKER_LANES, performance_video_pose_request_headers, run_due_workers, selected_lanes
 from app.workers import match_tracking as match_tracking_worker
 from app.workers import video_pose as video_pose_worker
 from app.workers.match_tracking import run_opposition_match_tracking_endpoint_worker
@@ -104,31 +104,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 
     result = await run_due_workers(db_session, organization_id=organization.id, lanes=("all",), limit=10)
 
-    assert result["lanes"] == [
-        "agent-tasks",
-        "billing-dunning",
-        "billing-late-fees",
-        "billing-payment-retries",
-        "billing-recurring-invoices",
-        "communication-digests",
-        "communication-escalations",
-        "communication-scheduled-dispatch",
-        "compliance-reconciliation",
-        "developer-webhooks",
-        "emergency-escalations",
-        "event-travel-consent-reminders",
-        "family-coordination-digests",
-        "family-portal-invite-reminders",
-        "object-storage-lifecycle",
-        "performance-achievements",
-        "performance-forecast-validations",
-        "performance-highlight-reel-reminders",
-        "performance-injury-risk-alerts",
-        "performance-review-escalations",
-        "performance-video-pose",
-        "volunteer-reminders",
-        "wearable-pull-retries",
-    ]
+    assert result["lanes"] == sorted(WORKER_LANES)
     assert result["summary"]["eligible_count"] == 2
     assert result["summary"]["processed_count"] == 2
     assert result["results"]["billing_dunning"]["eligible_count"] == 0
@@ -138,6 +114,8 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["communication_digests"]["eligible_count"] == 0
     assert result["results"]["communication_escalations"]["eligible_count"] == 0
     assert result["results"]["communication_scheduled_dispatch"]["eligible_count"] == 0
+    assert result["results"]["commercial_grant_alerts"]["eligible_count"] == 0
+    assert result["results"]["compliance_credential_renewal_reminders"]["eligible_count"] == 0
     assert result["results"]["compliance_reconciliation"]["eligible_count"] == 1
     assert result["results"]["compliance_reconciliation"]["executed_count"] == 1
     assert result["results"]["developer_webhooks"]["eligible_count"] == 0
@@ -145,6 +123,9 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
     assert result["results"]["event_travel_consent_reminders"]["eligible_count"] == 0
     assert result["results"]["family_coordination_digests"]["eligible_count"] == 0
     assert result["results"]["family_portal_invite_reminders"]["eligible_count"] == 0
+    assert result["results"]["insurance_renewal_reminders"]["eligible_count"] == 0
+    assert result["results"]["member_dues_charges"]["eligible_count"] == 0
+    assert result["results"]["member_dues_reminders"]["eligible_count"] == 0
     assert result["results"]["object_storage_lifecycle"]["eligible_count"] == 0
     assert result["results"]["performance_achievements"]["eligible_count"] == 0
     assert result["results"]["performance_forecast_validations"]["eligible_count"] == 0
@@ -163,31 +144,7 @@ async def test_due_worker_runs_agent_lane_and_empty_webhooks(db_session) -> None
 
 
 def test_selected_lanes_expands_all() -> None:
-    assert selected_lanes(("all",)) == {
-        "agent-tasks",
-        "billing-dunning",
-        "billing-late-fees",
-        "billing-payment-retries",
-        "billing-recurring-invoices",
-        "communication-digests",
-        "communication-escalations",
-        "communication-scheduled-dispatch",
-        "compliance-reconciliation",
-        "developer-webhooks",
-        "emergency-escalations",
-        "event-travel-consent-reminders",
-        "family-coordination-digests",
-        "family-portal-invite-reminders",
-        "object-storage-lifecycle",
-        "performance-achievements",
-        "performance-forecast-validations",
-        "performance-highlight-reel-reminders",
-        "performance-injury-risk-alerts",
-        "performance-review-escalations",
-        "performance-video-pose",
-        "volunteer-reminders",
-        "wearable-pull-retries",
-    }
+    assert selected_lanes(("all",)) == set(WORKER_LANES)
     assert selected_lanes(("agent-tasks",)) == {"agent-tasks"}
 
 
@@ -1144,6 +1101,68 @@ async def test_due_worker_reconciles_compliance_expiry(db_session) -> None:
     assert check.status == BackgroundCheckStatus.EXPIRED
     assert expired_credential.status == ComplianceCredentialStatus.EXPIRED
     assert expiring_credential.status == ComplianceCredentialStatus.EXPIRING_SOON
+
+
+async def test_due_worker_sends_compliance_credential_renewal_reminders(db_session) -> None:
+    organization = Organization(
+        name="Credential Reminder Worker Club",
+        slug="credential-reminder-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    manager = Person(display_name="Credential Manager", primary_email="credential-manager@example.com")
+    coach = Person(display_name="Licensed Coach", primary_email="licensed-coach@example.com")
+    db_session.add_all([organization, manager, coach])
+    await db_session.flush()
+    db_session.add(
+        Membership(
+            organization_id=organization.id,
+            subject_type=MemberSubjectType.PERSON,
+            subject_id=manager.id,
+            role=MembershipRole.OWNER,
+        )
+    )
+    credential = ComplianceCredential(
+        organization_id=organization.id,
+        person_id=coach.id,
+        credential_type=ComplianceCredentialType.COACHING_LICENSE,
+        status=ComplianceCredentialStatus.VERIFIED,
+        title="CAF C License",
+        issuing_body="CAF",
+        credential_number="CAF-C-WORKER",
+        renewal_due_at=date(2026, 6, 15),
+        expires_at=date(2026, 7, 1),
+    )
+    db_session.add(credential)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("compliance-credential-renewal-reminders",),
+        limit=10,
+        compliance_credential_renewal_reminder_as_of=date(2026, 6, 1),
+        compliance_credential_renewal_reminder_horizon_days=90,
+        compliance_credential_renewal_reminder_channel=CommunicationChannel.EMAIL,
+    )
+
+    reminders = result["results"]["compliance_credential_renewal_reminders"]
+    assert reminders["eligible_count"] == 1
+    assert reminders["reminded_count"] == 1
+    assert reminders["credential_ids"] == [str(credential.id)]
+    assert reminders["items"][0]["person_name"] == "Licensed Coach"
+    assert result["summary"]["processed_count"] == 1
+
+    await db_session.refresh(credential)
+    assert credential.renewal_reminder_count == 1
+    assert str(credential.renewal_reminder_message_id) == reminders["message_ids"][0]
+    message_count = await db_session.scalar(
+        select(func.count(CommunicationMessage.id)).where(
+            CommunicationMessage.organization_id == organization.id,
+            CommunicationMessage.subject == "Credential renewal due: CAF C License",
+        )
+    )
+    assert message_count == 1
 
 
 async def test_due_worker_sends_insurance_renewal_reminders(db_session) -> None:

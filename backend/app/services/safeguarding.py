@@ -87,6 +87,9 @@ from app.schemas.safeguarding import (
     ComplianceReconciliationRead,
     ComplianceReconciliationWorkerRunRead,
     ComplianceCredentialCreate,
+    ComplianceCredentialRenewalReminderItemRead,
+    ComplianceCredentialRenewalReminderRunCreate,
+    ComplianceCredentialRenewalReminderRunRead,
     ComplianceSummaryRead,
     ComplianceCredentialUpdate,
     ConsentRequestCreate,
@@ -5332,6 +5335,275 @@ async def update_compliance_credential(
     await db.commit()
     await db.refresh(credential)
     return credential
+
+
+async def run_compliance_credential_renewal_reminders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: ComplianceCredentialRenewalReminderRunCreate,
+    authz: AuthorizationService,
+) -> ComplianceCredentialRenewalReminderRunRead:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    return await run_compliance_credential_renewal_reminder_worker(
+        db,
+        organization_id=payload.organization_id,
+        channel=payload.channel,
+        as_of=payload.as_of,
+        horizon_days=payload.horizon_days,
+        repeat_after_days=payload.repeat_after_days,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_compliance_credential_renewal_reminder_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    as_of: date | None = None,
+    horizon_days: int = 60,
+    repeat_after_days: int = 14,
+    limit: int = 100,
+    dry_run: bool = False,
+) -> ComplianceCredentialRenewalReminderRunRead:
+    effective_as_of = as_of or today_utc()
+    rows = await compliance_credentials_due_for_renewal_reminder(
+        db,
+        organization_id=organization_id,
+        as_of=effective_as_of,
+        horizon_days=horizon_days,
+        limit=limit,
+    )
+    items: list[ComplianceCredentialRenewalReminderItemRead] = []
+    credential_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+    executed_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for credential, person in rows:
+        executed_count += 1
+        due_on = compliance_credential_due_date(credential)
+        if due_on is None:
+            skipped_count += 1
+            items.append(
+                compliance_credential_renewal_reminder_item(
+                    credential,
+                    person,
+                    effective_as_of,
+                    action="skipped",
+                    reason="Credential has no renewal or expiry date.",
+                )
+            )
+            continue
+        if compliance_credential_recently_reminded(credential, repeat_after_days):
+            skipped_count += 1
+            items.append(
+                compliance_credential_renewal_reminder_item(
+                    credential,
+                    person,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"Credential renewal reminder already sent within {repeat_after_days} days.",
+                    message_id=credential.renewal_reminder_message_id,
+                )
+            )
+            continue
+        recipients = await insurance_policy_manager_recipients(db, credential.organization_id, channel)
+        if not recipients:
+            skipped_count += 1
+            items.append(
+                compliance_credential_renewal_reminder_item(
+                    credential,
+                    person,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"No organization manager has a destination for {channel.value}.",
+                )
+            )
+            continue
+        days_until_due = (due_on - effective_as_of).days
+        if dry_run:
+            skipped_count += 1
+            items.append(
+                compliance_credential_renewal_reminder_item(
+                    credential,
+                    person,
+                    effective_as_of,
+                    action="dry_run",
+                    reason=f"Would remind {len(recipients)} manager(s); credential is due in {days_until_due} days.",
+                    recipient_count=len(recipients),
+                )
+            )
+            continue
+        try:
+            message = await create_message_for_recipients(
+                db,
+                organization_id=credential.organization_id,
+                message_type=CommunicationMessageType.REMINDER,
+                channel=channel,
+                scope_type=CommunicationScopeType.PERSON,
+                scope_id=credential.person_id,
+                recipient_person_ids=[recipient.id for recipient in recipients],
+                subject=f"Credential renewal due: {credential.title}",
+                body=compliance_credential_renewal_reminder_body(credential, person, effective_as_of),
+                urgent=days_until_due <= 14,
+                created_by_person_id=None,
+            )
+            credential.renewal_last_reminded_at = utc_now()
+            credential.renewal_reminder_message_id = message.id
+            credential.renewal_reminder_count = int(credential.renewal_reminder_count or 0) + 1
+            await db.commit()
+            await db.refresh(credential)
+            credential_ids.append(credential.id)
+            message_ids.append(message.id)
+            items.append(
+                compliance_credential_renewal_reminder_item(
+                    credential,
+                    person,
+                    effective_as_of,
+                    action="reminded",
+                    reason=f"Credential renewal reminder sent to {len(recipients)} manager(s).",
+                    recipient_count=len(recipients),
+                    message_id=message.id,
+                )
+            )
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+            items.append(
+                compliance_credential_renewal_reminder_item(
+                    credential,
+                    person,
+                    effective_as_of,
+                    action="failed",
+                    reason="Failed to create credential renewal reminder message.",
+                    recipient_count=len(recipients),
+                )
+            )
+
+    return ComplianceCredentialRenewalReminderRunRead(
+        organization_id=organization_id,
+        channel=channel,
+        as_of=effective_as_of,
+        horizon_days=horizon_days,
+        repeat_after_days=repeat_after_days,
+        eligible_count=len(rows),
+        executed_count=executed_count,
+        reminded_count=len(message_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        credential_ids=credential_ids,
+        message_ids=message_ids,
+        items=items,
+    )
+
+
+async def compliance_credentials_due_for_renewal_reminder(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    as_of: date,
+    horizon_days: int,
+    limit: int,
+) -> list[tuple[ComplianceCredential, Person]]:
+    horizon = as_of + timedelta(days=horizon_days)
+    statement = (
+        select(ComplianceCredential, Person)
+        .join(Person, Person.id == ComplianceCredential.person_id)
+        .where(
+            ComplianceCredential.status.in_(
+                [
+                    ComplianceCredentialStatus.VERIFIED,
+                    ComplianceCredentialStatus.EXPIRING_SOON,
+                    ComplianceCredentialStatus.EXPIRED,
+                ]
+            )
+        )
+        .where(
+            or_(
+                ComplianceCredential.renewal_due_at <= horizon,
+                ComplianceCredential.expires_at <= horizon,
+            )
+        )
+        .order_by(
+            func.coalesce(ComplianceCredential.renewal_due_at, ComplianceCredential.expires_at).asc(),
+            Person.display_name.asc(),
+            ComplianceCredential.title.asc(),
+        )
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(ComplianceCredential.organization_id == organization_id)
+    return [(credential, person) for credential, person in (await db.execute(statement)).all()]
+
+
+def compliance_credential_due_date(credential: ComplianceCredential) -> date | None:
+    candidates = [value for value in (credential.renewal_due_at, credential.expires_at) if value is not None]
+    return min(candidates) if candidates else None
+
+
+def compliance_credential_recently_reminded(credential: ComplianceCredential, repeat_after_days: int) -> bool:
+    if credential.renewal_last_reminded_at is None:
+        return False
+    if repeat_after_days <= 0:
+        return False
+    last_reminded = (
+        credential.renewal_last_reminded_at.replace(tzinfo=UTC)
+        if credential.renewal_last_reminded_at.tzinfo is None
+        else credential.renewal_last_reminded_at.astimezone(UTC)
+    )
+    return last_reminded >= utc_now() - timedelta(days=repeat_after_days)
+
+
+def compliance_credential_renewal_reminder_body(
+    credential: ComplianceCredential,
+    person: Person,
+    as_of: date,
+) -> str:
+    due_on = compliance_credential_due_date(credential)
+    due_text = due_on.isoformat() if due_on is not None else "not recorded"
+    days_until_due = (due_on - as_of).days if due_on is not None else None
+    return "\n".join(
+        [
+            f"{credential.title} for {person.display_name} needs renewal review.",
+            f"Credential type: {credential.credential_type.value.replace('_', ' ')}. Status: {credential.status.value}.",
+            f"Renewal due: {due_text}. Expires: {credential.expires_at.isoformat() if credential.expires_at else 'not recorded'}.",
+            f"Days until due: {days_until_due if days_until_due is not None else 'unknown'}.",
+            f"Issuer: {credential.issuing_body or 'not recorded'}. Number: {credential.credential_number or 'not recorded'}.",
+            "Update evidence, verify the credential, or restrict athlete-facing duties before the credential lapses.",
+        ]
+    )
+
+
+def compliance_credential_renewal_reminder_item(
+    credential: ComplianceCredential,
+    person: Person,
+    as_of: date,
+    *,
+    action: str,
+    reason: str,
+    recipient_count: int = 0,
+    message_id: UUID | None = None,
+) -> ComplianceCredentialRenewalReminderItemRead:
+    due_on = compliance_credential_due_date(credential)
+    return ComplianceCredentialRenewalReminderItemRead(
+        credential_id=credential.id,
+        person_id=credential.person_id,
+        person_name=person.display_name,
+        title=credential.title,
+        credential_type=credential.credential_type,
+        status=credential.status,
+        renewal_due_at=credential.renewal_due_at,
+        expires_at=credential.expires_at,
+        days_until_due=(due_on - as_of).days if due_on is not None else None,
+        recipient_count=recipient_count,
+        action=action,
+        reason=reason,
+        message_id=message_id,
+    )
 
 
 async def reconcile_compliance_statuses(

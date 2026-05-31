@@ -31,6 +31,8 @@ from app.schemas.safeguarding import (
     BackgroundCheckUpdate,
     ComplianceCredentialCreate,
     ComplianceCredentialRead,
+    ComplianceCredentialRenewalReminderRunCreate,
+    ComplianceCredentialRenewalReminderRunRead,
     ComplianceCredentialUpdate,
     ComplianceReconciliationRead,
     ComplianceSummaryRead,
@@ -159,6 +161,7 @@ from app.services.safeguarding import (
     respond_to_family_consent_request,
     respond_to_family_event,
     reconcile_compliance_statuses,
+    run_compliance_credential_renewal_reminders,
     read_signed_incident_report_package_artifact,
     read_signed_background_check_evidence_document,
     read_signed_safeguarding_incident_evidence,
@@ -306,6 +309,9 @@ def to_credential_read(credential) -> ComplianceCredentialRead:
         issued_at=credential.issued_at,
         expires_at=credential.expires_at,
         renewal_due_at=credential.renewal_due_at,
+        renewal_last_reminded_at=credential.renewal_last_reminded_at,
+        renewal_reminder_message_id=credential.renewal_reminder_message_id,
+        renewal_reminder_count=credential.renewal_reminder_count,
         verification_url=credential.verification_url,
         evidence_object_key=credential.evidence_object_key,
         notes=credential.notes,
@@ -1309,6 +1315,19 @@ async def update_compliance_credential_route(
     return to_credential_read(
         await update_compliance_credential(db, identity, credential_id, payload, authz)
     )
+
+
+@router.post(
+    "/credentials/renewal-reminders/run",
+    response_model=ComplianceCredentialRenewalReminderRunRead,
+)
+async def run_compliance_credential_renewal_reminders_route(
+    payload: ComplianceCredentialRenewalReminderRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> ComplianceCredentialRenewalReminderRunRead:
+    return await run_compliance_credential_renewal_reminders(db, identity, payload, authz)
 
 
 @router.get("/my-family/events", response_model=list[FamilyEventSummaryRead])
