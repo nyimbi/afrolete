@@ -469,6 +469,44 @@ class MemberSubscriptionPayment(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class OrganizationMarketProfile(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_market_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "country_code",
+            "region_code",
+            name="uq_organization_market_profiles_scope",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False, index=True)
+    region_code: Mapped[str | None] = mapped_column(String(80), index=True)
+    locale: Mapped[str] = mapped_column(String(16), default="en-KE", nullable=False, index=True)
+    timezone: Mapped[str] = mapped_column(String(80), default="Africa/Nairobi", nullable=False)
+    default_currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False, index=True)
+    reporting_currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False, index=True)
+    exchange_rate_source: Mapped[str | None] = mapped_column(String(160))
+    exchange_rate_margin_bps: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    season_rate_lock: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    primary_payment_method: Mapped[str] = mapped_column(String(80), default="mpesa", nullable=False, index=True)
+    supported_payment_methods_json: Mapped[str | None] = mapped_column(Text)
+    mobile_money_providers_json: Mapped[str | None] = mapped_column(Text)
+    cash_collection_points_json: Mapped[str | None] = mapped_column(Text)
+    bank_integrations_json: Mapped[str | None] = mapped_column(Text)
+    tax_authority: Mapped[str | None] = mapped_column(String(180), index=True)
+    tax_registration_number: Mapped[str | None] = mapped_column(String(120), index=True)
+    tax_profile: Mapped[str | None] = mapped_column(String(120), index=True)
+    tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    tax_exempt_categories_json: Mapped[str | None] = mapped_column(Text)
+    government_reporting_agencies_json: Mapped[str | None] = mapped_column(Text)
+    federation_reporting_templates_json: Mapped[str | None] = mapped_column(Text)
+    compliance_notes: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
 class RegistrationInquiry(IdMixin, TimestampMixin, Base):
     __tablename__ = "registration_inquiries"
 

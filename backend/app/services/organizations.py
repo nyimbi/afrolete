@@ -63,6 +63,7 @@ from app.models.organization import (
     OrganizationDataMigrationRun,
     OrganizationGroup,
     OrganizationGroupMembership,
+    OrganizationMarketProfile,
     OrganizationProgram,
     OrganizationRecoveryDrill,
     OrganizationRecoveryPlan,
@@ -91,6 +92,9 @@ from app.schemas.organization import (
     OrganizationDataMigrationRunCreate,
     OrganizationGroupCreate,
     OrganizationGroupMemberAdd,
+    OrganizationMarketProfileCreate,
+    OrganizationMarketProfileRead,
+    OrganizationMarketProfileSummaryRead,
     OrganizationProgramCreate,
     OrganizationRecoveryDrillCreate,
     OrganizationRecoveryPlanCreate,
@@ -4735,6 +4739,171 @@ async def record_member_subscription_payment(
     await db.refresh(payment)
     await db.refresh(subscription)
     return payment, subscription
+
+
+async def create_organization_market_profile(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationMarketProfileCreate,
+    authz: AuthorizationService,
+) -> OrganizationMarketProfileRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    profile = await db.scalar(
+        select(OrganizationMarketProfile).where(
+            OrganizationMarketProfile.organization_id == organization_id,
+            OrganizationMarketProfile.country_code == payload.country_code.upper(),
+            OrganizationMarketProfile.region_code == payload.region_code,
+        )
+    )
+    values = organization_market_profile_values(payload)
+    if profile is None:
+        profile = OrganizationMarketProfile(organization_id=organization_id, **values)
+        db.add(profile)
+    else:
+        for field, value in values.items():
+            setattr(profile, field, value)
+    await db.commit()
+    await db.refresh(profile)
+    return organization_market_profile_read(profile)
+
+
+async def list_organization_market_profiles(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[OrganizationMarketProfileRead]:
+    profiles = (
+        await db.scalars(
+            select(OrganizationMarketProfile)
+            .where(OrganizationMarketProfile.organization_id == organization_id)
+            .order_by(
+                OrganizationMarketProfile.status,
+                OrganizationMarketProfile.country_code,
+                OrganizationMarketProfile.region_code,
+                OrganizationMarketProfile.name,
+            )
+        )
+    ).all()
+    return [organization_market_profile_read(profile) for profile in profiles]
+
+
+async def organization_market_profile_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> OrganizationMarketProfileSummaryRead:
+    profiles = await list_organization_market_profiles(db, organization_id)
+    active_profiles = [profile for profile in profiles if profile.status == "active"]
+    payment_methods = sorted({method for profile in profiles for method in profile.supported_payment_methods})
+    mobile_money_providers = sorted({provider for profile in profiles for provider in profile.mobile_money_providers})
+    tax_authorities = sorted({profile.tax_authority for profile in profiles if profile.tax_authority})
+    government_agencies = sorted(
+        {agency for profile in profiles for agency in profile.government_reporting_agencies}
+    )
+    federation_templates = sorted(
+        {template for profile in profiles for template in profile.federation_reporting_templates}
+    )
+    next_actions: list[str] = []
+    if not active_profiles:
+        next_actions.append("Activate at least one country or regional market profile.")
+    if not payment_methods:
+        next_actions.append("Configure local payment methods for dues, registration, ticketing, and invoices.")
+    if not tax_authorities:
+        next_actions.append("Record local tax authority and tax profile requirements.")
+    if not government_agencies and not federation_templates:
+        next_actions.append("Add government or federation reporting templates for compliance packages.")
+    if not mobile_money_providers:
+        next_actions.append("Add mobile-money or local bank rails for markets where cards are not primary.")
+    return OrganizationMarketProfileSummaryRead(
+        organization_id=organization_id,
+        profile_count=len(profiles),
+        active_profile_count=len(active_profiles),
+        country_count=len({profile.country_code for profile in profiles}),
+        primary_currencies=sorted({profile.default_currency for profile in profiles}),
+        payment_methods=payment_methods,
+        mobile_money_providers=mobile_money_providers,
+        tax_authorities=tax_authorities,
+        government_reporting_agencies=government_agencies,
+        federation_reporting_templates=federation_templates,
+        compliance_ready=bool(active_profiles and payment_methods and tax_authorities and (government_agencies or federation_templates)),
+        next_actions=next_actions or ["Market localization profile is operationally ready."],
+    )
+
+
+def organization_market_profile_values(payload: OrganizationMarketProfileCreate) -> dict:
+    return {
+        "name": payload.name,
+        "country_code": payload.country_code.upper(),
+        "region_code": payload.region_code,
+        "locale": payload.locale,
+        "timezone": payload.timezone,
+        "default_currency": payload.default_currency.upper(),
+        "reporting_currency": payload.reporting_currency.upper(),
+        "exchange_rate_source": payload.exchange_rate_source,
+        "exchange_rate_margin_bps": payload.exchange_rate_margin_bps,
+        "season_rate_lock": payload.season_rate_lock,
+        "primary_payment_method": payload.primary_payment_method,
+        "supported_payment_methods_json": json_dumps_list(payload.supported_payment_methods),
+        "mobile_money_providers_json": json_dumps_list(payload.mobile_money_providers),
+        "cash_collection_points_json": json_dumps_list(payload.cash_collection_points),
+        "bank_integrations_json": json_dumps_list(payload.bank_integrations),
+        "tax_authority": payload.tax_authority,
+        "tax_registration_number": payload.tax_registration_number,
+        "tax_profile": payload.tax_profile,
+        "tax_rate": payload.tax_rate,
+        "tax_exempt_categories_json": json_dumps_list(payload.tax_exempt_categories),
+        "government_reporting_agencies_json": json_dumps_list(payload.government_reporting_agencies),
+        "federation_reporting_templates_json": json_dumps_list(payload.federation_reporting_templates),
+        "compliance_notes": payload.compliance_notes,
+        "status": payload.status,
+    }
+
+
+def organization_market_profile_read(profile: OrganizationMarketProfile) -> OrganizationMarketProfileRead:
+    return OrganizationMarketProfileRead(
+        id=profile.id,
+        organization_id=profile.organization_id,
+        name=profile.name,
+        country_code=profile.country_code,
+        region_code=profile.region_code,
+        locale=profile.locale,
+        timezone=profile.timezone,
+        default_currency=profile.default_currency,
+        reporting_currency=profile.reporting_currency,
+        exchange_rate_source=profile.exchange_rate_source,
+        exchange_rate_margin_bps=profile.exchange_rate_margin_bps,
+        season_rate_lock=profile.season_rate_lock,
+        primary_payment_method=profile.primary_payment_method,
+        supported_payment_methods=json_loads_list(profile.supported_payment_methods_json),
+        mobile_money_providers=json_loads_list(profile.mobile_money_providers_json),
+        cash_collection_points=json_loads_list(profile.cash_collection_points_json),
+        bank_integrations=json_loads_list(profile.bank_integrations_json),
+        tax_authority=profile.tax_authority,
+        tax_registration_number=profile.tax_registration_number,
+        tax_profile=profile.tax_profile,
+        tax_rate=profile.tax_rate,
+        tax_exempt_categories=json_loads_list(profile.tax_exempt_categories_json),
+        government_reporting_agencies=json_loads_list(profile.government_reporting_agencies_json),
+        federation_reporting_templates=json_loads_list(profile.federation_reporting_templates_json),
+        compliance_notes=profile.compliance_notes,
+        status=profile.status,
+    )
+
+
+def json_dumps_list(values: list[str]) -> str:
+    normalized = [value.strip() for value in values if value.strip()]
+    return json.dumps(normalized)
+
+
+def json_loads_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item).strip()]
 
 
 async def ensure_member_subject_exists(db: AsyncSession, subject_type: MemberSubjectType, subject_id: UUID) -> None:

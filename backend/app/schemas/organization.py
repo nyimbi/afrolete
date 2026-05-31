@@ -1195,6 +1195,53 @@ class MemberSubscriptionPaymentRead(BaseModel):
     subscription_status: str
 
 
+class OrganizationMarketProfileCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    country_code: str = Field(min_length=2, max_length=2)
+    region_code: str | None = Field(default=None, max_length=80)
+    locale: str = Field(default="en-KE", min_length=2, max_length=16)
+    timezone: str = Field(default="Africa/Nairobi", min_length=2, max_length=80)
+    default_currency: str = Field(default="KES", min_length=3, max_length=3)
+    reporting_currency: str = Field(default="KES", min_length=3, max_length=3)
+    exchange_rate_source: str | None = Field(default=None, max_length=160)
+    exchange_rate_margin_bps: int = Field(default=0, ge=-1000, le=1000)
+    season_rate_lock: bool = False
+    primary_payment_method: str = Field(default="mpesa", min_length=2, max_length=80)
+    supported_payment_methods: list[str] = Field(default_factory=list, max_length=20)
+    mobile_money_providers: list[str] = Field(default_factory=list, max_length=20)
+    cash_collection_points: list[str] = Field(default_factory=list, max_length=20)
+    bank_integrations: list[str] = Field(default_factory=list, max_length=20)
+    tax_authority: str | None = Field(default=None, max_length=180)
+    tax_registration_number: str | None = Field(default=None, max_length=120)
+    tax_profile: str | None = Field(default=None, max_length=120)
+    tax_rate: Decimal | None = Field(default=None, ge=0, le=1, max_digits=6, decimal_places=4)
+    tax_exempt_categories: list[str] = Field(default_factory=list, max_length=20)
+    government_reporting_agencies: list[str] = Field(default_factory=list, max_length=20)
+    federation_reporting_templates: list[str] = Field(default_factory=list, max_length=20)
+    compliance_notes: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="active", pattern="^(active|draft|retired)$")
+
+
+class OrganizationMarketProfileRead(OrganizationMarketProfileCreate):
+    id: UUID
+    organization_id: UUID
+
+
+class OrganizationMarketProfileSummaryRead(BaseModel):
+    organization_id: UUID
+    profile_count: int
+    active_profile_count: int
+    country_count: int
+    primary_currencies: list[str]
+    payment_methods: list[str]
+    mobile_money_providers: list[str]
+    tax_authorities: list[str]
+    government_reporting_agencies: list[str]
+    federation_reporting_templates: list[str]
+    compliance_ready: bool
+    next_actions: list[str]
+
+
 class CommitteeCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     level: AssociationLevel | None = None

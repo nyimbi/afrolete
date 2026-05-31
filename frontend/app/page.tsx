@@ -364,6 +364,8 @@ import type {
   OrganizationDataMigrationRunRead,
   OrganizationGroupMembershipRead,
   OrganizationGroupRead,
+  OrganizationMarketProfileRead,
+  OrganizationMarketProfileSummaryRead,
   OrganizationProgramRead,
   OrganizationRecoveryDrillRead,
   OrganizationRecoveryPlanRead,
@@ -1856,6 +1858,8 @@ export default function HomePage() {
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
+  const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
+  const [marketProfileSummary, setMarketProfileSummary] = useState<OrganizationMarketProfileSummaryRead | null>(null);
   const [dataMigrationProjects, setDataMigrationProjects] = useState<OrganizationDataMigrationProjectRead[]>([]);
   const [dataMigrationRuns, setDataMigrationRuns] = useState<OrganizationDataMigrationRunRead[]>([]);
   const [recoveryPlans, setRecoveryPlans] = useState<OrganizationRecoveryPlanRead[]>([]);
@@ -2632,6 +2636,31 @@ export default function HomePage() {
     provider: "mpesa",
     method: "stk_push",
     external_payment_id: "MPESA-DEMO-001"
+  });
+  const [marketProfileForm, setMarketProfileForm] = useState({
+    name: "Kenya operating market",
+    country_code: "KE",
+    region_code: "Nairobi",
+    locale: "en-KE",
+    timezone: "Africa/Nairobi",
+    default_currency: "KES",
+    reporting_currency: "KES",
+    exchange_rate_source: "Central Bank of Kenya",
+    exchange_rate_margin_bps: 200,
+    season_rate_lock: true,
+    primary_payment_method: "mpesa",
+    supported_payment_methods: "mpesa, cash, bank_transfer",
+    mobile_money_providers: "M-Pesa, Airtel Money, T-Kash",
+    cash_collection_points: "Club office, partner school bursar",
+    bank_integrations: "Equity Bank, KCB",
+    tax_authority: "Kenya Revenue Authority",
+    tax_registration_number: "P000000000A",
+    tax_profile: "sports_club",
+    tax_rate: "0.1600",
+    tax_exempt_categories: "member_dues, donations",
+    government_reporting_agencies: "Registrar of Societies, Sports Registrar",
+    federation_reporting_templates: "FKF club license, youth tournament roster",
+    compliance_notes: "Use KES for local dues and registration; retain KRA support documents."
   });
   const [dataMigrationProjectForm, setDataMigrationProjectForm] = useState({
     name: "Legacy SportsEngine import",
@@ -4188,6 +4217,15 @@ export default function HomePage() {
     setSelectedMemberSubscriptionId((current) =>
       subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
     );
+  }, []);
+
+  const loadMarketProfiles = useCallback(async (organizationId: string) => {
+    const [profiles, summary] = await Promise.all([
+      apiRequest<OrganizationMarketProfileRead[]>(`/organizations/${organizationId}/market-profiles`),
+      apiRequest<OrganizationMarketProfileSummaryRead>(`/organizations/${organizationId}/market-profiles/summary`)
+    ]);
+    setMarketProfiles(profiles);
+    setMarketProfileSummary(summary);
   }, []);
 
   const loadMigrationAndRecovery = useCallback(async (organizationId: string) => {
@@ -5777,6 +5815,8 @@ export default function HomePage() {
       setMemberSubscriptions([]);
       setMemberSubscriptionPayment(null);
       setSelectedMemberSubscriptionId("");
+      setMarketProfiles([]);
+      setMarketProfileSummary(null);
       setDataMigrationProjects([]);
       setDataMigrationRuns([]);
       setRecoveryPlans([]);
@@ -6207,6 +6247,7 @@ export default function HomePage() {
       await loadOrganizationOperatingUnits(selectedOrganizationId);
       await loadAwardPrograms(selectedOrganizationId);
       await loadMemberDues(selectedOrganizationId);
+      await loadMarketProfiles(selectedOrganizationId);
       await loadMigrationAndRecovery(selectedOrganizationId);
       await loadComplianceDocuments(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
@@ -6245,6 +6286,7 @@ export default function HomePage() {
     loadOrganizationOperatingUnits,
     loadAwardPrograms,
     loadMemberDues,
+    loadMarketProfiles,
     loadMigrationAndRecovery,
     loadComplianceDocuments,
     loadRegistrationInquiries,
@@ -7014,6 +7056,51 @@ export default function HomePage() {
           )
         );
         addLog(`Recorded ${payment.provider.toUpperCase()} dues payment`, "good");
+      }
+    );
+  };
+
+  const saveMarketProfile = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before saving market settings", "bad");
+      return;
+    }
+    runAction(
+      "save-market-profile",
+      () =>
+        apiRequest<OrganizationMarketProfileRead>(`/organizations/${selectedOrganizationId}/market-profiles`, {
+          method: "POST",
+          identity,
+          body: {
+            name: marketProfileForm.name,
+            country_code: marketProfileForm.country_code.toUpperCase(),
+            region_code: marketProfileForm.region_code || null,
+            locale: marketProfileForm.locale,
+            timezone: marketProfileForm.timezone,
+            default_currency: marketProfileForm.default_currency.toUpperCase(),
+            reporting_currency: marketProfileForm.reporting_currency.toUpperCase(),
+            exchange_rate_source: marketProfileForm.exchange_rate_source || null,
+            exchange_rate_margin_bps: marketProfileForm.exchange_rate_margin_bps,
+            season_rate_lock: marketProfileForm.season_rate_lock,
+            primary_payment_method: marketProfileForm.primary_payment_method,
+            supported_payment_methods: parseCommaList(marketProfileForm.supported_payment_methods),
+            mobile_money_providers: parseCommaList(marketProfileForm.mobile_money_providers),
+            cash_collection_points: parseCommaList(marketProfileForm.cash_collection_points),
+            bank_integrations: parseCommaList(marketProfileForm.bank_integrations),
+            tax_authority: marketProfileForm.tax_authority || null,
+            tax_registration_number: marketProfileForm.tax_registration_number || null,
+            tax_profile: marketProfileForm.tax_profile || null,
+            tax_rate: marketProfileForm.tax_rate || null,
+            tax_exempt_categories: parseCommaList(marketProfileForm.tax_exempt_categories),
+            government_reporting_agencies: parseCommaList(marketProfileForm.government_reporting_agencies),
+            federation_reporting_templates: parseCommaList(marketProfileForm.federation_reporting_templates),
+            compliance_notes: marketProfileForm.compliance_notes || null
+          }
+        }),
+      (profile) => {
+        setMarketProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
+        void loadMarketProfiles(selectedOrganizationId);
+        addLog(`${profile.name} market profile saved`, "good");
       }
     );
   };
@@ -22375,6 +22462,134 @@ export default function HomePage() {
                     <strong>{drill.drill_type.replaceAll("_", " ")} · {drill.status}</strong>
                     <span>Observed RPO {drill.rpo_minutes_observed ?? "-"}m · RTO {drill.rto_minutes_observed ?? "-"}m</span>
                     <small>{drill.result_summary ?? drill.action_items ?? "Recovery rehearsal evidence"}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Market localization</p>
+                <h2>Payments, tax, reporting</h2>
+              </div>
+              <button type="button" onClick={saveMarketProfile} disabled={busyAction !== null}>Save market</button>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Markets</span>
+                <strong>{marketProfileSummary?.profile_count ?? marketProfiles.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Countries</span>
+                <strong>{marketProfileSummary?.country_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Currencies</span>
+                <strong>{marketProfileSummary?.primary_currencies.join(", ") || "—"}</strong>
+              </div>
+              <div>
+                <span className="muted">Ready</span>
+                <strong>{marketProfileSummary?.compliance_ready ? "Yes" : "No"}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Market
+                <input value={marketProfileForm.name} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, name: event.target.value })} />
+              </label>
+              <label>
+                Country
+                <input maxLength={2} value={marketProfileForm.country_code} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, country_code: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Region
+                <input value={marketProfileForm.region_code} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, region_code: event.target.value })} />
+              </label>
+              <label>
+                Locale
+                <input value={marketProfileForm.locale} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, locale: event.target.value })} />
+              </label>
+              <label>
+                Timezone
+                <input value={marketProfileForm.timezone} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, timezone: event.target.value })} />
+              </label>
+              <label>
+                Local currency
+                <input maxLength={3} value={marketProfileForm.default_currency} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, default_currency: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Reporting currency
+                <input maxLength={3} value={marketProfileForm.reporting_currency} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, reporting_currency: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Primary rail
+                <input value={marketProfileForm.primary_payment_method} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, primary_payment_method: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Payment methods
+                <input value={marketProfileForm.supported_payment_methods} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, supported_payment_methods: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Mobile money
+                <input value={marketProfileForm.mobile_money_providers} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, mobile_money_providers: event.target.value })} />
+              </label>
+              <label>
+                Rate source
+                <input value={marketProfileForm.exchange_rate_source} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, exchange_rate_source: event.target.value })} />
+              </label>
+              <label>
+                Margin bps
+                <input type="number" value={marketProfileForm.exchange_rate_margin_bps} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, exchange_rate_margin_bps: Number(event.target.value) })} />
+              </label>
+              <label>
+                Tax authority
+                <input value={marketProfileForm.tax_authority} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, tax_authority: event.target.value })} />
+              </label>
+              <label>
+                Tax rate
+                <input value={marketProfileForm.tax_rate} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, tax_rate: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Government reports
+                <input value={marketProfileForm.government_reporting_agencies} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, government_reporting_agencies: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Federation templates
+                <input value={marketProfileForm.federation_reporting_templates} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, federation_reporting_templates: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Cash and bank rails
+                <input value={`${marketProfileForm.cash_collection_points}; ${marketProfileForm.bank_integrations}`} onChange={(event) => {
+                  const [cash, banks] = event.target.value.split(";");
+                  setMarketProfileForm({
+                    ...marketProfileForm,
+                    cash_collection_points: cash ?? "",
+                    bank_integrations: banks ?? ""
+                  });
+                }} />
+              </label>
+              <label className="wide-field">
+                Compliance notes
+                <input value={marketProfileForm.compliance_notes} onChange={(event) => setMarketProfileForm({ ...marketProfileForm, compliance_notes: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {marketProfiles.slice(0, 4).map((profile) => (
+                <article key={profile.id} className="task-card">
+                  <div>
+                    <strong>{profile.name}</strong>
+                    <span>{profile.country_code} · {profile.region_code ?? "all regions"} · {profile.default_currency}/{profile.reporting_currency}</span>
+                    <small>{profile.primary_payment_method} · {profile.mobile_money_providers.join(", ") || "no mobile money"} · {profile.tax_authority ?? "no tax authority"}</small>
+                  </div>
+                </article>
+              ))}
+              {(marketProfileSummary?.next_actions ?? []).slice(0, 3).map((action) => (
+                <article key={action} className="task-card">
+                  <div>
+                    <strong>Market action</strong>
+                    <span>{action}</span>
                   </div>
                 </article>
               ))}

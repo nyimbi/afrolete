@@ -197,6 +197,7 @@ from app.models.organization import (  # noqa: F401,E402
     OrganizationDataMigrationRun,
     OrganizationGroup,
     OrganizationGroupMembership,
+    OrganizationMarketProfile,
     OrganizationProgram,
     OrganizationRecoveryDrill,
     OrganizationRecoveryPlan,

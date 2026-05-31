@@ -49,6 +49,9 @@ from app.schemas.organization import (
     OrganizationGroupMembershipRead,
     OrganizationGroupRead,
     OrganizationHandleAvailabilityRead,
+    OrganizationMarketProfileCreate,
+    OrganizationMarketProfileRead,
+    OrganizationMarketProfileSummaryRead,
     OrganizationOnboardingCreate,
     OrganizationOnboardingRead,
     OrganizationProgramCreate,
@@ -123,6 +126,7 @@ from app.services.organizations import (
     create_member_subscription,
     create_member_subscription_plan,
     create_organization_group,
+    create_organization_market_profile,
     create_organization_program,
     create_organization_season,
     create_public_registration_inquiry,
@@ -138,6 +142,7 @@ from app.services.organizations import (
     ensure_manage_organization,
     import_registration_inquiries,
     organization_handle_availability,
+    organization_market_profile_summary,
     list_family_registration_inquiries,
     list_organization_award_categories,
     list_organization_award_nominations,
@@ -157,6 +162,7 @@ from app.services.organizations import (
     list_recovery_plans,
     list_member_subscription_plans,
     list_member_subscriptions,
+    list_organization_market_profiles,
     list_committees,
     list_organizations_for_identity,
     list_registration_inquiries,
@@ -1899,6 +1905,40 @@ async def record_member_subscription_payment_route(
         subscription_balance_amount=subscription.balance_amount,
         subscription_status=subscription.status,
     )
+
+
+@router.post(
+    "/{organization_id}/market-profiles",
+    response_model=OrganizationMarketProfileRead,
+    status_code=201,
+)
+async def create_market_profile_route(
+    organization_id: UUID,
+    payload: OrganizationMarketProfileCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationMarketProfileRead:
+    return await create_organization_market_profile(db, identity, organization_id, payload, authz)
+
+
+@router.get("/{organization_id}/market-profiles", response_model=list[OrganizationMarketProfileRead])
+async def list_market_profiles_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationMarketProfileRead]:
+    return await list_organization_market_profiles(db, organization_id)
+
+
+@router.get(
+    "/{organization_id}/market-profiles/summary",
+    response_model=OrganizationMarketProfileSummaryRead,
+)
+async def market_profile_summary_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> OrganizationMarketProfileSummaryRead:
+    return await organization_market_profile_summary(db, organization_id)
 
 
 def to_committee_read(committee) -> CommitteeRead:

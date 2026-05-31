@@ -188,6 +188,95 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert subscriptions_response.json()[0]["balance_amount"] == "500.00"
 
 
+def test_organization_market_profiles_localize_payments_tax_and_reporting(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Localized Market FC",
+            "organization_type": "club",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+
+    profile_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/market-profiles",
+        headers=identity_headers,
+        json={
+            "name": "Kenya operating market",
+            "country_code": "ke",
+            "region_code": "Nairobi",
+            "locale": "en-KE",
+            "timezone": "Africa/Nairobi",
+            "default_currency": "kes",
+            "reporting_currency": "KES",
+            "exchange_rate_source": "Central Bank of Kenya",
+            "exchange_rate_margin_bps": 200,
+            "season_rate_lock": True,
+            "primary_payment_method": "mpesa",
+            "supported_payment_methods": ["mpesa", "cash", "bank_transfer"],
+            "mobile_money_providers": ["M-Pesa", "Airtel Money", "T-Kash"],
+            "cash_collection_points": ["Club office", "Partner school bursar"],
+            "bank_integrations": ["Equity Bank", "KCB"],
+            "tax_authority": "Kenya Revenue Authority",
+            "tax_registration_number": "P000000000A",
+            "tax_profile": "sports_club",
+            "tax_rate": "0.1600",
+            "tax_exempt_categories": ["member_dues", "donations"],
+            "government_reporting_agencies": ["Registrar of Societies", "Sports Registrar"],
+            "federation_reporting_templates": ["FKF club license", "Youth tournament roster"],
+            "compliance_notes": "Use KES for local dues and registration; retain KRA support documents.",
+        },
+    )
+    assert profile_response.status_code == 201
+    profile = profile_response.json()
+    assert profile["country_code"] == "KE"
+    assert profile["default_currency"] == "KES"
+    assert profile["season_rate_lock"] is True
+    assert "M-Pesa" in profile["mobile_money_providers"]
+    assert "Registrar of Societies" in profile["government_reporting_agencies"]
+
+    updated_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/market-profiles",
+        headers=identity_headers,
+        json={
+            **profile,
+            "primary_payment_method": "bank_transfer",
+            "supported_payment_methods": ["mpesa", "bank_transfer", "cash"],
+            "compliance_notes": "Updated for annual license renewal.",
+        },
+    )
+    assert updated_response.status_code == 201
+    updated = updated_response.json()
+    assert updated["id"] == profile["id"]
+    assert updated["primary_payment_method"] == "bank_transfer"
+    assert updated["compliance_notes"] == "Updated for annual license renewal."
+
+    list_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/market-profiles",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+    summary_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/market-profiles/summary",
+        headers=identity_headers,
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["profile_count"] == 1
+    assert summary["active_profile_count"] == 1
+    assert summary["country_count"] == 1
+    assert summary["primary_currencies"] == ["KES"]
+    assert "bank_transfer" in summary["payment_methods"]
+    assert "M-Pesa" in summary["mobile_money_providers"]
+    assert summary["tax_authorities"] == ["Kenya Revenue Authority"]
+    assert summary["compliance_ready"] is True
+    assert summary["next_actions"] == ["Market localization profile is operationally ready."]
+
+
 def test_organization_program_season_and_group_crud(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",

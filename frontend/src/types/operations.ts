@@ -1049,6 +1049,50 @@ export type MemberSubscriptionPaymentRead = {
   subscription_status: string;
 };
 
+export type OrganizationMarketProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  country_code: string;
+  region_code: string | null;
+  locale: string;
+  timezone: string;
+  default_currency: string;
+  reporting_currency: string;
+  exchange_rate_source: string | null;
+  exchange_rate_margin_bps: number;
+  season_rate_lock: boolean;
+  primary_payment_method: string;
+  supported_payment_methods: string[];
+  mobile_money_providers: string[];
+  cash_collection_points: string[];
+  bank_integrations: string[];
+  tax_authority: string | null;
+  tax_registration_number: string | null;
+  tax_profile: string | null;
+  tax_rate: string | null;
+  tax_exempt_categories: string[];
+  government_reporting_agencies: string[];
+  federation_reporting_templates: string[];
+  compliance_notes: string | null;
+  status: string;
+};
+
+export type OrganizationMarketProfileSummaryRead = {
+  organization_id: UUID;
+  profile_count: number;
+  active_profile_count: number;
+  country_count: number;
+  primary_currencies: string[];
+  payment_methods: string[];
+  mobile_money_providers: string[];
+  tax_authorities: string[];
+  government_reporting_agencies: string[];
+  federation_reporting_templates: string[];
+  compliance_ready: boolean;
+  next_actions: string[];
+};
+
 export type OrganizationDataMigrationProjectRead = {
   id: UUID;
   organization_id: UUID;
