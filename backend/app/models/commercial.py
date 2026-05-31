@@ -507,6 +507,66 @@ class FinancePayment(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FinancialBudget(IdMixin, TimestampMixin, Base):
+    __tablename__ = "financial_budgets"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", "fiscal_year", name="uq_financial_budgets_org_name_year"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    period_start: Mapped[date] = mapped_column(nullable=False, index=True)
+    period_end: Mapped[date] = mapped_column(nullable=False, index=True)
+    budget_type: Mapped[str] = mapped_column(String(80), default="operating", nullable=False, index=True)
+    scope_type: Mapped[str] = mapped_column(String(80), default="organization", nullable=False, index=True)
+    scope_id: Mapped[UUID | None] = mapped_column(GUID(), index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    beginning_cash_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    minimum_cash_reserve: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    assumptions_json: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+
+
+class FinancialBudgetLine(IdMixin, TimestampMixin, Base):
+    __tablename__ = "financial_budget_lines"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    budget_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("financial_budgets.id"), index=True)
+    line_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    department: Mapped[str | None] = mapped_column(String(120), index=True)
+    amount_budgeted: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount_actual: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    forecast_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    cash_timing_month: Mapped[str | None] = mapped_column(String(20), index=True)
+    funding_source: Mapped[str | None] = mapped_column(String(120), index=True)
+    restricted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    variance_reason: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
+class FinancialForecastScenario(IdMixin, TimestampMixin, Base):
+    __tablename__ = "financial_forecast_scenarios"
+    __table_args__ = (
+        UniqueConstraint("budget_id", "name", name="uq_financial_forecast_scenarios_budget_name"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    budget_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("financial_budgets.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    scenario_type: Mapped[str] = mapped_column(String(60), default="base", nullable=False, index=True)
+    revenue_adjustment_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), nullable=False)
+    expense_adjustment_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), nullable=False)
+    cash_adjustment_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    membership_growth_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), nullable=False)
+    facility_utilization_percent: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    assumptions_json: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
 class CommercialPaymentSession(IdMixin, TimestampMixin, Base):
     __tablename__ = "commercial_payment_sessions"
     __table_args__ = (UniqueConstraint("organization_id", "provider", "local_session_id"),)

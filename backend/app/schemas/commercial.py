@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import CommercialStatus, TicketStatus
 
@@ -767,6 +767,108 @@ class FinancePaymentCreate(BaseModel):
 class FinancePaymentRead(FinancePaymentCreate):
     id: UUID
     received_at: datetime
+
+
+class FinancialBudgetCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    fiscal_year: int = Field(ge=2000, le=2200)
+    period_start: date
+    period_end: date
+    budget_type: str = Field(default="operating", pattern="^(operating|capital|grant|program|team|event|cash_flow)$")
+    scope_type: str = Field(default="organization", pattern="^(organization|department|team|program|event|facility|grant)$")
+    scope_id: UUID | None = None
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    beginning_cash_balance: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    minimum_cash_reserve: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    assumptions: list[str] = Field(default_factory=list, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="draft", pattern="^(draft|approved|active|locked|archived)$")
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "FinancialBudgetCreate":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be on or after period_start")
+        return self
+
+
+class FinancialBudgetRead(FinancialBudgetCreate):
+    id: UUID
+    line_count: int = 0
+
+
+class FinancialBudgetLineCreate(BaseModel):
+    budget_id: UUID
+    line_type: str = Field(pattern="^(revenue|expense)$")
+    category: str = Field(min_length=2, max_length=120)
+    department: str | None = Field(default=None, max_length=120)
+    amount_budgeted: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    amount_actual: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    forecast_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    cash_timing_month: str | None = Field(default=None, max_length=20)
+    funding_source: str | None = Field(default=None, max_length=120)
+    restricted: bool = False
+    variance_reason: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="active", pattern="^(active|inactive|archived)$")
+
+
+class FinancialBudgetLineRead(FinancialBudgetLineCreate):
+    id: UUID
+    organization_id: UUID
+    variance_amount: Decimal
+    variance_percent: Decimal | None
+
+
+class FinancialForecastScenarioCreate(BaseModel):
+    budget_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    scenario_type: str = Field(default="base", pattern="^(base|optimistic|conservative|stress|custom)$")
+    revenue_adjustment_percent: Decimal = Field(default=Decimal("0"), ge=-100, le=500, max_digits=6, decimal_places=2)
+    expense_adjustment_percent: Decimal = Field(default=Decimal("0"), ge=-100, le=500, max_digits=6, decimal_places=2)
+    cash_adjustment_amount: Decimal = Field(default=Decimal("0"), max_digits=12, decimal_places=2)
+    membership_growth_percent: Decimal = Field(default=Decimal("0"), ge=-100, le=500, max_digits=6, decimal_places=2)
+    facility_utilization_percent: Decimal | None = Field(default=None, ge=0, le=100, max_digits=6, decimal_places=2)
+    assumptions: list[str] = Field(default_factory=list, max_length=40)
+    status: str = Field(default="active", pattern="^(active|inactive|archived)$")
+
+
+class FinancialForecastScenarioRead(FinancialForecastScenarioCreate):
+    id: UUID
+    organization_id: UUID
+    projected_revenue: Decimal
+    projected_expense: Decimal
+    projected_net_income: Decimal
+    projected_ending_cash: Decimal
+    reserve_gap: Decimal
+    sensitivity_rank: list[str]
+
+
+class FinancialBudgetSummaryRead(BaseModel):
+    organization_id: UUID
+    budget_id: UUID
+    budget_name: str
+    currency: str
+    budgeted_revenue: Decimal
+    actual_revenue: Decimal
+    forecast_revenue: Decimal
+    budgeted_expense: Decimal
+    actual_expense: Decimal
+    forecast_expense: Decimal
+    budgeted_net_income: Decimal
+    actual_net_income: Decimal
+    forecast_net_income: Decimal
+    revenue_variance: Decimal
+    expense_variance: Decimal
+    net_variance: Decimal
+    ending_cash_position: Decimal
+    minimum_cash_reserve: Decimal
+    cash_buffer: Decimal
+    cash_runway_days: int | None
+    variance_alert_count: int
+    scenario_count: int
+    scenarios: list[FinancialForecastScenarioRead]
+    recommendations: list[str]
 
 
 class TaxQuoteRead(BaseModel):

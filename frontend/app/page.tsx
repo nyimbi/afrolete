@@ -288,6 +288,10 @@ import type {
   FacilityUtilizationRead,
   FinanceInvoiceRead,
   FinancePaymentRead,
+  FinancialBudgetLineRead,
+  FinancialBudgetRead,
+  FinancialBudgetSummaryRead,
+  FinancialForecastScenarioRead,
   FixtureMatchEventRead,
   FixtureOfficialAssignmentRead,
   FundraisingCampaignRead,
@@ -2336,6 +2340,10 @@ export default function HomePage() {
   const [ticketAccessDashboard, setTicketAccessDashboard] = useState<TicketAccessDashboardRead | null>(null);
   const [invoices, setInvoices] = useState<FinanceInvoiceRead[]>([]);
   const [payments, setPayments] = useState<FinancePaymentRead[]>([]);
+  const [financialBudgets, setFinancialBudgets] = useState<FinancialBudgetRead[]>([]);
+  const [financialBudgetLines, setFinancialBudgetLines] = useState<FinancialBudgetLineRead[]>([]);
+  const [financialBudgetSummary, setFinancialBudgetSummary] = useState<FinancialBudgetSummaryRead | null>(null);
+  const [financialForecastScenarios, setFinancialForecastScenarios] = useState<FinancialForecastScenarioRead[]>([]);
   const [commercialSummary, setCommercialSummary] = useState<CommercialSummaryRead | null>(null);
   const [taxQuote, setTaxQuote] = useState<TaxQuoteRead | null>(null);
   const [commercialTaxFiling, setCommercialTaxFiling] = useState<CommercialTaxFilingRead | null>(null);
@@ -2498,6 +2506,7 @@ export default function HomePage() {
   const [selectedTicketProductId, setSelectedTicketProductId] = useState("");
   const [selectedTicketId, setSelectedTicketId] = useState("");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
+  const [selectedFinancialBudgetId, setSelectedFinancialBudgetId] = useState("");
   const [selectedReportDefinitionId, setSelectedReportDefinitionId] = useState("");
   const [selectedGeneratedReportId, setSelectedGeneratedReportId] = useState("");
   const [selectedInsightId, setSelectedInsightId] = useState("");
@@ -3853,6 +3862,30 @@ export default function HomePage() {
     tax_rate: 16,
     tax_period_start: "2026-06-01",
     tax_period_end: "2026-06-30"
+  });
+  const [financialBudgetForm, setFinancialBudgetForm] = useState({
+    name: "Club operating budget 2026",
+    fiscal_year: 2026,
+    period_start: "2026-01-01",
+    period_end: "2026-12-31",
+    currency: "KES",
+    beginning_cash_balance: "45000.00",
+    minimum_cash_reserve: "20000.00",
+    assumptions: "Membership growth 12%, sponsor renewals on time",
+    revenue_category: "Membership dues",
+    revenue_budgeted: "90000.00",
+    revenue_actual: "92450.00",
+    revenue_forecast: "99000.00",
+    expense_category: "Travel",
+    expense_budgeted: "25000.00",
+    expense_actual: "26800.00",
+    expense_forecast: "30000.00",
+    scenario_name: "New training facility conservative",
+    revenue_adjustment_percent: "15.00",
+    expense_adjustment_percent: "28.00",
+    cash_adjustment_amount: "-10000.00",
+    membership_growth_percent: "15.00",
+    facility_utilization_percent: "62.50"
   });
   const [reportForm, setReportForm] = useState({
     name: "Weekly intelligence brief",
@@ -5514,6 +5547,7 @@ export default function HomePage() {
       ticketResaleData,
       ticketAccessDashboardData,
       invoiceData,
+      budgetData,
       summaryData,
       dashboardData,
       payoutData,
@@ -5549,6 +5583,7 @@ export default function HomePage() {
       apiRequest<TicketResaleListingRead[]>(`/commercial/tickets/resale-listings?organization_id=${organizationId}`),
       apiRequest<TicketAccessDashboardRead>(`/commercial/tickets/access-dashboard?organization_id=${organizationId}`),
       apiRequest<FinanceInvoiceRead[]>(`/commercial/invoices?organization_id=${organizationId}`),
+      apiRequest<FinancialBudgetRead[]>(`/commercial/budgets?organization_id=${organizationId}`),
       apiRequest<CommercialSummaryRead>(`/commercial/summary?organization_id=${organizationId}`),
       apiRequest<SponsorshipDashboardRead[]>(
         `/commercial/sponsorship-dashboard?organization_id=${organizationId}`
@@ -5584,6 +5619,7 @@ export default function HomePage() {
     setTicketResaleListings(ticketResaleData);
     setTicketAccessDashboard(ticketAccessDashboardData);
     setInvoices(invoiceData);
+    setFinancialBudgets(budgetData);
     setCommercialSummary(summaryData);
     setSponsorshipDashboard(dashboardData);
     setCommercialPayouts(payoutData);
@@ -5623,6 +5659,34 @@ export default function HomePage() {
     setSelectedInvoiceId((current) =>
       invoiceData.some((invoice) => invoice.id === current) ? current : invoiceData[0]?.id ?? ""
     );
+    setSelectedFinancialBudgetId((current) =>
+      budgetData.some((budget) => budget.id === current) ? current : budgetData[0]?.id ?? ""
+    );
+    if (budgetData[0]) {
+      const [lines, scenarios, budgetSummary] = await Promise.all([
+        apiRequest<FinancialBudgetLineRead[]>(`/commercial/budgets/${budgetData[0].id}/lines`),
+        apiRequest<FinancialForecastScenarioRead[]>(`/commercial/budgets/${budgetData[0].id}/scenarios`),
+        apiRequest<FinancialBudgetSummaryRead>(`/commercial/budgets/${budgetData[0].id}/summary?organization_id=${organizationId}`)
+      ]);
+      setFinancialBudgetLines(lines);
+      setFinancialForecastScenarios(scenarios);
+      setFinancialBudgetSummary(budgetSummary);
+    } else {
+      setFinancialBudgetLines([]);
+      setFinancialForecastScenarios([]);
+      setFinancialBudgetSummary(null);
+    }
+  }, []);
+
+  const loadFinancialBudgetDetails = useCallback(async (organizationId: string, budgetId: string) => {
+    const [lines, scenarios, summary] = await Promise.all([
+      apiRequest<FinancialBudgetLineRead[]>(`/commercial/budgets/${budgetId}/lines`),
+      apiRequest<FinancialForecastScenarioRead[]>(`/commercial/budgets/${budgetId}/scenarios`),
+      apiRequest<FinancialBudgetSummaryRead>(`/commercial/budgets/${budgetId}/summary?organization_id=${organizationId}`)
+    ]);
+    setFinancialBudgetLines(lines);
+    setFinancialForecastScenarios(scenarios);
+    setFinancialBudgetSummary(summary);
   }, []);
 
   const loadReporting = useCallback(async (organizationId: string) => {
@@ -6203,6 +6267,11 @@ export default function HomePage() {
       setTicketAccessDashboard(null);
       setInvoices([]);
       setPayments([]);
+      setFinancialBudgets([]);
+      setFinancialBudgetLines([]);
+      setFinancialForecastScenarios([]);
+      setFinancialBudgetSummary(null);
+      setSelectedFinancialBudgetId("");
       setCommercialSummary(null);
       setTaxQuote(null);
       setCommercialTaxFiling(null);
@@ -20344,6 +20413,111 @@ export default function HomePage() {
     );
   };
 
+  const createFinancialBudgetPlan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a budget", "bad");
+      return;
+    }
+    runAction(
+      "create-financial-budget-plan",
+      async () => {
+        const budget = await apiRequest<FinancialBudgetRead>("/commercial/budgets", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: financialBudgetForm.name,
+            fiscal_year: financialBudgetForm.fiscal_year,
+            period_start: financialBudgetForm.period_start,
+            period_end: financialBudgetForm.period_end,
+            budget_type: "operating",
+            scope_type: "organization",
+            currency: financialBudgetForm.currency.toUpperCase(),
+            beginning_cash_balance: financialBudgetForm.beginning_cash_balance,
+            minimum_cash_reserve: financialBudgetForm.minimum_cash_reserve,
+            assumptions: parseCommaList(financialBudgetForm.assumptions),
+            status: "active"
+          }
+        });
+        const revenueLine = await apiRequest<FinancialBudgetLineRead>("/commercial/budgets/lines", {
+          method: "POST",
+          identity,
+          body: {
+            budget_id: budget.id,
+            line_type: "revenue",
+            category: financialBudgetForm.revenue_category,
+            department: "Revenue",
+            amount_budgeted: financialBudgetForm.revenue_budgeted,
+            amount_actual: financialBudgetForm.revenue_actual,
+            forecast_amount: financialBudgetForm.revenue_forecast,
+            cash_timing_month: `${financialBudgetForm.fiscal_year}-03`,
+            funding_source: "member_dues"
+          }
+        });
+        const expenseLine = await apiRequest<FinancialBudgetLineRead>("/commercial/budgets/lines", {
+          method: "POST",
+          identity,
+          body: {
+            budget_id: budget.id,
+            line_type: "expense",
+            category: financialBudgetForm.expense_category,
+            department: "Operations",
+            amount_budgeted: financialBudgetForm.expense_budgeted,
+            amount_actual: financialBudgetForm.expense_actual,
+            forecast_amount: financialBudgetForm.expense_forecast,
+            cash_timing_month: `${financialBudgetForm.fiscal_year}-04`,
+            variance_reason: "Updated from current operating commitments."
+          }
+        });
+        const scenario = await apiRequest<FinancialForecastScenarioRead>("/commercial/budgets/scenarios", {
+          method: "POST",
+          identity,
+          body: {
+            budget_id: budget.id,
+            name: financialBudgetForm.scenario_name,
+            scenario_type: "conservative",
+            revenue_adjustment_percent: financialBudgetForm.revenue_adjustment_percent,
+            expense_adjustment_percent: financialBudgetForm.expense_adjustment_percent,
+            cash_adjustment_amount: financialBudgetForm.cash_adjustment_amount,
+            membership_growth_percent: financialBudgetForm.membership_growth_percent,
+            facility_utilization_percent: financialBudgetForm.facility_utilization_percent,
+            assumptions: ["Scenario created from the finance planning console."]
+          }
+        });
+        const summary = await apiRequest<FinancialBudgetSummaryRead>(
+          `/commercial/budgets/${budget.id}/summary?organization_id=${selectedOrganizationId}`
+        );
+        return { budget, revenueLine, expenseLine, scenario, summary };
+      },
+      ({ budget, revenueLine, expenseLine, scenario, summary }) => {
+        setFinancialBudgets((current) => [budget, ...current.filter((item) => item.id !== budget.id)]);
+        setFinancialBudgetLines([revenueLine, expenseLine]);
+        setFinancialForecastScenarios([scenario]);
+        setFinancialBudgetSummary(summary);
+        setSelectedFinancialBudgetId(budget.id);
+        addLog(`${budget.name} budget scenario ready`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const refreshFinancialBudgetSummary = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before refreshing the budget", "bad");
+      return;
+    }
+    const budgetId = selectedFinancialBudgetId || financialBudgets[0]?.id;
+    if (!budgetId) {
+      addLog("Create or select a financial budget first", "bad");
+      return;
+    }
+    runAction(
+      "refresh-financial-budget-summary",
+      () => loadFinancialBudgetDetails(selectedOrganizationId, budgetId),
+      () => addLog("Budget forecast summary refreshed", "good")
+    );
+  };
+
   const quoteCommercialTax = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -27130,6 +27304,8 @@ export default function HomePage() {
                 <button type="button" onClick={checkInSelectedTicket} disabled={busyAction !== null}>Scan</button>
                 <button type="button" onClick={refundSelectedTicket} disabled={busyAction !== null}>Refund ticket</button>
                 <button type="button" onClick={createInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
+                <button type="button" onClick={createFinancialBudgetPlan} disabled={busyAction !== null}>Budget</button>
+                <button type="button" onClick={refreshFinancialBudgetSummary} disabled={busyAction !== null}>Refresh budget</button>
                 <button type="button" onClick={refundSelectedInvoice} disabled={busyAction !== null}>Refund invoice</button>
                 <button type="button" onClick={quoteCommercialTax} disabled={busyAction !== null}>Tax</button>
                 <button type="button" onClick={fileCommercialTax} disabled={busyAction !== null}>File tax</button>
@@ -27172,6 +27348,22 @@ export default function HomePage() {
               <div>
                 <span className="muted">Outstanding</span>
                 <strong>{commercialSummary?.invoice_outstanding ?? "0.00"}</strong>
+              </div>
+              <div>
+                <span className="muted">Budget revenue</span>
+                <strong>{financialBudgetSummary?.budgeted_revenue ?? "0.00"}</strong>
+              </div>
+              <div>
+                <span className="muted">Actual net</span>
+                <strong>{financialBudgetSummary?.actual_net_income ?? "0.00"}</strong>
+              </div>
+              <div>
+                <span className="muted">Ending cash</span>
+                <strong>{financialBudgetSummary?.ending_cash_position ?? "0.00"}</strong>
+              </div>
+              <div>
+                <span className="muted">Variance alerts</span>
+                <strong>{financialBudgetSummary?.variance_alert_count ?? 0}</strong>
               </div>
             </div>
             <div className="form-grid">
@@ -27279,8 +27471,134 @@ export default function HomePage() {
                 Period end
                 <input type="date" value={invoiceForm.tax_period_end} onChange={(event) => setInvoiceForm({ ...invoiceForm, tax_period_end: event.target.value })} />
               </label>
+              <label>
+                Budget name
+                <input value={financialBudgetForm.name} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, name: event.target.value })} />
+              </label>
+              <label>
+                Fiscal year
+                <input type="number" min="2026" value={financialBudgetForm.fiscal_year} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, fiscal_year: Number(event.target.value) })} />
+              </label>
+              <label>
+                Budget start
+                <input type="date" value={financialBudgetForm.period_start} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, period_start: event.target.value })} />
+              </label>
+              <label>
+                Budget end
+                <input type="date" value={financialBudgetForm.period_end} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, period_end: event.target.value })} />
+              </label>
+              <label>
+                Budget currency
+                <input value={financialBudgetForm.currency} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, currency: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Opening cash
+                <input value={financialBudgetForm.beginning_cash_balance} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, beginning_cash_balance: event.target.value })} />
+              </label>
+              <label>
+                Minimum reserve
+                <input value={financialBudgetForm.minimum_cash_reserve} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, minimum_cash_reserve: event.target.value })} />
+              </label>
+              <label>
+                Assumptions
+                <input value={financialBudgetForm.assumptions} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, assumptions: event.target.value })} />
+              </label>
+              <label>
+                Member dues revenue
+                <input value={financialBudgetForm.revenue_category} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, revenue_category: event.target.value })} />
+              </label>
+              <label>
+                Revenue budget
+                <input value={financialBudgetForm.revenue_budgeted} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, revenue_budgeted: event.target.value })} />
+              </label>
+              <label>
+                Revenue actual
+                <input value={financialBudgetForm.revenue_actual} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, revenue_actual: event.target.value })} />
+              </label>
+              <label>
+                Revenue forecast
+                <input value={financialBudgetForm.revenue_forecast} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, revenue_forecast: event.target.value })} />
+              </label>
+              <label>
+                Operating expense
+                <input value={financialBudgetForm.expense_category} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, expense_category: event.target.value })} />
+              </label>
+              <label>
+                Expense budget
+                <input value={financialBudgetForm.expense_budgeted} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, expense_budgeted: event.target.value })} />
+              </label>
+              <label>
+                Expense actual
+                <input value={financialBudgetForm.expense_actual} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, expense_actual: event.target.value })} />
+              </label>
+              <label>
+                Expense forecast
+                <input value={financialBudgetForm.expense_forecast} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, expense_forecast: event.target.value })} />
+              </label>
+              <label>
+                Scenario
+                <input value={financialBudgetForm.scenario_name} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, scenario_name: event.target.value })} />
+              </label>
+              <label>
+                Revenue lift %
+                <input value={financialBudgetForm.revenue_adjustment_percent} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, revenue_adjustment_percent: event.target.value })} />
+              </label>
+              <label>
+                Expense lift %
+                <input value={financialBudgetForm.expense_adjustment_percent} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, expense_adjustment_percent: event.target.value })} />
+              </label>
+              <label>
+                Cash adjustment
+                <input value={financialBudgetForm.cash_adjustment_amount} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, cash_adjustment_amount: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {financialBudgetSummary ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{financialBudgetSummary.budget_name} forecast</strong>
+                    <span>
+                      Cash {financialBudgetSummary.ending_cash_position} · buffer {financialBudgetSummary.cash_buffer} · runway {financialBudgetSummary.cash_runway_days} days
+                    </span>
+                    <small>{financialBudgetSummary.recommendations[0] ?? "Member dues are club receivables; AfroLete hosting stays in the tenant billing lane."}</small>
+                  </div>
+                </article>
+              ) : null}
+              {financialForecastScenarios.slice(0, 2).map((scenario) => (
+                <article key={scenario.id} className="task-card">
+                  <div>
+                    <strong>{scenario.name}</strong>
+                    <span>Revenue {scenario.projected_revenue} · expense {scenario.projected_expense} · cash {scenario.projected_ending_cash}</span>
+                    <small>{scenario.sensitivity_rank}</small>
+                  </div>
+                </article>
+              ))}
+              {financialBudgetLines.slice(0, 3).map((line) => (
+                <article key={line.id} className="task-card">
+                  <div>
+                    <strong>{line.category} · {line.line_type}</strong>
+                    <span>{line.amount_actual}/{line.amount_budgeted} · variance {line.variance_amount} ({line.variance_percent}%)</span>
+                    <small>{line.funding_source ?? line.department ?? "operations"} · {line.cash_timing_month ?? "no cash month"}</small>
+                  </div>
+                </article>
+              ))}
+              {financialBudgets.slice(0, 3).map((budget) => (
+                <button
+                  type="button"
+                  key={budget.id}
+                  className={`task-card ${budget.id === selectedFinancialBudgetId ? "selected" : ""}`}
+                  onClick={() => {
+                    setSelectedFinancialBudgetId(budget.id);
+                    void loadFinancialBudgetDetails(budget.organization_id, budget.id);
+                  }}
+                >
+                  <div>
+                    <strong>{budget.name}</strong>
+                    <span>{budget.fiscal_year} · {budget.currency} · {budget.line_count} lines · {budget.status}</span>
+                    <small>Club operating budget, separate from AfroLete hosting billing.</small>
+                  </div>
+                </button>
+              ))}
               {taxQuote ? (
                 <article className="task-card">
                   <div>

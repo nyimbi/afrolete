@@ -22,6 +22,9 @@ from app.models.commercial import (
     Donation,
     FinanceInvoice,
     FinancePayment,
+    FinancialBudget,
+    FinancialBudgetLine,
+    FinancialForecastScenario,
     FundraisingCampaign,
     GrantApplication,
     GrantOpportunity,
@@ -70,6 +73,13 @@ from app.schemas.commercial import (
     DonationCreate,
     FinanceInvoiceCreate,
     FinancePaymentCreate,
+    FinancialBudgetCreate,
+    FinancialBudgetLineCreate,
+    FinancialBudgetLineRead,
+    FinancialBudgetRead,
+    FinancialBudgetSummaryRead,
+    FinancialForecastScenarioCreate,
+    FinancialForecastScenarioRead,
     FundraisingCampaignCreate,
     GrantApplicationCreate,
     GrantDashboardRead,
@@ -1696,6 +1706,377 @@ async def record_payment(db: AsyncSession, identity: CurrentIdentity, payload: F
     await db.commit()
     await db.refresh(payment)
     return payment
+
+
+async def create_financial_budget(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FinancialBudgetCreate,
+    authz: AuthorizationService,
+) -> FinancialBudgetRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    budget = FinancialBudget(
+        organization_id=payload.organization_id,
+        name=payload.name,
+        fiscal_year=payload.fiscal_year,
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        budget_type=payload.budget_type,
+        scope_type=payload.scope_type,
+        scope_id=payload.scope_id,
+        currency=payload.currency.upper(),
+        beginning_cash_balance=payload.beginning_cash_balance,
+        minimum_cash_reserve=payload.minimum_cash_reserve,
+        assumptions_json=commercial_json_dumps_list(payload.assumptions),
+        notes=payload.notes,
+        status=payload.status,
+    )
+    db.add(budget)
+    await db.commit()
+    await db.refresh(budget)
+    return await financial_budget_read(db, budget)
+
+
+async def list_financial_budgets(db: AsyncSession, organization_id: UUID) -> list[FinancialBudgetRead]:
+    budgets = (
+        await db.scalars(
+            select(FinancialBudget)
+            .where(FinancialBudget.organization_id == organization_id)
+            .order_by(FinancialBudget.fiscal_year.desc(), FinancialBudget.name)
+        )
+    ).all()
+    return [await financial_budget_read(db, budget) for budget in budgets]
+
+
+async def create_financial_budget_line(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FinancialBudgetLineCreate,
+    authz: AuthorizationService,
+) -> FinancialBudgetLineRead:
+    budget = await get_financial_budget(db, payload.budget_id)
+    await ensure_manage_commercial(authz, identity, budget.organization_id)
+    line = FinancialBudgetLine(
+        organization_id=budget.organization_id,
+        budget_id=budget.id,
+        line_type=payload.line_type,
+        category=payload.category,
+        department=payload.department,
+        amount_budgeted=payload.amount_budgeted,
+        amount_actual=payload.amount_actual,
+        forecast_amount=payload.forecast_amount,
+        cash_timing_month=payload.cash_timing_month,
+        funding_source=payload.funding_source,
+        restricted=payload.restricted,
+        variance_reason=payload.variance_reason,
+        notes=payload.notes,
+        status=payload.status,
+    )
+    db.add(line)
+    await db.commit()
+    await db.refresh(line)
+    return financial_budget_line_read(line)
+
+
+async def list_financial_budget_lines(db: AsyncSession, budget_id: UUID) -> list[FinancialBudgetLineRead]:
+    lines = (
+        await db.scalars(
+            select(FinancialBudgetLine)
+            .where(FinancialBudgetLine.budget_id == budget_id)
+            .order_by(FinancialBudgetLine.line_type.desc(), FinancialBudgetLine.category, FinancialBudgetLine.created_at)
+        )
+    ).all()
+    return [financial_budget_line_read(line) for line in lines]
+
+
+async def create_financial_forecast_scenario(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FinancialForecastScenarioCreate,
+    authz: AuthorizationService,
+) -> FinancialForecastScenarioRead:
+    budget = await get_financial_budget(db, payload.budget_id)
+    await ensure_manage_commercial(authz, identity, budget.organization_id)
+    scenario = FinancialForecastScenario(
+        organization_id=budget.organization_id,
+        budget_id=budget.id,
+        name=payload.name,
+        scenario_type=payload.scenario_type,
+        revenue_adjustment_percent=payload.revenue_adjustment_percent,
+        expense_adjustment_percent=payload.expense_adjustment_percent,
+        cash_adjustment_amount=payload.cash_adjustment_amount,
+        membership_growth_percent=payload.membership_growth_percent,
+        facility_utilization_percent=payload.facility_utilization_percent,
+        assumptions_json=commercial_json_dumps_list(payload.assumptions),
+        status=payload.status,
+    )
+    db.add(scenario)
+    await db.commit()
+    await db.refresh(scenario)
+    lines = await financial_budget_line_models(db, budget.id)
+    return financial_forecast_scenario_read(scenario, budget, lines)
+
+
+async def list_financial_forecast_scenarios(db: AsyncSession, budget_id: UUID) -> list[FinancialForecastScenarioRead]:
+    budget = await get_financial_budget(db, budget_id)
+    lines = await financial_budget_line_models(db, budget_id)
+    scenarios = (
+        await db.scalars(
+            select(FinancialForecastScenario)
+            .where(FinancialForecastScenario.budget_id == budget_id)
+            .order_by(FinancialForecastScenario.scenario_type, FinancialForecastScenario.name)
+        )
+    ).all()
+    return [financial_forecast_scenario_read(scenario, budget, lines) for scenario in scenarios]
+
+
+async def financial_budget_summary(db: AsyncSession, organization_id: UUID, budget_id: UUID) -> FinancialBudgetSummaryRead:
+    budget = await get_financial_budget(db, budget_id)
+    if budget.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial budget not found")
+    lines = await financial_budget_line_models(db, budget_id)
+    scenarios = await list_financial_forecast_scenarios(db, budget_id)
+    totals = financial_budget_totals(lines)
+    ending_cash = (budget.beginning_cash_balance + totals["actual_net"]).quantize(Decimal("0.01"))
+    cash_buffer = (ending_cash - budget.minimum_cash_reserve).quantize(Decimal("0.01"))
+    runway_days = financial_cash_runway_days(budget, totals["actual_expense"], totals["budgeted_expense"], ending_cash)
+    variance_alerts = [
+        line
+        for line in lines
+        if abs(financial_budget_line_variance_percent(line) or Decimal("0")) >= Decimal("10")
+    ]
+    return FinancialBudgetSummaryRead(
+        organization_id=organization_id,
+        budget_id=budget.id,
+        budget_name=budget.name,
+        currency=budget.currency,
+        budgeted_revenue=totals["budgeted_revenue"],
+        actual_revenue=totals["actual_revenue"],
+        forecast_revenue=totals["forecast_revenue"],
+        budgeted_expense=totals["budgeted_expense"],
+        actual_expense=totals["actual_expense"],
+        forecast_expense=totals["forecast_expense"],
+        budgeted_net_income=totals["budgeted_net"],
+        actual_net_income=totals["actual_net"],
+        forecast_net_income=totals["forecast_net"],
+        revenue_variance=(totals["actual_revenue"] - totals["budgeted_revenue"]).quantize(Decimal("0.01")),
+        expense_variance=(totals["budgeted_expense"] - totals["actual_expense"]).quantize(Decimal("0.01")),
+        net_variance=(totals["actual_net"] - totals["budgeted_net"]).quantize(Decimal("0.01")),
+        ending_cash_position=ending_cash,
+        minimum_cash_reserve=budget.minimum_cash_reserve,
+        cash_buffer=cash_buffer,
+        cash_runway_days=runway_days,
+        variance_alert_count=len(variance_alerts),
+        scenario_count=len(scenarios),
+        scenarios=scenarios,
+        recommendations=financial_budget_recommendations(budget, totals, cash_buffer, variance_alerts, scenarios),
+    )
+
+
+async def get_financial_budget(db: AsyncSession, budget_id: UUID) -> FinancialBudget:
+    budget = await db.get(FinancialBudget, budget_id)
+    if budget is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial budget not found")
+    return budget
+
+
+async def financial_budget_read(db: AsyncSession, budget: FinancialBudget) -> FinancialBudgetRead:
+    line_count = await db.scalar(
+        select(func.count(FinancialBudgetLine.id)).where(FinancialBudgetLine.budget_id == budget.id)
+    )
+    return FinancialBudgetRead(
+        id=budget.id,
+        organization_id=budget.organization_id,
+        name=budget.name,
+        fiscal_year=budget.fiscal_year,
+        period_start=budget.period_start,
+        period_end=budget.period_end,
+        budget_type=budget.budget_type,
+        scope_type=budget.scope_type,
+        scope_id=budget.scope_id,
+        currency=budget.currency,
+        beginning_cash_balance=budget.beginning_cash_balance,
+        minimum_cash_reserve=budget.minimum_cash_reserve,
+        assumptions=commercial_json_loads_list(budget.assumptions_json),
+        notes=budget.notes,
+        status=budget.status,
+        line_count=int(line_count or 0),
+    )
+
+
+async def financial_budget_line_models(db: AsyncSession, budget_id: UUID) -> list[FinancialBudgetLine]:
+    return list(
+        (
+            await db.scalars(
+                select(FinancialBudgetLine)
+                .where(FinancialBudgetLine.budget_id == budget_id)
+                .order_by(FinancialBudgetLine.line_type.desc(), FinancialBudgetLine.category)
+            )
+        ).all()
+    )
+
+
+def financial_budget_line_read(line: FinancialBudgetLine) -> FinancialBudgetLineRead:
+    return FinancialBudgetLineRead(
+        id=line.id,
+        organization_id=line.organization_id,
+        budget_id=line.budget_id,
+        line_type=line.line_type,
+        category=line.category,
+        department=line.department,
+        amount_budgeted=line.amount_budgeted,
+        amount_actual=line.amount_actual,
+        forecast_amount=line.forecast_amount,
+        cash_timing_month=line.cash_timing_month,
+        funding_source=line.funding_source,
+        restricted=line.restricted,
+        variance_reason=line.variance_reason,
+        notes=line.notes,
+        status=line.status,
+        variance_amount=financial_budget_line_variance(line),
+        variance_percent=financial_budget_line_variance_percent(line),
+    )
+
+
+def financial_budget_line_variance(line: FinancialBudgetLine) -> Decimal:
+    if line.line_type == "expense":
+        return (line.amount_budgeted - line.amount_actual).quantize(Decimal("0.01"))
+    return (line.amount_actual - line.amount_budgeted).quantize(Decimal("0.01"))
+
+
+def financial_budget_line_variance_percent(line: FinancialBudgetLine) -> Decimal | None:
+    if line.amount_budgeted == Decimal("0"):
+        return None
+    return ((financial_budget_line_variance(line) / line.amount_budgeted) * Decimal("100")).quantize(Decimal("0.01"))
+
+
+def financial_budget_totals(lines: list[FinancialBudgetLine]) -> dict[str, Decimal]:
+    revenue_lines = [line for line in lines if line.line_type == "revenue" and line.status == "active"]
+    expense_lines = [line for line in lines if line.line_type == "expense" and line.status == "active"]
+    budgeted_revenue = sum((line.amount_budgeted for line in revenue_lines), Decimal("0")).quantize(Decimal("0.01"))
+    actual_revenue = sum((line.amount_actual for line in revenue_lines), Decimal("0")).quantize(Decimal("0.01"))
+    forecast_revenue = sum((line.forecast_amount or line.amount_actual or line.amount_budgeted for line in revenue_lines), Decimal("0")).quantize(Decimal("0.01"))
+    budgeted_expense = sum((line.amount_budgeted for line in expense_lines), Decimal("0")).quantize(Decimal("0.01"))
+    actual_expense = sum((line.amount_actual for line in expense_lines), Decimal("0")).quantize(Decimal("0.01"))
+    forecast_expense = sum((line.forecast_amount or line.amount_actual or line.amount_budgeted for line in expense_lines), Decimal("0")).quantize(Decimal("0.01"))
+    return {
+        "budgeted_revenue": budgeted_revenue,
+        "actual_revenue": actual_revenue,
+        "forecast_revenue": forecast_revenue,
+        "budgeted_expense": budgeted_expense,
+        "actual_expense": actual_expense,
+        "forecast_expense": forecast_expense,
+        "budgeted_net": (budgeted_revenue - budgeted_expense).quantize(Decimal("0.01")),
+        "actual_net": (actual_revenue - actual_expense).quantize(Decimal("0.01")),
+        "forecast_net": (forecast_revenue - forecast_expense).quantize(Decimal("0.01")),
+    }
+
+
+def financial_forecast_scenario_read(
+    scenario: FinancialForecastScenario,
+    budget: FinancialBudget,
+    lines: list[FinancialBudgetLine],
+) -> FinancialForecastScenarioRead:
+    totals = financial_budget_totals(lines)
+    projected_revenue = apply_percent_adjustment(totals["forecast_revenue"], scenario.revenue_adjustment_percent)
+    projected_expense = apply_percent_adjustment(totals["forecast_expense"], scenario.expense_adjustment_percent)
+    projected_net = (projected_revenue - projected_expense).quantize(Decimal("0.01"))
+    projected_cash = (budget.beginning_cash_balance + projected_net + scenario.cash_adjustment_amount).quantize(Decimal("0.01"))
+    reserve_gap = max(Decimal("0"), (budget.minimum_cash_reserve - projected_cash).quantize(Decimal("0.01")))
+    return FinancialForecastScenarioRead(
+        id=scenario.id,
+        organization_id=scenario.organization_id,
+        budget_id=scenario.budget_id,
+        name=scenario.name,
+        scenario_type=scenario.scenario_type,
+        revenue_adjustment_percent=scenario.revenue_adjustment_percent,
+        expense_adjustment_percent=scenario.expense_adjustment_percent,
+        cash_adjustment_amount=scenario.cash_adjustment_amount,
+        membership_growth_percent=scenario.membership_growth_percent,
+        facility_utilization_percent=scenario.facility_utilization_percent,
+        assumptions=commercial_json_loads_list(scenario.assumptions_json),
+        status=scenario.status,
+        projected_revenue=projected_revenue,
+        projected_expense=projected_expense,
+        projected_net_income=projected_net,
+        projected_ending_cash=projected_cash,
+        reserve_gap=reserve_gap,
+        sensitivity_rank=financial_sensitivity_rank(scenario),
+    )
+
+
+def apply_percent_adjustment(amount: Decimal, percent: Decimal) -> Decimal:
+    return (amount * (Decimal("1") + (percent / Decimal("100")))).quantize(Decimal("0.01"))
+
+
+def financial_sensitivity_rank(scenario: FinancialForecastScenario) -> list[str]:
+    values = [
+        ("membership growth", abs(scenario.membership_growth_percent)),
+        ("revenue adjustment", abs(scenario.revenue_adjustment_percent)),
+        ("expense adjustment", abs(scenario.expense_adjustment_percent)),
+        ("cash adjustment", abs(scenario.cash_adjustment_amount / Decimal("1000"))),
+        (
+            "facility utilization",
+            abs(scenario.facility_utilization_percent or Decimal("0")),
+        ),
+    ]
+    return [name for name, value in sorted(values, key=lambda item: item[1], reverse=True) if value > 0][:4]
+
+
+def financial_cash_runway_days(
+    budget: FinancialBudget,
+    actual_expense: Decimal,
+    budgeted_expense: Decimal,
+    ending_cash: Decimal,
+) -> int | None:
+    expense_base = actual_expense if actual_expense > 0 else budgeted_expense
+    if expense_base <= 0:
+        return None
+    days = max((budget.period_end - budget.period_start).days + 1, 1)
+    daily_expense = expense_base / Decimal(days)
+    if daily_expense <= 0:
+        return None
+    return max(0, int(ending_cash / daily_expense))
+
+
+def financial_budget_recommendations(
+    budget: FinancialBudget,
+    totals: dict[str, Decimal],
+    cash_buffer: Decimal,
+    variance_alerts: list[FinancialBudgetLine],
+    scenarios: list[FinancialForecastScenarioRead],
+) -> list[str]:
+    recommendations: list[str] = []
+    if not totals["budgeted_revenue"] and not totals["budgeted_expense"]:
+        recommendations.append("Add revenue and expense budget lines before approving this budget.")
+    if totals["actual_net"] < totals["budgeted_net"]:
+        recommendations.append("Net income is behind budget; review underperforming revenue and over-budget expenses.")
+    if variance_alerts:
+        recommendations.append(f"Review {len(variance_alerts)} budget line(s) with variance beyond 10%.")
+    if cash_buffer < 0:
+        recommendations.append("Projected cash is below the minimum reserve; defer discretionary spend or accelerate collections.")
+    if not scenarios:
+        recommendations.append("Create optimistic, conservative, or stress scenarios before board approval.")
+    if not recommendations:
+        recommendations.append(f"{budget.name} is tracking within the current financial guardrails.")
+    return recommendations
+
+
+def commercial_json_dumps_list(values: list[str]) -> str:
+    return json.dumps([value.strip() for value in values if value.strip()])
+
+
+def commercial_json_loads_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item).strip()]
 
 
 async def get_commercial_invoice_hosted_checkout(

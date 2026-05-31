@@ -4815,6 +4815,93 @@ export type FinancePaymentRead = {
   notes: string | null;
 };
 
+export type FinancialBudgetRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  fiscal_year: number;
+  period_start: string;
+  period_end: string;
+  budget_type: string;
+  scope_type: string;
+  scope_id: UUID | null;
+  currency: string;
+  beginning_cash_balance: string;
+  minimum_cash_reserve: string;
+  assumptions: string[];
+  notes: string | null;
+  status: string;
+  line_count: number;
+};
+
+export type FinancialBudgetLineRead = {
+  id: UUID;
+  organization_id: UUID;
+  budget_id: UUID;
+  line_type: "revenue" | "expense";
+  category: string;
+  department: string | null;
+  amount_budgeted: string;
+  amount_actual: string;
+  forecast_amount: string | null;
+  cash_timing_month: string | null;
+  funding_source: string | null;
+  restricted: boolean;
+  variance_reason: string | null;
+  notes: string | null;
+  status: string;
+  variance_amount: string;
+  variance_percent: string | null;
+};
+
+export type FinancialForecastScenarioRead = {
+  id: UUID;
+  organization_id: UUID;
+  budget_id: UUID;
+  name: string;
+  scenario_type: string;
+  revenue_adjustment_percent: string;
+  expense_adjustment_percent: string;
+  cash_adjustment_amount: string;
+  membership_growth_percent: string;
+  facility_utilization_percent: string | null;
+  assumptions: string[];
+  status: string;
+  projected_revenue: string;
+  projected_expense: string;
+  projected_net_income: string;
+  projected_ending_cash: string;
+  reserve_gap: string;
+  sensitivity_rank: string[];
+};
+
+export type FinancialBudgetSummaryRead = {
+  organization_id: UUID;
+  budget_id: UUID;
+  budget_name: string;
+  currency: string;
+  budgeted_revenue: string;
+  actual_revenue: string;
+  forecast_revenue: string;
+  budgeted_expense: string;
+  actual_expense: string;
+  forecast_expense: string;
+  budgeted_net_income: string;
+  actual_net_income: string;
+  forecast_net_income: string;
+  revenue_variance: string;
+  expense_variance: string;
+  net_variance: string;
+  ending_cash_position: string;
+  minimum_cash_reserve: string;
+  cash_buffer: string;
+  cash_runway_days: number | null;
+  variance_alert_count: number;
+  scenario_count: number;
+  scenarios: FinancialForecastScenarioRead[];
+  recommendations: string[];
+};
+
 export type CommercialRefundRead = {
   refund_id: string;
   organization_id: UUID;

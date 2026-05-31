@@ -43,6 +43,114 @@ def create_commercial_context(client, identity_headers):
     return organization, team, event
 
 
+def test_financial_budget_planning_tracks_variance_cash_and_scenarios(client, identity_headers) -> None:
+    organization, _, _ = create_commercial_context(client, identity_headers)
+
+    budget_response = client.post(
+        "/api/v1/commercial/budgets",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Club operating budget 2026",
+            "fiscal_year": 2026,
+            "period_start": "2026-01-01",
+            "period_end": "2026-12-31",
+            "budget_type": "operating",
+            "scope_type": "organization",
+            "currency": "KES",
+            "beginning_cash_balance": "45000.00",
+            "minimum_cash_reserve": "20000.00",
+            "assumptions": ["Membership growth 12%", "Sponsor renewals on time"],
+            "status": "active",
+        },
+    )
+    assert budget_response.status_code == 201
+    budget = budget_response.json()
+    assert budget["currency"] == "KES"
+    assert budget["assumptions"] == ["Membership growth 12%", "Sponsor renewals on time"]
+
+    revenue_response = client.post(
+        "/api/v1/commercial/budgets/lines",
+        headers=identity_headers,
+        json={
+            "budget_id": budget["id"],
+            "line_type": "revenue",
+            "category": "Membership dues",
+            "department": "Membership",
+            "amount_budgeted": "90000.00",
+            "amount_actual": "92450.00",
+            "forecast_amount": "99000.00",
+            "cash_timing_month": "2026-03",
+            "funding_source": "member_dues",
+        },
+    )
+    assert revenue_response.status_code == 201
+    assert revenue_response.json()["variance_amount"] == "2450.00"
+
+    expense_response = client.post(
+        "/api/v1/commercial/budgets/lines",
+        headers=identity_headers,
+        json={
+            "budget_id": budget["id"],
+            "line_type": "expense",
+            "category": "Travel",
+            "department": "Competition",
+            "amount_budgeted": "25000.00",
+            "amount_actual": "26800.00",
+            "forecast_amount": "30000.00",
+            "cash_timing_month": "2026-04",
+            "variance_reason": "Regional finals required an additional away trip.",
+        },
+    )
+    assert expense_response.status_code == 201
+    assert expense_response.json()["variance_amount"] == "-1800.00"
+
+    scenario_response = client.post(
+        "/api/v1/commercial/budgets/scenarios",
+        headers=identity_headers,
+        json={
+            "budget_id": budget["id"],
+            "name": "New training facility conservative",
+            "scenario_type": "conservative",
+            "revenue_adjustment_percent": "15.00",
+            "expense_adjustment_percent": "28.00",
+            "cash_adjustment_amount": "-10000.00",
+            "membership_growth_percent": "15.00",
+            "facility_utilization_percent": "62.50",
+            "assumptions": ["One new team", "Moderate rental demand"],
+        },
+    )
+    assert scenario_response.status_code == 201
+    scenario = scenario_response.json()
+    assert scenario["projected_revenue"] == "113850.00"
+    assert scenario["projected_expense"] == "38400.00"
+    assert "facility utilization" in scenario["sensitivity_rank"]
+
+    list_response = client.get(
+        f"/api/v1/commercial/budgets?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["line_count"] == 2
+
+    summary_response = client.get(
+        f"/api/v1/commercial/budgets/{budget['id']}/summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["budgeted_revenue"] == "90000.00"
+    assert summary["actual_revenue"] == "92450.00"
+    assert summary["budgeted_expense"] == "25000.00"
+    assert summary["actual_expense"] == "26800.00"
+    assert summary["actual_net_income"] == "65650.00"
+    assert summary["ending_cash_position"] == "110650.00"
+    assert summary["cash_buffer"] == "90650.00"
+    assert summary["variance_alert_count"] == 0
+    assert summary["scenario_count"] == 1
+    assert summary["scenarios"][0]["name"] == "New training facility conservative"
+
+
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,
     identity_headers,

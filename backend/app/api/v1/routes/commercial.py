@@ -28,6 +28,13 @@ from app.schemas.commercial import (
     FinanceInvoiceRead,
     FinancePaymentCreate,
     FinancePaymentRead,
+    FinancialBudgetCreate,
+    FinancialBudgetLineCreate,
+    FinancialBudgetLineRead,
+    FinancialBudgetRead,
+    FinancialBudgetSummaryRead,
+    FinancialForecastScenarioCreate,
+    FinancialForecastScenarioRead,
     FundraisingCampaignCreate,
     FundraisingCampaignRead,
     GrantApplicationCreate,
@@ -99,6 +106,9 @@ from app.services.commercial import (
     create_grant_opportunity,
     create_grant_report,
     create_invoice,
+    create_financial_budget,
+    create_financial_budget_line,
+    create_financial_forecast_scenario,
     create_merchandise_order,
     create_merchandise_product,
     create_commercial_invoice_provider_checkout,
@@ -118,8 +128,12 @@ from app.services.commercial import (
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
     issue_complimentary_tickets,
+    financial_budget_summary,
     list_commercial_settlement_payouts,
     list_campaigns,
+    list_financial_budget_lines,
+    list_financial_budgets,
+    list_financial_forecast_scenarios,
     list_grant_applications,
     list_grant_opportunities,
     list_grant_reports,
@@ -934,6 +948,69 @@ async def record_payment_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> FinancePaymentRead:
     return payment_read(await record_payment(db, identity, payload, authz))
+
+
+@router.post("/budgets", response_model=FinancialBudgetRead, status_code=status.HTTP_201_CREATED)
+async def create_financial_budget_route(
+    payload: FinancialBudgetCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FinancialBudgetRead:
+    return await create_financial_budget(db, identity, payload, authz)
+
+
+@router.get("/budgets", response_model=list[FinancialBudgetRead])
+async def list_financial_budgets_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[FinancialBudgetRead]:
+    return await list_financial_budgets(db, organization_id)
+
+
+@router.post("/budgets/lines", response_model=FinancialBudgetLineRead, status_code=status.HTTP_201_CREATED)
+async def create_financial_budget_line_route(
+    payload: FinancialBudgetLineCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FinancialBudgetLineRead:
+    return await create_financial_budget_line(db, identity, payload, authz)
+
+
+@router.get("/budgets/{budget_id}/lines", response_model=list[FinancialBudgetLineRead])
+async def list_financial_budget_lines_route(
+    budget_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[FinancialBudgetLineRead]:
+    return await list_financial_budget_lines(db, budget_id)
+
+
+@router.post("/budgets/scenarios", response_model=FinancialForecastScenarioRead, status_code=status.HTTP_201_CREATED)
+async def create_financial_forecast_scenario_route(
+    payload: FinancialForecastScenarioCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FinancialForecastScenarioRead:
+    return await create_financial_forecast_scenario(db, identity, payload, authz)
+
+
+@router.get("/budgets/{budget_id}/scenarios", response_model=list[FinancialForecastScenarioRead])
+async def list_financial_forecast_scenarios_route(
+    budget_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[FinancialForecastScenarioRead]:
+    return await list_financial_forecast_scenarios(db, budget_id)
+
+
+@router.get("/budgets/{budget_id}/summary", response_model=FinancialBudgetSummaryRead)
+async def financial_budget_summary_route(
+    budget_id: UUID,
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> FinancialBudgetSummaryRead:
+    return await financial_budget_summary(db, organization_id, budget_id)
 
 
 @router.get("/tax-quote", response_model=TaxQuoteRead)
