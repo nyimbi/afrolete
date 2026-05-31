@@ -44,6 +44,10 @@ from app.schemas.organization import (
     OrganizationDataMigrationRunRead,
     OrganizationCreate,
     OrganizationDirectoryRead,
+    OrganizationExternalReportCreate,
+    OrganizationExternalReportRead,
+    OrganizationExternalReportStatusUpdate,
+    OrganizationExternalReportSummaryRead,
     OrganizationGroupCreate,
     OrganizationGroupMemberAdd,
     OrganizationGroupMembershipRead,
@@ -120,6 +124,7 @@ from app.services.organizations import (
     create_compliance_document_version,
     create_data_migration_project,
     create_data_migration_run,
+    create_organization_external_report,
     create_recovery_drill,
     create_recovery_plan,
     add_organization_group_member,
@@ -141,6 +146,7 @@ from app.services.organizations import (
     get_public_site,
     ensure_manage_organization,
     import_registration_inquiries,
+    organization_external_report_summary,
     organization_handle_availability,
     organization_market_profile_summary,
     list_family_registration_inquiries,
@@ -154,6 +160,7 @@ from app.services.organizations import (
     list_data_migration_runs,
     list_compliance_documents,
     list_compliance_document_versions,
+    list_organization_external_reports,
     list_organization_group_members,
     list_organization_groups,
     list_organization_programs,
@@ -178,6 +185,7 @@ from app.services.organizations import (
     registration_onboarding_presets,
     registration_readiness,
     record_member_subscription_payment,
+    update_organization_external_report_status,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
     settle_registration_payment_checkout,
@@ -1939,6 +1947,56 @@ async def market_profile_summary_route(
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationMarketProfileSummaryRead:
     return await organization_market_profile_summary(db, organization_id)
+
+
+@router.post(
+    "/{organization_id}/external-reports",
+    response_model=OrganizationExternalReportRead,
+    status_code=201,
+)
+async def create_external_report_route(
+    organization_id: UUID,
+    payload: OrganizationExternalReportCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationExternalReportRead:
+    return await create_organization_external_report(db, identity, organization_id, payload, authz)
+
+
+@router.get(
+    "/{organization_id}/external-reports/summary",
+    response_model=OrganizationExternalReportSummaryRead,
+)
+async def external_report_summary_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> OrganizationExternalReportSummaryRead:
+    return await organization_external_report_summary(db, organization_id)
+
+
+@router.get("/{organization_id}/external-reports", response_model=list[OrganizationExternalReportRead])
+async def list_external_reports_route(
+    organization_id: UUID,
+    status_filter: str | None = Query(default=None),
+    target_type: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationExternalReportRead]:
+    return await list_organization_external_reports(db, organization_id, status_filter, target_type)
+
+
+@router.patch(
+    "/external-reports/{report_id}/status",
+    response_model=OrganizationExternalReportRead,
+)
+async def update_external_report_status_route(
+    report_id: UUID,
+    payload: OrganizationExternalReportStatusUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationExternalReportRead:
+    return await update_organization_external_report_status(db, identity, report_id, payload, authz)
 
 
 def to_committee_read(committee) -> CommitteeRead:

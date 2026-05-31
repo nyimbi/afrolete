@@ -61,6 +61,7 @@ from app.models.organization import (
     OrganizationComplianceDocumentVersion,
     OrganizationDataMigrationProject,
     OrganizationDataMigrationRun,
+    OrganizationExternalReport,
     OrganizationGroup,
     OrganizationGroupMembership,
     OrganizationMarketProfile,
@@ -90,6 +91,10 @@ from app.schemas.organization import (
     OrganizationComplianceDocumentSummaryRead,
     OrganizationDataMigrationProjectCreate,
     OrganizationDataMigrationRunCreate,
+    OrganizationExternalReportCreate,
+    OrganizationExternalReportRead,
+    OrganizationExternalReportStatusUpdate,
+    OrganizationExternalReportSummaryRead,
     OrganizationGroupCreate,
     OrganizationGroupMemberAdd,
     OrganizationMarketProfileCreate,
@@ -4886,6 +4891,235 @@ def organization_market_profile_read(profile: OrganizationMarketProfile) -> Orga
         federation_reporting_templates=json_loads_list(profile.federation_reporting_templates_json),
         compliance_notes=profile.compliance_notes,
         status=profile.status,
+    )
+
+
+async def create_organization_external_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationExternalReportCreate,
+    authz: AuthorizationService,
+) -> OrganizationExternalReportRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    market_profile = await organization_external_report_market_profile(db, organization_id, payload.market_profile_id)
+    report = OrganizationExternalReport(
+        organization_id=organization_id,
+        market_profile_id=market_profile.id if market_profile else None,
+        name=payload.name,
+        report_code=payload.report_code,
+        report_type=payload.report_type,
+        target_agency=payload.target_agency,
+        target_type=payload.target_type,
+        reporting_period_start=payload.reporting_period_start,
+        reporting_period_end=payload.reporting_period_end,
+        due_on=payload.due_on,
+        submission_format=payload.submission_format,
+        data_elements_json=json_dumps_list(payload.data_elements),
+        source_summary=payload.source_summary
+        or "External report generated from tenant registrations, rosters, finance, safety, and compliance records.",
+        generated_payload=payload.generated_payload
+        or organization_external_report_generated_payload(payload, organization_id, market_profile),
+        submission_payload=payload.submission_payload,
+        status=payload.status,
+        external_reference=payload.external_reference,
+        submitted_at=payload.submitted_at,
+        accepted_at=payload.accepted_at,
+        rejection_reason=payload.rejection_reason,
+        notes=payload.notes,
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return organization_external_report_read(report, market_profile.name if market_profile else None)
+
+
+async def list_organization_external_reports(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: str | None = None,
+    target_type: str | None = None,
+) -> list[OrganizationExternalReportRead]:
+    statement = (
+        select(OrganizationExternalReport, OrganizationMarketProfile.name)
+        .outerjoin(
+            OrganizationMarketProfile,
+            OrganizationMarketProfile.id == OrganizationExternalReport.market_profile_id,
+        )
+        .where(OrganizationExternalReport.organization_id == organization_id)
+        .order_by(
+            OrganizationExternalReport.status,
+            OrganizationExternalReport.due_on.asc(),
+            OrganizationExternalReport.target_agency,
+        )
+    )
+    if status_filter:
+        statement = statement.where(OrganizationExternalReport.status == status_filter)
+    if target_type:
+        statement = statement.where(OrganizationExternalReport.target_type == target_type)
+    return [
+        organization_external_report_read(report, market_profile_name)
+        for report, market_profile_name in (await db.execute(statement)).all()
+    ]
+
+
+async def update_organization_external_report_status(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    report_id: UUID,
+    payload: OrganizationExternalReportStatusUpdate,
+    authz: AuthorizationService,
+) -> OrganizationExternalReportRead:
+    report = await db.get(OrganizationExternalReport, report_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="External report not found")
+    await ensure_manage_organization(db, identity, report.organization_id, authz)
+    report.status = payload.status
+    for field in ("external_reference", "rejection_reason", "submission_payload", "notes"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(report, field, value)
+    now = datetime.now(UTC)
+    if payload.submitted_at is not None:
+        report.submitted_at = payload.submitted_at
+    elif payload.status in {"submitted", "accepted"} and report.submitted_at is None:
+        report.submitted_at = now
+    if payload.accepted_at is not None:
+        report.accepted_at = payload.accepted_at
+    elif payload.status == "accepted" and report.accepted_at is None:
+        report.accepted_at = now
+    await db.commit()
+    await db.refresh(report)
+    market_profile = await db.get(OrganizationMarketProfile, report.market_profile_id) if report.market_profile_id else None
+    return organization_external_report_read(report, market_profile.name if market_profile else None)
+
+
+async def organization_external_report_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> OrganizationExternalReportSummaryRead:
+    reports = await list_organization_external_reports(db, organization_id)
+    today = date.today()
+    target_type_counts: dict[str, int] = {}
+    for report in reports:
+        target_type_counts[report.target_type] = target_type_counts.get(report.target_type, 0) + 1
+    overdue_reports = [
+        report
+        for report in reports
+        if report.due_on < today and report.status not in {"submitted", "accepted", "cancelled"}
+    ]
+    upcoming_reports = [
+        report
+        for report in reports
+        if 0 <= (report.due_on - today).days <= 14 and report.status in {"draft", "ready"}
+    ]
+    next_actions: list[str] = []
+    if not reports:
+        next_actions.append("Create government and federation reporting obligations for this tenant.")
+    if overdue_reports:
+        next_actions.append(f"Resolve {len(overdue_reports)} overdue external reporting submission(s).")
+    if upcoming_reports:
+        next_actions.append(f"Prepare {len(upcoming_reports)} report(s) due in the next 14 days.")
+    if not any(report.target_type == "federation" for report in reports):
+        next_actions.append("Add federation reporting templates for club licensing and competition eligibility.")
+    if not any(report.target_type == "government" for report in reports):
+        next_actions.append("Add government reporting templates for statutory compliance.")
+    return OrganizationExternalReportSummaryRead(
+        organization_id=organization_id,
+        total_reports=len(reports),
+        submitted_reports=sum(1 for report in reports if report.status == "submitted"),
+        accepted_reports=sum(1 for report in reports if report.status == "accepted"),
+        rejected_reports=sum(1 for report in reports if report.status == "rejected"),
+        overdue_reports=len(overdue_reports),
+        upcoming_reports=len(upcoming_reports),
+        target_type_counts=target_type_counts,
+        next_actions=next_actions or ["External reporting register is current."],
+    )
+
+
+async def organization_external_report_market_profile(
+    db: AsyncSession,
+    organization_id: UUID,
+    market_profile_id: UUID | None,
+) -> OrganizationMarketProfile | None:
+    if market_profile_id is None:
+        return None
+    market_profile = await db.get(OrganizationMarketProfile, market_profile_id)
+    if market_profile is None or market_profile.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Market profile not found")
+    return market_profile
+
+
+def organization_external_report_generated_payload(
+    payload: OrganizationExternalReportCreate,
+    organization_id: UUID,
+    market_profile: OrganizationMarketProfile | None,
+) -> str:
+    return json.dumps(
+        {
+            "organization_id": str(organization_id),
+            "report": {
+                "name": payload.name,
+                "report_code": payload.report_code,
+                "report_type": payload.report_type,
+                "target_agency": payload.target_agency,
+                "target_type": payload.target_type,
+                "period_start": payload.reporting_period_start.isoformat(),
+                "period_end": payload.reporting_period_end.isoformat(),
+                "due_on": payload.due_on.isoformat(),
+                "submission_format": payload.submission_format,
+                "data_elements": payload.data_elements,
+            },
+            "market": None
+            if market_profile is None
+            else {
+                "name": market_profile.name,
+                "country_code": market_profile.country_code,
+                "region_code": market_profile.region_code,
+                "timezone": market_profile.timezone,
+                "currency": market_profile.reporting_currency,
+                "payment_methods": json_loads_list(market_profile.supported_payment_methods_json),
+                "government_reporting_agencies": json_loads_list(
+                    market_profile.government_reporting_agencies_json
+                ),
+                "federation_reporting_templates": json_loads_list(
+                    market_profile.federation_reporting_templates_json
+                ),
+            },
+        },
+        sort_keys=True,
+    )
+
+
+def organization_external_report_read(
+    report: OrganizationExternalReport,
+    market_profile_name: str | None = None,
+) -> OrganizationExternalReportRead:
+    return OrganizationExternalReportRead(
+        id=report.id,
+        organization_id=report.organization_id,
+        market_profile_id=report.market_profile_id,
+        market_profile_name=market_profile_name,
+        name=report.name,
+        report_code=report.report_code,
+        report_type=report.report_type,
+        target_agency=report.target_agency,
+        target_type=report.target_type,
+        reporting_period_start=report.reporting_period_start,
+        reporting_period_end=report.reporting_period_end,
+        due_on=report.due_on,
+        submission_format=report.submission_format,
+        data_elements=json_loads_list(report.data_elements_json),
+        source_summary=report.source_summary,
+        generated_payload=report.generated_payload,
+        submission_payload=report.submission_payload,
+        status=report.status,
+        external_reference=report.external_reference,
+        submitted_at=report.submitted_at,
+        accepted_at=report.accepted_at,
+        rejection_reason=report.rejection_reason,
+        notes=report.notes,
+        days_until_due=(report.due_on - date.today()).days,
     )
 
 

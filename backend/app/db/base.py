@@ -195,6 +195,7 @@ from app.models.organization import (  # noqa: F401,E402
     OrganizationComplianceDocumentVersion,
     OrganizationDataMigrationProject,
     OrganizationDataMigrationRun,
+    OrganizationExternalReport,
     OrganizationGroup,
     OrganizationGroupMembership,
     OrganizationMarketProfile,

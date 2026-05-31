@@ -1,3 +1,4 @@
+import json
 from base64 import b64encode
 
 from app.services.authz.service import authorization_service
@@ -275,6 +276,108 @@ def test_organization_market_profiles_localize_payments_tax_and_reporting(client
     assert summary["tax_authorities"] == ["Kenya Revenue Authority"]
     assert summary["compliance_ready"] is True
     assert summary["next_actions"] == ["Market localization profile is operationally ready."]
+
+
+def test_external_reporting_register_tracks_government_and_federation_submissions(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Reporting Obligations FC",
+            "organization_type": "club",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+    profile = client.post(
+        f"/api/v1/organizations/{organization['id']}/market-profiles",
+        headers=identity_headers,
+        json={
+            "name": "Kenya reporting market",
+            "country_code": "KE",
+            "region_code": "Nairobi",
+            "locale": "en-KE",
+            "timezone": "Africa/Nairobi",
+            "default_currency": "KES",
+            "reporting_currency": "KES",
+            "primary_payment_method": "mpesa",
+            "supported_payment_methods": ["mpesa", "bank_transfer"],
+            "mobile_money_providers": ["M-Pesa"],
+            "tax_authority": "Kenya Revenue Authority",
+            "government_reporting_agencies": ["Sports Registrar"],
+            "federation_reporting_templates": ["FKF monthly player registration"],
+        },
+    ).json()
+
+    create_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/external-reports",
+        headers=identity_headers,
+        json={
+            "market_profile_id": profile["id"],
+            "name": "FKF Monthly Player Registration",
+            "report_code": "fkf-monthly-player-registration",
+            "report_type": "player_registration",
+            "target_agency": "Football Kenya Federation",
+            "target_type": "federation",
+            "reporting_period_start": "2026-06-01",
+            "reporting_period_end": "2026-06-30",
+            "due_on": "2026-07-05",
+            "submission_format": "xml",
+            "data_elements": ["player_bio", "transfer_clearance", "team_roster"],
+            "status": "ready",
+        },
+    )
+    assert create_response.status_code == 201
+    report = create_response.json()
+    generated_payload = json.loads(report["generated_payload"])
+    assert report["market_profile_name"] == "Kenya reporting market"
+    assert report["report_code"] == "fkf-monthly-player-registration"
+    assert report["data_elements"] == ["player_bio", "transfer_clearance", "team_roster"]
+    assert generated_payload["market"]["payment_methods"] == ["mpesa", "bank_transfer"]
+    assert generated_payload["report"]["report_code"] == "fkf-monthly-player-registration"
+    assert generated_payload["report"]["target_agency"] == "Football Kenya Federation"
+
+    list_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/external-reports",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["status"] == "ready"
+
+    submit_response = client.patch(
+        f"/api/v1/organizations/external-reports/{report['id']}/status",
+        headers=identity_headers,
+        json={
+            "status": "submitted",
+            "external_reference": "FKF-RECEIPT-001",
+            "submission_payload": "<fkf-report status=\"submitted\" />",
+            "notes": "Filed through federation portal.",
+        },
+    )
+    assert submit_response.status_code == 200
+    submitted = submit_response.json()
+    assert submitted["status"] == "submitted"
+    assert submitted["submitted_at"] is not None
+    assert submitted["external_reference"] == "FKF-RECEIPT-001"
+
+    accepted_response = client.patch(
+        f"/api/v1/organizations/external-reports/{report['id']}/status",
+        headers=identity_headers,
+        json={"status": "accepted"},
+    )
+    assert accepted_response.status_code == 200
+    assert accepted_response.json()["accepted_at"] is not None
+
+    summary_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/external-reports/summary",
+        headers=identity_headers,
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["total_reports"] == 1
+    assert summary["accepted_reports"] == 1
+    assert summary["target_type_counts"] == {"federation": 1}
+    assert "Add government reporting templates for statutory compliance." in summary["next_actions"]
 
 
 def test_organization_program_season_and_group_crud(client, identity_headers) -> None:

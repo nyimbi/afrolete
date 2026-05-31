@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from decimal import Decimal
 
 from app.models.enums import (
@@ -1239,6 +1239,67 @@ class OrganizationMarketProfileSummaryRead(BaseModel):
     government_reporting_agencies: list[str]
     federation_reporting_templates: list[str]
     compliance_ready: bool
+    next_actions: list[str]
+
+
+class OrganizationExternalReportCreate(BaseModel):
+    market_profile_id: UUID | None = None
+    name: str = Field(min_length=2, max_length=180)
+    report_code: str = Field(min_length=2, max_length=120)
+    report_type: str = Field(default="federation", min_length=2, max_length=80)
+    target_agency: str = Field(min_length=2, max_length=180)
+    target_type: str = Field(
+        default="federation",
+        pattern="^(government|federation|education|health_safety|financial|anti_doping|grant|other)$",
+    )
+    reporting_period_start: date
+    reporting_period_end: date
+    due_on: date
+    submission_format: str = Field(default="pdf", pattern="^(pdf|xlsx|csv|xml|json|portal|api)$")
+    data_elements: list[str] = Field(default_factory=list, max_length=40)
+    source_summary: str | None = Field(default=None, max_length=4000)
+    generated_payload: str | None = Field(default=None, max_length=12000)
+    submission_payload: str | None = Field(default=None, max_length=12000)
+    status: str = Field(default="draft", pattern="^(draft|ready|submitted|accepted|rejected|overdue|cancelled)$")
+    external_reference: str | None = Field(default=None, max_length=180)
+    submitted_at: datetime | None = None
+    accepted_at: datetime | None = None
+    rejection_reason: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "OrganizationExternalReportCreate":
+        if self.reporting_period_end < self.reporting_period_start:
+            raise ValueError("reporting_period_end must be on or after reporting_period_start")
+        return self
+
+
+class OrganizationExternalReportStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(draft|ready|submitted|accepted|rejected|overdue|cancelled)$")
+    external_reference: str | None = Field(default=None, max_length=180)
+    submitted_at: datetime | None = None
+    accepted_at: datetime | None = None
+    rejection_reason: str | None = Field(default=None, max_length=4000)
+    submission_payload: str | None = Field(default=None, max_length=12000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationExternalReportRead(OrganizationExternalReportCreate):
+    id: UUID
+    organization_id: UUID
+    market_profile_name: str | None = None
+    days_until_due: int
+
+
+class OrganizationExternalReportSummaryRead(BaseModel):
+    organization_id: UUID
+    total_reports: int
+    submitted_reports: int
+    accepted_reports: int
+    rejected_reports: int
+    overdue_reports: int
+    upcoming_reports: int
+    target_type_counts: dict[str, int]
     next_actions: list[str]
 
 

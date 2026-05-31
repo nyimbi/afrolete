@@ -181,7 +181,8 @@ Major capability areas include:
   venue digital-signage sponsor rotations with playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
-  AI insights, and export jobs.
+  AI insights, export jobs, and government/federation reporting registers tied
+  to tenant market profiles.
 - Integrations and developer platform: API keys, OAuth-style consent grants,
   SDK routes for roster, events, attendance, performance, training drills,
   training plans, sessions, feedback, availability, calendar exports,

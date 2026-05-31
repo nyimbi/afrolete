@@ -1093,6 +1093,45 @@ export type OrganizationMarketProfileSummaryRead = {
   next_actions: string[];
 };
 
+export type OrganizationExternalReportRead = {
+  id: UUID;
+  organization_id: UUID;
+  market_profile_id: UUID | null;
+  market_profile_name: string | null;
+  name: string;
+  report_code: string;
+  report_type: string;
+  target_agency: string;
+  target_type: string;
+  reporting_period_start: string;
+  reporting_period_end: string;
+  due_on: string;
+  submission_format: string;
+  data_elements: string[];
+  source_summary: string | null;
+  generated_payload: string | null;
+  submission_payload: string | null;
+  status: string;
+  external_reference: string | null;
+  submitted_at: string | null;
+  accepted_at: string | null;
+  rejection_reason: string | null;
+  notes: string | null;
+  days_until_due: number;
+};
+
+export type OrganizationExternalReportSummaryRead = {
+  organization_id: UUID;
+  total_reports: number;
+  submitted_reports: number;
+  accepted_reports: number;
+  rejected_reports: number;
+  overdue_reports: number;
+  upcoming_reports: number;
+  target_type_counts: Record<string, number>;
+  next_actions: string[];
+};
+
 export type OrganizationDataMigrationProjectRead = {
   id: UUID;
   organization_id: UUID;

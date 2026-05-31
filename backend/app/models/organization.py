@@ -507,6 +507,44 @@ class OrganizationMarketProfile(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
 
 
+class OrganizationExternalReport(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_external_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "target_agency",
+            "report_code",
+            "reporting_period_start",
+            "reporting_period_end",
+            name="uq_organization_external_reports_period",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    market_profile_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("organization_market_profiles.id"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    report_code: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    report_type: Mapped[str] = mapped_column(String(80), default="federation", nullable=False, index=True)
+    target_agency: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(80), default="federation", nullable=False, index=True)
+    reporting_period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    reporting_period_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    due_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    submission_format: Mapped[str] = mapped_column(String(40), default="pdf", nullable=False, index=True)
+    data_elements_json: Mapped[str | None] = mapped_column(Text)
+    source_summary: Mapped[str | None] = mapped_column(Text)
+    generated_payload: Mapped[str | None] = mapped_column(Text)
+    submission_payload: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    external_reference: Mapped[str | None] = mapped_column(String(180), index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class RegistrationInquiry(IdMixin, TimestampMixin, Base):
     __tablename__ = "registration_inquiries"
 

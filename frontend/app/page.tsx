@@ -362,6 +362,8 @@ import type {
   OrganizationComplianceDocumentVersionRead,
   OrganizationDataMigrationProjectRead,
   OrganizationDataMigrationRunRead,
+  OrganizationExternalReportRead,
+  OrganizationExternalReportSummaryRead,
   OrganizationGroupMembershipRead,
   OrganizationGroupRead,
   OrganizationMarketProfileRead,
@@ -1860,6 +1862,9 @@ export default function HomePage() {
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
   const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
   const [marketProfileSummary, setMarketProfileSummary] = useState<OrganizationMarketProfileSummaryRead | null>(null);
+  const [externalReports, setExternalReports] = useState<OrganizationExternalReportRead[]>([]);
+  const [externalReportSummary, setExternalReportSummary] =
+    useState<OrganizationExternalReportSummaryRead | null>(null);
   const [dataMigrationProjects, setDataMigrationProjects] = useState<OrganizationDataMigrationProjectRead[]>([]);
   const [dataMigrationRuns, setDataMigrationRuns] = useState<OrganizationDataMigrationRunRead[]>([]);
   const [recoveryPlans, setRecoveryPlans] = useState<OrganizationRecoveryPlanRead[]>([]);
@@ -2661,6 +2666,20 @@ export default function HomePage() {
     government_reporting_agencies: "Registrar of Societies, Sports Registrar",
     federation_reporting_templates: "FKF club license, youth tournament roster",
     compliance_notes: "Use KES for local dues and registration; retain KRA support documents."
+  });
+  const [externalReportForm, setExternalReportForm] = useState({
+    name: "FKF Monthly Player Registration",
+    report_code: "fkf-monthly-player-registration",
+    report_type: "player_registration",
+    target_agency: "Football Kenya Federation",
+    target_type: "federation",
+    reporting_period_start: "2026-06-01",
+    reporting_period_end: "2026-06-30",
+    due_on: "2026-07-05",
+    submission_format: "xml",
+    data_elements: "player_bio, transfer_clearance, team_roster",
+    submission_payload: "<fkf-report status=\"ready\" />",
+    external_reference: "FKF-RECEIPT-001"
   });
   const [dataMigrationProjectForm, setDataMigrationProjectForm] = useState({
     name: "Legacy SportsEngine import",
@@ -4226,6 +4245,15 @@ export default function HomePage() {
     ]);
     setMarketProfiles(profiles);
     setMarketProfileSummary(summary);
+  }, []);
+
+  const loadExternalReports = useCallback(async (organizationId: string) => {
+    const [reports, summary] = await Promise.all([
+      apiRequest<OrganizationExternalReportRead[]>(`/organizations/${organizationId}/external-reports`),
+      apiRequest<OrganizationExternalReportSummaryRead>(`/organizations/${organizationId}/external-reports/summary`)
+    ]);
+    setExternalReports(reports);
+    setExternalReportSummary(summary);
   }, []);
 
   const loadMigrationAndRecovery = useCallback(async (organizationId: string) => {
@@ -5817,6 +5845,8 @@ export default function HomePage() {
       setSelectedMemberSubscriptionId("");
       setMarketProfiles([]);
       setMarketProfileSummary(null);
+      setExternalReports([]);
+      setExternalReportSummary(null);
       setDataMigrationProjects([]);
       setDataMigrationRuns([]);
       setRecoveryPlans([]);
@@ -6248,6 +6278,7 @@ export default function HomePage() {
       await loadAwardPrograms(selectedOrganizationId);
       await loadMemberDues(selectedOrganizationId);
       await loadMarketProfiles(selectedOrganizationId);
+      await loadExternalReports(selectedOrganizationId);
       await loadMigrationAndRecovery(selectedOrganizationId);
       await loadComplianceDocuments(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
@@ -6287,6 +6318,7 @@ export default function HomePage() {
     loadAwardPrograms,
     loadMemberDues,
     loadMarketProfiles,
+    loadExternalReports,
     loadMigrationAndRecovery,
     loadComplianceDocuments,
     loadRegistrationInquiries,
@@ -7101,6 +7133,74 @@ export default function HomePage() {
         setMarketProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
         void loadMarketProfiles(selectedOrganizationId);
         addLog(`${profile.name} market profile saved`, "good");
+      }
+    );
+  };
+
+  const createExternalReport = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a reporting obligation", "bad");
+      return;
+    }
+    runAction(
+      "create-external-report",
+      () =>
+        apiRequest<OrganizationExternalReportRead>(`/organizations/${selectedOrganizationId}/external-reports`, {
+          method: "POST",
+          identity,
+          body: {
+            market_profile_id: marketProfiles[0]?.id ?? null,
+            name: externalReportForm.name,
+            report_code: externalReportForm.report_code,
+            report_type: externalReportForm.report_type,
+            target_agency: externalReportForm.target_agency,
+            target_type: externalReportForm.target_type,
+            reporting_period_start: externalReportForm.reporting_period_start,
+            reporting_period_end: externalReportForm.reporting_period_end,
+            due_on: externalReportForm.due_on,
+            submission_format: externalReportForm.submission_format,
+            data_elements: parseCommaList(externalReportForm.data_elements),
+            submission_payload: externalReportForm.submission_payload || null,
+            external_reference: externalReportForm.external_reference || null,
+            status: "ready"
+          }
+        }),
+      (report) => {
+        setExternalReports((current) => [report, ...current.filter((item) => item.id !== report.id)]);
+        void loadExternalReports(selectedOrganizationId);
+        addLog(`${report.target_agency} reporting obligation is ready`, "good");
+      }
+    );
+  };
+
+  const submitExternalReport = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before filing a report", "bad");
+      return;
+    }
+    const report = externalReports[0];
+    if (!report) {
+      addLog("Create a reporting obligation before filing", "bad");
+      return;
+    }
+    const nextStatus = report.status === "submitted" ? "accepted" : "submitted";
+    runAction(
+      "submit-external-report",
+      () =>
+        apiRequest<OrganizationExternalReportRead>(`/organizations/external-reports/${report.id}/status`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: nextStatus,
+            external_reference: externalReportForm.external_reference || report.external_reference,
+            submission_payload: externalReportForm.submission_payload || report.submission_payload,
+            notes: "Filed from the operations console."
+          }
+        }),
+      (updated) => {
+        setExternalReports((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        void loadExternalReports(selectedOrganizationId);
+        addLog(`${updated.name} marked ${updated.status}`, "good");
       }
     );
   };
@@ -22589,6 +22689,123 @@ export default function HomePage() {
                 <article key={action} className="task-card">
                   <div>
                     <strong>Market action</strong>
+                    <span>{action}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Government reporting</p>
+                <h2>Federation and ministry submissions</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createExternalReport} disabled={busyAction !== null}>Report</button>
+                <button type="button" onClick={submitExternalReport} disabled={busyAction !== null}>File</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Reports</span>
+                <strong>{externalReportSummary?.total_reports ?? externalReports.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Upcoming</span>
+                <strong>{externalReportSummary?.upcoming_reports ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Overdue</span>
+                <strong>{externalReportSummary?.overdue_reports ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Accepted</span>
+                <strong>{externalReportSummary?.accepted_reports ?? 0}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Report
+                <input value={externalReportForm.name} onChange={(event) => setExternalReportForm({ ...externalReportForm, name: event.target.value })} />
+              </label>
+              <label>
+                Agency
+                <input value={externalReportForm.target_agency} onChange={(event) => setExternalReportForm({ ...externalReportForm, target_agency: event.target.value })} />
+              </label>
+              <label>
+                Code
+                <input value={externalReportForm.report_code} onChange={(event) => setExternalReportForm({ ...externalReportForm, report_code: event.target.value })} />
+              </label>
+              <label>
+                Type
+                <input value={externalReportForm.report_type} onChange={(event) => setExternalReportForm({ ...externalReportForm, report_type: event.target.value })} />
+              </label>
+              <label>
+                Target
+                <select value={externalReportForm.target_type} onChange={(event) => setExternalReportForm({ ...externalReportForm, target_type: event.target.value })}>
+                  <option value="federation">Federation</option>
+                  <option value="government">Government</option>
+                  <option value="education">Education</option>
+                  <option value="health_safety">Health and safety</option>
+                  <option value="financial">Financial</option>
+                  <option value="anti_doping">Anti-doping</option>
+                  <option value="grant">Grant</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Period start
+                <input type="date" value={externalReportForm.reporting_period_start} onChange={(event) => setExternalReportForm({ ...externalReportForm, reporting_period_start: event.target.value })} />
+              </label>
+              <label>
+                Period end
+                <input type="date" value={externalReportForm.reporting_period_end} onChange={(event) => setExternalReportForm({ ...externalReportForm, reporting_period_end: event.target.value })} />
+              </label>
+              <label>
+                Due
+                <input type="date" value={externalReportForm.due_on} onChange={(event) => setExternalReportForm({ ...externalReportForm, due_on: event.target.value })} />
+              </label>
+              <label>
+                Format
+                <select value={externalReportForm.submission_format} onChange={(event) => setExternalReportForm({ ...externalReportForm, submission_format: event.target.value })}>
+                  <option value="xml">XML</option>
+                  <option value="pdf">PDF</option>
+                  <option value="xlsx">XLSX</option>
+                  <option value="csv">CSV</option>
+                  <option value="json">JSON</option>
+                  <option value="portal">Portal</option>
+                  <option value="api">API</option>
+                </select>
+              </label>
+              <label className="wide-field">
+                Data elements
+                <input value={externalReportForm.data_elements} onChange={(event) => setExternalReportForm({ ...externalReportForm, data_elements: event.target.value })} />
+              </label>
+              <label>
+                Reference
+                <input value={externalReportForm.external_reference} onChange={(event) => setExternalReportForm({ ...externalReportForm, external_reference: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Payload
+                <input value={externalReportForm.submission_payload} onChange={(event) => setExternalReportForm({ ...externalReportForm, submission_payload: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {externalReports.slice(0, 4).map((report) => (
+                <article key={report.id} className="task-card">
+                  <div>
+                    <strong>{report.name}</strong>
+                    <span>{report.report_code} · {report.target_agency} · {report.status.replaceAll("_", " ")} · due {report.due_on}</span>
+                    <small>{report.market_profile_name ?? "No market profile"} · {report.submission_format.toUpperCase()} · {report.data_elements.join(", ") || "no data elements"}</small>
+                  </div>
+                </article>
+              ))}
+              {(externalReportSummary?.next_actions ?? []).slice(0, 3).map((action) => (
+                <article key={action} className="task-card">
+                  <div>
+                    <strong>Reporting action</strong>
                     <span>{action}</span>
                   </div>
                 </article>
