@@ -376,6 +376,25 @@ class GrantSubmissionPackage(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class GrantAwardRecord(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_award_records"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    grant_application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("grant_applications.id"), index=True)
+    record_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    category: Mapped[str | None] = mapped_column(String(120), index=True)
+    due_on: Mapped[date | None] = mapped_column(index=True)
+    occurred_on: Mapped[date | None] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(40), default="planned", nullable=False, index=True)
+    requirement: Mapped[str | None] = mapped_column(Text)
+    evidence_url: Mapped[str | None] = mapped_column(String(500))
+    external_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class GrantReport(IdMixin, TimestampMixin, Base):
     __tablename__ = "grant_reports"
 

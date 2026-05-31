@@ -542,6 +542,74 @@ def test_grant_application_internal_approval_workflow(client, identity_headers) 
     assert packages[0]["id"] == submission_package["id"]
     assert packages[0]["project_title"] == "Scholarship expansion"
 
+    for payload in [
+        {
+            "record_type": "payment",
+            "title": "Initial award payment",
+            "amount": "25000.00",
+            "category": "disbursement",
+            "occurred_on": "2026-03-01",
+            "status": "received",
+            "external_reference": "PAY-001",
+        },
+        {
+            "record_type": "expenditure",
+            "title": "Coach education expenses",
+            "amount": "15200.00",
+            "category": "coach_education",
+            "occurred_on": "2026-04-15",
+            "status": "paid",
+            "evidence_url": "https://files.example/receipt.pdf",
+        },
+        {
+            "record_type": "compliance",
+            "title": "Progress photos due",
+            "amount": "0.00",
+            "category": "monthly_evidence",
+            "due_on": "2026-01-31",
+            "status": "planned",
+            "requirement": "Upload monthly progress photos.",
+        },
+        {
+            "record_type": "milestone",
+            "title": "Coach cohort launched",
+            "amount": "0.00",
+            "category": "program_delivery",
+            "due_on": "2026-04-30",
+            "occurred_on": "2026-04-20",
+            "status": "completed",
+        },
+    ]:
+        response = client.post(
+            "/api/v1/commercial/grants/award-records",
+            headers=identity_headers,
+            json={
+                "organization_id": organization["id"],
+                "grant_application_id": application["id"],
+                **payload,
+            },
+        )
+        assert response.status_code == 201
+
+    award_records = client.get(
+        f"/api/v1/commercial/grants/award-records?organization_id={organization['id']}&grant_application_id={application['id']}",
+        headers=identity_headers,
+    ).json()
+    assert len(award_records) == 4
+    assert any(record["record_type"] == "compliance" and record["overdue"] for record in award_records)
+
+    award_summary = client.get(
+        f"/api/v1/commercial/grants/award-summary?organization_id={organization['id']}&grant_application_id={application['id']}",
+        headers=identity_headers,
+    ).json()
+    assert award_summary["funds_received"] == "25000.00"
+    assert award_summary["expenditures_to_date"] == "15200.00"
+    assert award_summary["funds_balance"] == "9800.00"
+    assert award_summary["compliance_open_count"] == 1
+    assert award_summary["milestone_completed_count"] == 1
+    assert award_summary["overdue_count"] == 1
+    assert award_summary["health"] == "attention_required"
+
 
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,

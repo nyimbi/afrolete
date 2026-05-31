@@ -588,6 +588,53 @@ class GrantSubmissionPackageRead(GrantSubmissionPackageCreate):
     confirmed_at: datetime | None = None
 
 
+class GrantAwardRecordCreate(BaseModel):
+    organization_id: UUID
+    grant_application_id: UUID
+    record_type: str = Field(
+        pattern="^(payment|expenditure|compliance|milestone|site_visit|document)$",
+    )
+    title: str = Field(min_length=2, max_length=220)
+    amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    category: str | None = Field(default=None, max_length=120)
+    due_on: date | None = None
+    occurred_on: date | None = None
+    status: str = Field(default="planned", min_length=2, max_length=40)
+    requirement: str | None = Field(default=None, max_length=4000)
+    evidence_url: str | None = Field(default=None, max_length=500)
+    external_reference: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantAwardRecordRead(GrantAwardRecordCreate):
+    id: UUID
+    project_title: str | None = None
+    funder_name: str | None = None
+    overdue: bool = False
+
+
+class GrantAwardSummaryRead(BaseModel):
+    organization_id: UUID
+    grant_application_id: UUID
+    project_title: str | None = None
+    funder_name: str | None = None
+    awarded_amount: Decimal
+    currency: str
+    funds_received: Decimal
+    expenditures_to_date: Decimal
+    funds_balance: Decimal
+    budget_remaining: Decimal
+    compliance_total_count: int
+    compliance_open_count: int
+    milestone_total_count: int
+    milestone_completed_count: int
+    overdue_count: int
+    next_due_on: date | None = None
+    health: str
+    recommendations: list[str]
+
+
 class GrantReportCreate(BaseModel):
     organization_id: UUID
     grant_application_id: UUID

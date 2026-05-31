@@ -32,6 +32,7 @@ from app.models.commercial import (
     FundraisingCampaign,
     GrantApplicationApproval,
     GrantApplication,
+    GrantAwardRecord,
     GrantOpportunity,
     GrantReport,
     GrantSubmissionPackage,
@@ -101,6 +102,9 @@ from app.schemas.commercial import (
     GrantApplicationApprovalDecision,
     GrantApplicationApprovalRead,
     GrantApplicationCreate,
+    GrantAwardRecordCreate,
+    GrantAwardRecordRead,
+    GrantAwardSummaryRead,
     GrantDashboardRead,
     GrantOpportunityCreate,
     GrantReportCreate,
@@ -1182,6 +1186,131 @@ async def update_grant_submission_package(
     await db.commit()
     await db.refresh(package)
     return await grant_submission_package_read(db, package)
+
+
+async def create_grant_award_record(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantAwardRecordCreate,
+    authz: AuthorizationService,
+) -> GrantAwardRecordRead:
+    application = await get_grant_application_for_organization(
+        db,
+        payload.grant_application_id,
+        payload.organization_id,
+    )
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    record = GrantAwardRecord(**payload.model_dump())
+    record.currency = payload.currency.upper()
+    if record.record_type == "payment" and record.status in {"received", "cleared", "paid"}:
+        application.status = "awarded"
+        if application.awarded_amount == Decimal("0") and record.amount > 0:
+            application.awarded_amount = record.amount
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return await grant_award_record_read(db, record)
+
+
+async def list_grant_award_records(
+    db: AsyncSession,
+    organization_id: UUID,
+    grant_application_id: UUID | None = None,
+) -> list[GrantAwardRecordRead]:
+    query = select(GrantAwardRecord).where(GrantAwardRecord.organization_id == organization_id)
+    if grant_application_id is not None:
+        query = query.where(GrantAwardRecord.grant_application_id == grant_application_id)
+    records = (
+        await db.scalars(
+            query.order_by(GrantAwardRecord.due_on.is_(None), GrantAwardRecord.due_on, GrantAwardRecord.created_at.desc())
+        )
+    ).all()
+    return [await grant_award_record_read(db, record) for record in records]
+
+
+async def grant_award_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+    grant_application_id: UUID,
+) -> GrantAwardSummaryRead:
+    application = await get_grant_application_for_organization(db, grant_application_id, organization_id)
+    opportunity = await db.get(GrantOpportunity, application.grant_opportunity_id)
+    records = list(
+        (
+            await db.scalars(
+                select(GrantAwardRecord)
+                .where(GrantAwardRecord.organization_id == organization_id)
+                .where(GrantAwardRecord.grant_application_id == grant_application_id)
+            )
+        ).all()
+    )
+    today = date.today()
+    funds_received = money_sum(
+        record.amount
+        for record in records
+        if record.record_type == "payment" and record.status in {"received", "cleared", "paid"}
+    )
+    expenditures = money_sum(
+        record.amount
+        for record in records
+        if record.record_type == "expenditure" and record.status in {"approved", "paid", "recorded", "submitted"}
+    )
+    compliance_records = [record for record in records if record.record_type == "compliance"]
+    milestone_records = [record for record in records if record.record_type == "milestone"]
+    overdue_records = [
+        record
+        for record in records
+        if record.due_on is not None and record.due_on < today and record.status not in {"complete", "completed", "submitted", "accepted", "received", "paid", "cleared"}
+    ]
+    next_due = min(
+        (
+            record.due_on
+            for record in records
+            if record.due_on is not None and record.status not in {"complete", "completed", "submitted", "accepted", "received", "paid", "cleared"}
+        ),
+        default=None,
+    )
+    budget_remaining = (application.awarded_amount - expenditures).quantize(Decimal("0.01"))
+    funds_balance = (funds_received - expenditures).quantize(Decimal("0.01"))
+    compliance_open = sum(1 for record in compliance_records if record.status not in {"complete", "completed", "accepted"})
+    milestone_completed = sum(1 for record in milestone_records if record.status in {"complete", "completed", "accepted"})
+    recommendations: list[str] = []
+    if overdue_records:
+        recommendations.append(f"Resolve {len(overdue_records)} overdue grant obligation(s).")
+    if compliance_open:
+        recommendations.append(f"{compliance_open} compliance requirement(s) remain open.")
+    if funds_balance < Decimal("0"):
+        recommendations.append("Grant expenditures exceed received funds; reconcile cash timing.")
+    if budget_remaining < Decimal("0"):
+        recommendations.append("Grant spending exceeds awarded budget; review allowability before reporting.")
+    if not recommendations:
+        recommendations.append("Grant award administration is on track.")
+    if overdue_records or budget_remaining < Decimal("0"):
+        health = "attention_required"
+    elif compliance_open:
+        health = "monitor"
+    else:
+        health = "on_track"
+    return GrantAwardSummaryRead(
+        organization_id=organization_id,
+        grant_application_id=grant_application_id,
+        project_title=application.project_title,
+        funder_name=opportunity.funder_name if opportunity else None,
+        awarded_amount=application.awarded_amount,
+        currency=application.currency,
+        funds_received=funds_received,
+        expenditures_to_date=expenditures,
+        funds_balance=funds_balance,
+        budget_remaining=budget_remaining,
+        compliance_total_count=len(compliance_records),
+        compliance_open_count=compliance_open,
+        milestone_total_count=len(milestone_records),
+        milestone_completed_count=milestone_completed,
+        overdue_count=len(overdue_records),
+        next_due_on=next_due,
+        health=health,
+        recommendations=recommendations,
+    )
 
 
 async def create_grant_report(
@@ -2864,6 +2993,39 @@ async def grant_submission_package_read(
         and set(checklist_items).issubset(set(completed_items)),
         submitted_at=package.submitted_at,
         confirmed_at=package.confirmed_at,
+    )
+
+
+async def grant_award_record_read(
+    db: AsyncSession,
+    record: GrantAwardRecord,
+) -> GrantAwardRecordRead:
+    application = await db.get(GrantApplication, record.grant_application_id)
+    opportunity = (
+        await db.get(GrantOpportunity, application.grant_opportunity_id)
+        if application is not None
+        else None
+    )
+    terminal_statuses = {"complete", "completed", "submitted", "accepted", "received", "paid", "cleared"}
+    return GrantAwardRecordRead(
+        id=record.id,
+        organization_id=record.organization_id,
+        grant_application_id=record.grant_application_id,
+        record_type=record.record_type,
+        title=record.title,
+        amount=record.amount,
+        currency=record.currency,
+        category=record.category,
+        due_on=record.due_on,
+        occurred_on=record.occurred_on,
+        status=record.status,
+        requirement=record.requirement,
+        evidence_url=record.evidence_url,
+        external_reference=record.external_reference,
+        notes=record.notes,
+        project_title=application.project_title if application else None,
+        funder_name=opportunity.funder_name if opportunity else None,
+        overdue=record.due_on is not None and record.due_on < date.today() and record.status not in terminal_statuses,
     )
 
 

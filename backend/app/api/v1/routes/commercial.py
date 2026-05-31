@@ -51,6 +51,9 @@ from app.schemas.commercial import (
     GrantApplicationApprovalRead,
     GrantApplicationCreate,
     GrantApplicationRead,
+    GrantAwardRecordCreate,
+    GrantAwardRecordRead,
+    GrantAwardSummaryRead,
     GrantDashboardRead,
     GrantOpportunityCreate,
     GrantOpportunityRead,
@@ -122,6 +125,7 @@ from app.services.commercial import (
     create_donor_stewardship_plan,
     create_grant_application,
     create_grant_application_approval,
+    create_grant_award_record,
     create_grant_opportunity,
     create_grant_report,
     create_grant_submission_package,
@@ -165,10 +169,12 @@ from app.services.commercial import (
     list_financial_statement_packages,
     list_grant_application_approvals,
     list_grant_applications,
+    list_grant_award_records,
     list_grant_opportunities,
     list_grant_reports,
     list_grant_submission_packages,
     grant_application_approval_counts,
+    grant_award_summary,
     update_grant_submission_package,
     list_invoices,
     list_commercial_payment_sessions,
@@ -770,6 +776,34 @@ async def update_grant_submission_package_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> GrantSubmissionPackageRead:
     return await update_grant_submission_package(db, identity, package_id, payload, authz)
+
+
+@router.post("/grants/award-records", response_model=GrantAwardRecordRead, status_code=status.HTTP_201_CREATED)
+async def create_grant_award_record_route(
+    payload: GrantAwardRecordCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantAwardRecordRead:
+    return await create_grant_award_record(db, identity, payload, authz)
+
+
+@router.get("/grants/award-records", response_model=list[GrantAwardRecordRead])
+async def list_grant_award_records_route(
+    organization_id: UUID = Query(),
+    grant_application_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantAwardRecordRead]:
+    return await list_grant_award_records(db, organization_id, grant_application_id)
+
+
+@router.get("/grants/award-summary", response_model=GrantAwardSummaryRead)
+async def grant_award_summary_route(
+    organization_id: UUID = Query(),
+    grant_application_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> GrantAwardSummaryRead:
+    return await grant_award_summary(db, organization_id, grant_application_id)
 
 
 @router.post("/grants/reports", response_model=GrantReportRead, status_code=status.HTTP_201_CREATED)

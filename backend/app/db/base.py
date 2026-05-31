@@ -80,6 +80,7 @@ from app.models.commercial import (  # noqa: F401,E402
     FundraisingCampaign,
     GrantApplicationApproval,
     GrantApplication,
+    GrantAwardRecord,
     GrantOpportunity,
     GrantReport,
     GrantSubmissionPackage,

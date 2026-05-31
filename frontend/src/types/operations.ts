@@ -4422,6 +4422,48 @@ export type GrantSubmissionPackageRead = {
   confirmed_at: string | null;
 };
 
+export type GrantAwardRecordRead = {
+  id: UUID;
+  organization_id: UUID;
+  grant_application_id: UUID;
+  record_type: string;
+  title: string;
+  amount: string;
+  currency: string;
+  category: string | null;
+  due_on: string | null;
+  occurred_on: string | null;
+  status: string;
+  requirement: string | null;
+  evidence_url: string | null;
+  external_reference: string | null;
+  notes: string | null;
+  project_title: string | null;
+  funder_name: string | null;
+  overdue: boolean;
+};
+
+export type GrantAwardSummaryRead = {
+  organization_id: UUID;
+  grant_application_id: UUID;
+  project_title: string | null;
+  funder_name: string | null;
+  awarded_amount: string;
+  currency: string;
+  funds_received: string;
+  expenditures_to_date: string;
+  funds_balance: string;
+  budget_remaining: string;
+  compliance_total_count: number;
+  compliance_open_count: number;
+  milestone_total_count: number;
+  milestone_completed_count: number;
+  overdue_count: number;
+  next_due_on: string | null;
+  health: string;
+  recommendations: string[];
+};
+
 export type GrantReportRead = {
   id: UUID;
   organization_id: UUID;

@@ -302,6 +302,8 @@ import type {
   FundraisingCampaignRead,
   GrantApplicationApprovalRead,
   GrantApplicationRead,
+  GrantAwardRecordRead,
+  GrantAwardSummaryRead,
   GrantDashboardRead,
   GrantOpportunityRead,
   GrantReportRead,
@@ -2339,6 +2341,8 @@ export default function HomePage() {
   const [grantApplications, setGrantApplications] = useState<GrantApplicationRead[]>([]);
   const [grantApplicationApprovals, setGrantApplicationApprovals] = useState<GrantApplicationApprovalRead[]>([]);
   const [grantSubmissionPackages, setGrantSubmissionPackages] = useState<GrantSubmissionPackageRead[]>([]);
+  const [grantAwardRecords, setGrantAwardRecords] = useState<GrantAwardRecordRead[]>([]);
+  const [grantAwardSummary, setGrantAwardSummary] = useState<GrantAwardSummaryRead | null>(null);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
@@ -3779,6 +3783,16 @@ export default function HomePage() {
     submission_documents: "application.pdf, budget.xlsx, safeguarding-policy.pdf",
     submission_reference: "YSF-2026-00042",
     submission_notes: "Submitted after board approval with budget and impact attachments.",
+    award_record_type: "payment",
+    award_record_title: "Initial award payment",
+    award_record_amount: "25000.00",
+    award_record_category: "disbursement",
+    award_record_due_on: "2026-07-31",
+    award_record_occurred_on: "2026-06-30",
+    award_record_status: "received",
+    award_record_requirement: "Initial disbursement received and reconciled.",
+    award_record_evidence_url: "https://files.example/grants/payment-receipt.pdf",
+    award_record_reference: "PAY-001",
     report_type: "quarterly",
     report_due_on: "2026-09-30",
     report_status: "draft",
@@ -5596,6 +5610,8 @@ export default function HomePage() {
       grantApplicationData,
       grantApprovalData,
       grantSubmissionPackageData,
+      grantAwardRecordData,
+      grantAwardSummaryData,
       grantReportData,
       grantDashboardData,
       merchandiseProductData,
@@ -5640,6 +5656,10 @@ export default function HomePage() {
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
       apiRequest<GrantApplicationApprovalRead[]>(`/commercial/grants/application-approvals?organization_id=${organizationId}`),
       apiRequest<GrantSubmissionPackageRead[]>(`/commercial/grants/submission-packages?organization_id=${organizationId}`),
+      apiRequest<GrantAwardRecordRead[]>(`/commercial/grants/award-records?organization_id=${organizationId}`),
+      selectedGrantApplicationId
+        ? apiRequest<GrantAwardSummaryRead>(`/commercial/grants/award-summary?organization_id=${organizationId}&grant_application_id=${selectedGrantApplicationId}`)
+        : Promise.resolve(null),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
       apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
       apiRequest<MerchandiseProductRead[]>(`/commercial/merchandise/products?organization_id=${organizationId}`),
@@ -5684,6 +5704,8 @@ export default function HomePage() {
     setGrantApplications(grantApplicationData);
     setGrantApplicationApprovals(grantApprovalData);
     setGrantSubmissionPackages(grantSubmissionPackageData);
+    setGrantAwardRecords(grantAwardRecordData);
+    setGrantAwardSummary(grantAwardSummaryData);
     setGrantReports(grantReportData);
     setGrantDashboard(grantDashboardData);
     setMerchandiseProducts(merchandiseProductData);
@@ -6341,6 +6363,8 @@ export default function HomePage() {
       setGrantApplications([]);
       setGrantApplicationApprovals([]);
       setGrantSubmissionPackages([]);
+      setGrantAwardRecords([]);
+      setGrantAwardSummary(null);
       setGrantReports([]);
       setGrantDashboard(null);
       setMerchandiseProducts([]);
@@ -20379,6 +20403,47 @@ export default function HomePage() {
     );
   };
 
+  const createGrantAwardRecord = () => {
+    if (!selectedOrganizationId || !selectedGrantApplicationId) {
+      addLog("Create or select a grant application first", "bad");
+      return;
+    }
+    runAction(
+      "create-grant-award-record",
+      () =>
+        apiRequest<GrantAwardRecordRead>("/commercial/grants/award-records", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            grant_application_id: selectedGrantApplicationId,
+            record_type: grantForm.award_record_type,
+            title: grantForm.award_record_title,
+            amount: grantForm.award_record_amount,
+            currency: "USD",
+            category: grantForm.award_record_category,
+            due_on: grantForm.award_record_due_on || null,
+            occurred_on: grantForm.award_record_occurred_on || null,
+            status: grantForm.award_record_status,
+            requirement: grantForm.award_record_requirement,
+            evidence_url: grantForm.award_record_evidence_url,
+            external_reference: grantForm.award_record_reference,
+            notes: "Recorded from the grant award administration console."
+          }
+        }),
+      (record) => {
+        setGrantAwardRecords((current) => [
+          record,
+          ...current.filter((item) => item.id !== record.id)
+        ]);
+        addLog(`${record.title} award ${record.record_type} recorded`, record.overdue ? "bad" : "good");
+        if (selectedOrganizationId) {
+          void loadCommercial(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
   const createMerchandiseProductAndOrder = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -27185,6 +27250,7 @@ export default function HomePage() {
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
                 <button type="button" onClick={requestGrantApplicationApproval} disabled={busyAction !== null}>Approve grant</button>
                 <button type="button" onClick={createGrantSubmissionPackage} disabled={busyAction !== null}>Submit grant</button>
+                <button type="button" onClick={createGrantAwardRecord} disabled={busyAction !== null}>Award record</button>
                 <button type="button" onClick={createMerchandiseProductAndOrder} disabled={busyAction !== null}>Store</button>
                 <button type="button" onClick={fulfillSelectedMerchandiseOrder} disabled={busyAction !== null}>Fulfill</button>
               </div>
@@ -27501,6 +27567,49 @@ export default function HomePage() {
                 <input value={grantForm.submission_notes} onChange={(event) => setGrantForm({ ...grantForm, submission_notes: event.target.value })} />
               </label>
               <label>
+                Award type
+                <select value={grantForm.award_record_type} onChange={(event) => setGrantForm({ ...grantForm, award_record_type: event.target.value })}>
+                  <option value="payment">Payment</option>
+                  <option value="expenditure">Expenditure</option>
+                  <option value="compliance">Compliance</option>
+                  <option value="milestone">Milestone</option>
+                  <option value="site_visit">Site visit</option>
+                  <option value="document">Document</option>
+                </select>
+              </label>
+              <label>
+                Award title
+                <input value={grantForm.award_record_title} onChange={(event) => setGrantForm({ ...grantForm, award_record_title: event.target.value })} />
+              </label>
+              <label>
+                Award amount
+                <input value={grantForm.award_record_amount} onChange={(event) => setGrantForm({ ...grantForm, award_record_amount: event.target.value })} />
+              </label>
+              <label>
+                Award status
+                <input value={grantForm.award_record_status} onChange={(event) => setGrantForm({ ...grantForm, award_record_status: event.target.value })} />
+              </label>
+              <label>
+                Due
+                <input type="date" value={grantForm.award_record_due_on} onChange={(event) => setGrantForm({ ...grantForm, award_record_due_on: event.target.value })} />
+              </label>
+              <label>
+                Occurred
+                <input type="date" value={grantForm.award_record_occurred_on} onChange={(event) => setGrantForm({ ...grantForm, award_record_occurred_on: event.target.value })} />
+              </label>
+              <label>
+                Award category
+                <input value={grantForm.award_record_category} onChange={(event) => setGrantForm({ ...grantForm, award_record_category: event.target.value })} />
+              </label>
+              <label>
+                Evidence URL
+                <input value={grantForm.award_record_evidence_url} onChange={(event) => setGrantForm({ ...grantForm, award_record_evidence_url: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Award requirement
+                <input value={grantForm.award_record_requirement} onChange={(event) => setGrantForm({ ...grantForm, award_record_requirement: event.target.value })} />
+              </label>
+              <label>
                 Report due
                 <input type="date" value={grantForm.report_due_on} onChange={(event) => setGrantForm({ ...grantForm, report_due_on: event.target.value })} />
               </label>
@@ -27642,6 +27751,33 @@ export default function HomePage() {
                   {submissionPackage.status !== "confirmed" ? (
                     <button type="button" onClick={() => confirmGrantSubmissionPackage(submissionPackage)}>Confirm</button>
                   ) : null}
+                </article>
+              ))}
+              {grantAwardSummary ? (
+                <article className={`task-card ${grantAwardSummary.health === "on_track" ? "selected" : "risk-card"}`}>
+                  <div>
+                    <strong>Grant award · {grantAwardSummary.health.replaceAll("_", " ")}</strong>
+                    <span>
+                      {grantAwardSummary.funds_received} received · {grantAwardSummary.expenditures_to_date} spent · {grantAwardSummary.funds_balance} balance
+                    </span>
+                    <small>
+                      {grantAwardSummary.compliance_open_count} open compliance · {grantAwardSummary.milestone_completed_count}/{grantAwardSummary.milestone_total_count} milestones · next {grantAwardSummary.next_due_on ?? "none"}
+                    </small>
+                    <small>{grantAwardSummary.recommendations[0]}</small>
+                  </div>
+                </article>
+              ) : null}
+              {grantAwardRecords.slice(0, 4).map((record) => (
+                <article key={record.id} className={`task-card ${record.overdue ? "risk-card" : ""}`}>
+                  <div>
+                    <strong>{record.title} · {record.record_type.replaceAll("_", " ")}</strong>
+                    <span>
+                      {record.amount} {record.currency} · {record.status} · {record.category ?? "uncategorized"}
+                    </span>
+                    <small>
+                      {record.due_on ? `Due ${record.due_on}` : "No due date"} · {record.occurred_on ? `occurred ${record.occurred_on}` : "not occurred"} · {record.external_reference ?? "no reference"}
+                    </small>
+                  </div>
                 </article>
               ))}
               {sponsorActivationDashboard ? (
