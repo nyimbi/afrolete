@@ -306,6 +306,8 @@ def test_saas_invoice_hosted_checkout_settles_invoice(client, identity_headers) 
     link = link_response.json()
     assert link["hosted_checkout"]["open_amount"] == "249.00"
     assert link["hosted_checkout"]["session_status"] == "ready"
+    assert link["hosted_checkout"]["payer_type"] == "tenant_organization"
+    assert "Individual members are not the platform hosting payer" in link["hosted_checkout"]["payer_note"]
     assert "kind=saas" in link["checkout_url"]
 
     checkout_response = client.get(
@@ -317,6 +319,7 @@ def test_saas_invoice_hosted_checkout_settles_invoice(client, identity_headers) 
     assert checkout_response.status_code == 200
     checkout = checkout_response.json()
     assert checkout["client_reference"] == f"saas-invoice-checkout:{invoice['id']}"
+    assert checkout["checkout_summary"].endswith("outstanding for the tenant organization.")
 
     settlement_response = client.post(
         f"/api/v1/billing/invoice-checkout-sessions/{link['session_id']}/settle",

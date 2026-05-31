@@ -24338,7 +24338,7 @@ export default function HomePage() {
                   <div>
                     <strong>Member dues payment link</strong>
                     <span>{memberDuesCheckoutLink.hosted_checkout.open_amount} {memberDuesCheckoutLink.hosted_checkout.currency} · {memberDuesCheckoutLink.provider}</span>
-                    <small>{memberDuesCheckoutLink.checkout_url}</small>
+                    <small>{memberDuesCheckoutLink.hosted_checkout.receivable_note}</small>
                   </div>
                 </article>
               ) : null}
@@ -29600,6 +29600,7 @@ export default function HomePage() {
                     <span>
                       {saasCheckoutLink.hosted_checkout.open_amount} open · {saasCheckoutLink.provider} · {saasCheckoutLink.session_id}
                     </span>
+                    <small>{saasCheckoutLink.hosted_checkout.payer_note}</small>
                   </div>
                 </article>
               ) : null}

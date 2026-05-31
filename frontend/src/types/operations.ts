@@ -1054,6 +1054,9 @@ export type MemberSubscriptionHostedCheckoutRead = {
   organization_id: UUID;
   plan_id: UUID;
   plan_name: string;
+  receivable_owner_type: string;
+  receivable_note: string;
+  platform_hosting_charge: boolean;
   subject_label: string | null;
   dues_reference: string;
   title: string;
@@ -5780,6 +5783,8 @@ export type SaaSInvoiceHostedCheckoutRead = {
   invoice_number: string;
   organization_id: UUID;
   subscription_id: UUID;
+  payer_type: string;
+  payer_note: string;
   title: string;
   memo: string | null;
   due_on: string | null;

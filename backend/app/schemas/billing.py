@@ -170,6 +170,8 @@ class SaaSInvoiceHostedCheckoutRead(BaseModel):
     invoice_number: str
     organization_id: UUID
     subscription_id: UUID
+    payer_type: str
+    payer_note: str
     title: str
     memo: str | None
     due_on: date | None

@@ -1688,6 +1688,11 @@ def saas_invoice_hosted_checkout_read(
         invoice_number=invoice.invoice_number,
         organization_id=invoice.organization_id,
         subscription_id=invoice.subscription_id,
+        payer_type="tenant_organization",
+        payer_note=(
+            "AfroLete hosting is charged to the tenant club, school, association, "
+            "or organization. Individual members are not the platform hosting payer."
+        ),
         title=f"AfroLete club hosting invoice {invoice.invoice_number}",
         memo=invoice.line_items,
         due_on=invoice.due_on,
@@ -1703,9 +1708,9 @@ def saas_invoice_hosted_checkout_read(
         payment_methods=["card", "mobile_money", "bank_transfer"],
         settlement_endpoint=f"/api/v1/billing/invoice-checkout-sessions/{session_id}/settle",
         checkout_summary=(
-            f"{invoice.invoice_number} has {open_amount} {invoice.currency} outstanding."
+            f"{invoice.invoice_number} has {open_amount} {invoice.currency} outstanding for the tenant organization."
             if open_amount > 0
-            else f"{invoice.invoice_number} is fully paid."
+            else f"{invoice.invoice_number} is fully paid by the tenant organization."
         ),
     )
 

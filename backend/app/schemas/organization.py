@@ -1200,6 +1200,9 @@ class MemberSubscriptionHostedCheckoutRead(BaseModel):
     organization_id: UUID
     plan_id: UUID
     plan_name: str
+    receivable_owner_type: str
+    receivable_note: str
+    platform_hosting_charge: bool
     subject_label: str | None
     dues_reference: str
     title: str

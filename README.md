@@ -201,9 +201,11 @@ Major capability areas include:
   club, school, association, or organization, tenant subscriptions, lifecycle actions, entitlements,
   enforcement, metering, recurring invoices, dunning, late fees, payment
   retries, checkout links, signed tax filing packages, provider webhooks, and
-  billing summaries. Member dues are a separate club-managed receivables
-  workflow with its own payment links and M-Pesa/manual/provider settlements,
-  not AfroLete platform hosting.
+  billing summaries. Checkout payloads expose the tenant organization as the
+  hosting payer so members are never treated as the AfroLete hosting payer.
+  Member dues are a separate club-managed receivables workflow with its own
+  payment links and M-Pesa/manual/provider settlements, not AfroLete platform
+  hosting.
 - Offline/PWA operation: installable frontend shell, service worker caching,
   encrypted travel-manifest cache, signed offline artifacts, offline mutation
   outbox, and replay controls.

@@ -1311,6 +1311,7 @@ Latest slices:
 - Grant saved searches now preserve discovery criteria, alert preferences, and last-run results so recurring grant scans can be rerun from the console without re-entering profile terms.
 - Scheduled grant saved-search alerts now run from the API, console, or unified due-worker, persist run logs, and update saved-search match counts for recurring grant monitoring.
 - Club-managed member dues now have hosted M-Pesa/manual/provider payment links and public settlement pages that update member balances without creating or paying AfroLete hosting invoices.
+- Billing checkout payloads now expose the payer boundary directly: AfroLete hosting sessions name the tenant club/organization as the platform payer, while member-dues sessions declare themselves club-managed receivables and explicitly not platform hosting charges.
 - Insurance operations now include tenant policy portfolios, broker/certificate metadata, renewal alerts, coverage verification, portfolio summaries, and policy-linked incident claims before insurer adapter submission.
 - Regional market profiles now let tenants configure locale, timezone, KES/local currencies, mobile-money and bank rails, cash collection points, tax authorities, government agencies, and federation reporting templates for country-specific operations.
 - Government and federation reporting obligations now have a tenant-scoped register tied to market profiles, with due dates, data elements, generated payloads, submission references, accepted/rejected status, and console filing controls.

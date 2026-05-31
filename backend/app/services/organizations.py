@@ -4931,6 +4931,12 @@ def member_subscription_hosted_checkout_read(
         organization_id=subscription.organization_id,
         plan_id=plan.id,
         plan_name=plan.name,
+        receivable_owner_type="tenant_organization",
+        receivable_note=(
+            "This is a club-managed member dues receivable collected for the tenant organization; "
+            "it does not pay AfroLete platform hosting."
+        ),
+        platform_hosting_charge=False,
         subject_label=subject_label,
         dues_reference=subscription.external_reference or f"DUES-{str(subscription.id).split('-')[0].upper()}",
         title=title,

@@ -1,5 +1,6 @@
 import json
 from base64 import b64encode
+from decimal import Decimal
 
 from app.services.authz.service import authorization_service
 
@@ -200,6 +201,9 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     public_checkout = public_checkout_response.json()
     assert public_checkout["title"] == "Senior player monthly dues for Member Dues"
     assert public_checkout["payment_methods"][0] == "mobile_money"
+    assert public_checkout["platform_hosting_charge"] is False
+    assert public_checkout["receivable_owner_type"] == "tenant_organization"
+    assert "does not pay AfroLete platform hosting" in public_checkout["receivable_note"]
 
     settlement_response = client.post(
         f"/api/v1/organizations/member-subscription-checkout-sessions/{checkout['session_id']}/settle",
@@ -225,6 +229,16 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     )
     assert subscriptions_response.status_code == 200
     assert subscriptions_response.json()[0]["balance_amount"] == "0.00"
+
+    billing_summary_response = client.get(
+        f"/api/v1/billing/summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert billing_summary_response.status_code == 200
+    billing_summary = billing_summary_response.json()
+    assert billing_summary["active_subscriptions"] == 0
+    assert billing_summary["open_invoices"] == 0
+    assert Decimal(billing_summary["invoice_outstanding"]) == Decimal("0.00")
 
 
 def test_organization_market_profiles_localize_payments_tax_and_reporting(client, identity_headers) -> None:
