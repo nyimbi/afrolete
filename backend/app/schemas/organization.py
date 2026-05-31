@@ -1126,6 +1126,22 @@ class MemberSubscriptionPlanRead(MemberSubscriptionPlanCreate):
     status: str
 
 
+class MemberSubscriptionPlanUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    description: str | None = Field(default=None, max_length=4000)
+    member_role: str | None = Field(default=None, max_length=80)
+    amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    billing_interval: str | None = Field(
+        default=None,
+        pattern="^(weekly|monthly|quarterly|term|season|annual|one_time)$",
+    )
+    due_day: int | None = Field(default=None, ge=1, le=31)
+    grace_period_days: int | None = Field(default=None, ge=0, le=120)
+    benefits: str | None = Field(default=None, max_length=4000)
+    status: str | None = Field(default=None, pattern="^(active|draft|retired)$")
+
+
 class MemberSubscriptionCreate(BaseModel):
     plan_id: UUID
     membership_id: UUID | None = None
@@ -1139,6 +1155,26 @@ class MemberSubscriptionCreate(BaseModel):
     balance_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
     external_reference: str | None = Field(default=None, max_length=180)
     notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberSubscriptionUpdate(BaseModel):
+    plan_id: UUID | None = None
+    current_period_start: date | None = None
+    current_period_end: date | None = None
+    next_due_on: date | None = None
+    status: str | None = Field(default=None, pattern="^(trialing|active|past_due|paused|cancelled)$")
+    external_reference: str | None = Field(default=None, max_length=180)
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_partial_period(self) -> "MemberSubscriptionUpdate":
+        if (
+            self.current_period_start is not None
+            and self.current_period_end is not None
+            and self.current_period_end < self.current_period_start
+        ):
+            raise ValueError("current_period_end must be on or after current_period_start")
+        return self
 
 
 class MemberSubscriptionRead(BaseModel):

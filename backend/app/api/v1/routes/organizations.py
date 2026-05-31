@@ -33,6 +33,8 @@ from app.schemas.organization import (
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanRead,
     MemberSubscriptionRead,
+    MemberSubscriptionUpdate,
+    MemberSubscriptionPlanUpdate,
     MemberSubscriptionStatementArtifactRead,
     MemberSubscriptionStatementRead,
     MemberSubscriptionStatementSendCreate,
@@ -211,6 +213,8 @@ from app.services.organizations import (
     record_member_subscription_payment,
     run_member_subscription_reminders,
     send_member_subscription_statement,
+    update_member_subscription,
+    update_member_subscription_plan,
     update_organization_external_report_status,
     waive_member_subscription_charge,
     queue_registration_inquiry_agent_review,
@@ -1920,6 +1924,23 @@ async def list_member_subscription_plans_route(
     ]
 
 
+@router.patch(
+    "/{organization_id}/member-subscription-plans/{plan_id}",
+    response_model=MemberSubscriptionPlanRead,
+)
+async def update_member_subscription_plan_route(
+    organization_id: UUID,
+    plan_id: UUID,
+    payload: MemberSubscriptionPlanUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionPlanRead:
+    return to_member_subscription_plan_read(
+        await update_member_subscription_plan(db, identity, organization_id, plan_id, payload, authz)
+    )
+
+
 @router.post(
     "/{organization_id}/member-subscriptions",
     response_model=MemberSubscriptionRead,
@@ -1943,6 +1964,19 @@ async def list_member_subscriptions_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[MemberSubscriptionRead]:
     return [to_member_subscription_read(row) for row in await list_member_subscriptions(db, organization_id)]
+
+
+@router.patch("/member-subscriptions/{subscription_id}", response_model=MemberSubscriptionRead)
+async def update_member_subscription_route(
+    subscription_id: UUID,
+    payload: MemberSubscriptionUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionRead:
+    subscription = await update_member_subscription(db, identity, subscription_id, payload, authz)
+    rows = await list_member_subscriptions(db, subscription.organization_id)
+    return to_member_subscription_read(next(row for row in rows if row[0].id == subscription.id))
 
 
 @router.get(

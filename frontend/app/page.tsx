@@ -7357,6 +7357,58 @@ export default function HomePage() {
     );
   };
 
+  const updateMemberDuesPlanStatus = (plan: MemberSubscriptionPlanRead, status: "active" | "retired") => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before updating a dues plan", "bad");
+      return;
+    }
+    runAction(
+      `update-member-dues-plan-${plan.id}-${status}`,
+      () =>
+        apiRequest<MemberSubscriptionPlanRead>(
+          `/organizations/${selectedOrganizationId}/member-subscription-plans/${plan.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body: { status }
+          }
+        ),
+      (updatedPlan) => {
+        setMemberSubscriptionPlans((current) =>
+          current.map((item) => (item.id === updatedPlan.id ? updatedPlan : item))
+        );
+        addLog(`${updatedPlan.name} dues plan ${status}`, "good");
+      }
+    );
+  };
+
+  const updateMemberDuesSubscriptionStatus = (status: "active" | "paused" | "cancelled") => {
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!subscriptionId) {
+      addLog("Select a member dues account before changing status", "bad");
+      return;
+    }
+    runAction(
+      `update-member-dues-subscription-${status}`,
+      () =>
+        apiRequest<MemberSubscriptionRead>(`/organizations/member-subscriptions/${subscriptionId}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status,
+            notes: `Club-managed member dues account ${status} from operations console.`
+          }
+        }),
+      (subscription) => {
+        setMemberSubscriptions((current) =>
+          current.map((item) => (item.id === subscription.id ? subscription : item))
+        );
+        setSelectedMemberSubscriptionId(subscription.id);
+        addLog(`${subscription.subject_label ?? "Member"} dues account ${status}`, "good");
+      }
+    );
+  };
+
   const recordMemberDuesPayment = () => {
     const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
     if (!subscriptionId) {
@@ -24520,6 +24572,9 @@ export default function HomePage() {
               <button type="button" onClick={sendMemberDuesStatement} disabled={busyAction !== null}>Send</button>
               <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
               <button type="button" onClick={runMemberDuesReminders} disabled={busyAction !== null}>Remind due</button>
+              <button type="button" onClick={() => updateMemberDuesSubscriptionStatus("paused")} disabled={busyAction !== null}>Pause</button>
+              <button type="button" onClick={() => updateMemberDuesSubscriptionStatus("active")} disabled={busyAction !== null}>Reactivate</button>
+              <button type="button" onClick={() => updateMemberDuesSubscriptionStatus("cancelled")} disabled={busyAction !== null}>Cancel</button>
             </div>
             <div className="form-grid">
               <label>
@@ -24558,9 +24613,16 @@ export default function HomePage() {
                 <article key={plan.id} className="task-card">
                   <div>
                     <strong>{plan.name}</strong>
-                    <span>{plan.amount} {plan.currency} · {plan.billing_interval.replaceAll("_", " ")} · grace {plan.grace_period_days}d</span>
+                    <span>{plan.amount} {plan.currency} · {plan.billing_interval.replaceAll("_", " ")} · grace {plan.grace_period_days}d · {plan.status}</span>
                     <small>{plan.benefits ?? "Club-managed dues collected through M-Pesa/manual rails, separate from AfroLete hosting."}</small>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => updateMemberDuesPlanStatus(plan, plan.status === "retired" ? "active" : "retired")}
+                    disabled={busyAction !== null}
+                  >
+                    {plan.status === "retired" ? "Activate" : "Retire"}
+                  </button>
                 </article>
               ))}
               {memberSubscriptions.slice(0, 5).map((subscription) => (

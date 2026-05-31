@@ -91,6 +91,7 @@ from app.schemas.organization import (
     MemberSubscriptionChargeWaiverRead,
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
+    MemberSubscriptionUpdate,
     MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionStatementLineRead,
     MemberSubscriptionStatementArtifactRead,
@@ -102,6 +103,7 @@ from app.schemas.organization import (
     MemberSubscriptionReminderRunRead,
     MemberSubscriptionPaymentCreate,
     MemberSubscriptionPlanCreate,
+    MemberSubscriptionPlanUpdate,
     OrganizationAwardCategoryCreate,
     OrganizationAwardNominationCreate,
     OrganizationAwardProgramCreate,
@@ -4650,6 +4652,28 @@ async def list_member_subscription_plans(
     )
 
 
+async def update_member_subscription_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    plan_id: UUID,
+    payload: MemberSubscriptionPlanUpdate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionPlan:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    plan = await db.get(MemberSubscriptionPlan, plan_id)
+    if plan is None or plan.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription plan not found")
+    updates = payload.model_dump(exclude_unset=True)
+    if "currency" in updates and updates["currency"] is not None:
+        updates["currency"] = updates["currency"].upper()
+    for field, value in updates.items():
+        setattr(plan, field, value)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
 async def create_member_subscription(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -4661,6 +4685,8 @@ async def create_member_subscription(
     plan = await db.get(MemberSubscriptionPlan, payload.plan_id)
     if plan is None or plan.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription plan not found")
+    if plan.status != "active":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Member dues plan is not active")
 
     membership_id = payload.membership_id
     subject_type = payload.subject_type
@@ -4728,6 +4754,46 @@ async def create_member_subscription(
                 description=f"Initial member dues charge for {plan.name}",
                 created_by_person_id=identity.person_id,
             )
+        )
+    await db.commit()
+    await db.refresh(subscription)
+    return subscription
+
+
+async def update_member_subscription(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    payload: MemberSubscriptionUpdate,
+    authz: AuthorizationService,
+) -> MemberSubscription:
+    subscription = await db.get(MemberSubscription, subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+    await ensure_manage_organization(db, identity, subscription.organization_id, authz)
+    updates = payload.model_dump(exclude_unset=True)
+    if "plan_id" in updates and updates["plan_id"] is not None:
+        plan = await db.get(MemberSubscriptionPlan, updates["plan_id"])
+        if plan is None or plan.organization_id != subscription.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription plan not found")
+        if plan.status != "active":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Member dues plan is not active")
+        subscription.plan_id = plan.id
+    for field in ("current_period_start", "current_period_end", "next_due_on", "external_reference", "notes"):
+        if field in updates:
+            setattr(subscription, field, updates[field])
+    if "status" in updates and updates["status"] is not None:
+        previous_status = subscription.status
+        subscription.status = updates["status"]
+        if "notes" not in updates and previous_status != subscription.status:
+            subscription.notes = append_member_dues_note(
+                subscription.notes,
+                f"Club-managed member dues account status changed from {previous_status} to {subscription.status}.",
+            )
+    if subscription.current_period_end < subscription.current_period_start:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="current_period_end must be on or after current_period_start",
         )
     await db.commit()
     await db.refresh(subscription)
@@ -5669,6 +5735,7 @@ async def member_subscriptions_due_for_charge(
         select(MemberSubscription, MemberSubscriptionPlan)
         .join(MemberSubscriptionPlan, MemberSubscriptionPlan.id == MemberSubscription.plan_id)
         .where(MemberSubscription.status.in_(["trialing", "active", "past_due"]))
+        .where(MemberSubscriptionPlan.status == "active")
         .where(MemberSubscriptionPlan.billing_interval != "one_time")
         .where(MemberSubscription.current_period_end < charge_on)
         .order_by(MemberSubscription.current_period_end.asc(), MemberSubscription.created_at.asc())

@@ -144,6 +144,20 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert plan["currency"] == "KES"
     assert plan["billing_interval"] == "monthly"
 
+    plan_update_response = client.patch(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-plans/{plan['id']}",
+        headers=identity_headers,
+        json={
+            "grace_period_days": 12,
+            "benefits": "Training access, league registration, member voting, and hardship review eligibility.",
+        },
+    )
+    assert plan_update_response.status_code == 200
+    plan = plan_update_response.json()
+    assert plan["grace_period_days"] == 12
+    assert "hardship review" in plan["benefits"]
+    assert plan["status"] == "active"
+
     subscription_response = client.post(
         f"/api/v1/organizations/{organization['id']}/member-subscriptions",
         headers=identity_headers,
@@ -164,6 +178,25 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert subscription["subject_label"] == "Member Dues"
     assert subscription["plan_name"] == "Senior player monthly dues"
     assert subscription["balance_amount"] == "1500.00"
+
+    paused_response = client.patch(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}",
+        headers=identity_headers,
+        json={"status": "paused"},
+    )
+    assert paused_response.status_code == 200
+    assert paused_response.json()["status"] == "paused"
+    assert "changed from active to paused" in paused_response.json()["notes"]
+
+    reactivated_response = client.patch(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}",
+        headers=identity_headers,
+        json={"status": "active", "notes": "Member dues account reactivated after club review."},
+    )
+    assert reactivated_response.status_code == 200
+    subscription = reactivated_response.json()
+    assert subscription["status"] == "active"
+    assert subscription["notes"] == "Member dues account reactivated after club review."
 
     initial_charges_response = client.get(
         f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
@@ -478,6 +511,36 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert statement_send["channel"] == "in_app"
     assert statement_send["status"] == "sent"
     assert statement_send["sent_at"] is not None
+
+    retire_plan_response = client.patch(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-plans/{plan['id']}",
+        headers=identity_headers,
+        json={"status": "retired"},
+    )
+    assert retire_plan_response.status_code == 200
+    assert retire_plan_response.json()["status"] == "retired"
+
+    retired_charge_run_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "charge_on": "2026-08-01",
+            "limit": 10,
+        },
+    )
+    assert retired_charge_run_response.status_code == 200
+    retired_charge_run = retired_charge_run_response.json()
+    assert retired_charge_run["eligible_count"] == 0
+    assert retired_charge_run["charged_count"] == 0
+
+    cancelled_response = client.patch(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}",
+        headers=identity_headers,
+        json={"status": "cancelled"},
+    )
+    assert cancelled_response.status_code == 200
+    assert cancelled_response.json()["status"] == "cancelled"
 
     billing_summary_response = client.get(
         f"/api/v1/billing/summary?organization_id={organization['id']}",
