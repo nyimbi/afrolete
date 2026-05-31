@@ -305,6 +305,7 @@ import type {
   GrantDashboardRead,
   GrantOpportunityRead,
   GrantReportRead,
+  GrantSubmissionPackageRead,
   MerchandiseOrderRead,
   MerchandiseProductRead,
   MerchandiseStoreDashboardRead,
@@ -2337,6 +2338,7 @@ export default function HomePage() {
   const [grantOpportunities, setGrantOpportunities] = useState<GrantOpportunityRead[]>([]);
   const [grantApplications, setGrantApplications] = useState<GrantApplicationRead[]>([]);
   const [grantApplicationApprovals, setGrantApplicationApprovals] = useState<GrantApplicationApprovalRead[]>([]);
+  const [grantSubmissionPackages, setGrantSubmissionPackages] = useState<GrantSubmissionPackageRead[]>([]);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
@@ -3770,6 +3772,13 @@ export default function HomePage() {
     reviewer_email: "treasurer@example.com",
     approval_request_notes: "Confirm matching funds, safeguarding controls, and reporting capacity before submission.",
     approval_decision_notes: "Approved for submission with match-funding commitment.",
+    submission_package_name: "Foundation portal package",
+    submission_method: "online_portal",
+    submission_portal_url: "https://grants.example/submit",
+    submission_checklist: "Board approval secured, Budget attached, Impact metrics attached",
+    submission_documents: "application.pdf, budget.xlsx, safeguarding-policy.pdf",
+    submission_reference: "YSF-2026-00042",
+    submission_notes: "Submitted after board approval with budget and impact attachments.",
     report_type: "quarterly",
     report_due_on: "2026-09-30",
     report_status: "draft",
@@ -5586,6 +5595,7 @@ export default function HomePage() {
       grantOpportunityData,
       grantApplicationData,
       grantApprovalData,
+      grantSubmissionPackageData,
       grantReportData,
       grantDashboardData,
       merchandiseProductData,
@@ -5629,6 +5639,7 @@ export default function HomePage() {
       apiRequest<GrantOpportunityRead[]>(`/commercial/grants/opportunities?organization_id=${organizationId}`),
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
       apiRequest<GrantApplicationApprovalRead[]>(`/commercial/grants/application-approvals?organization_id=${organizationId}`),
+      apiRequest<GrantSubmissionPackageRead[]>(`/commercial/grants/submission-packages?organization_id=${organizationId}`),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
       apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
       apiRequest<MerchandiseProductRead[]>(`/commercial/merchandise/products?organization_id=${organizationId}`),
@@ -5672,6 +5683,7 @@ export default function HomePage() {
     setGrantOpportunities(grantOpportunityData);
     setGrantApplications(grantApplicationData);
     setGrantApplicationApprovals(grantApprovalData);
+    setGrantSubmissionPackages(grantSubmissionPackageData);
     setGrantReports(grantReportData);
     setGrantDashboard(grantDashboardData);
     setMerchandiseProducts(merchandiseProductData);
@@ -6328,6 +6340,7 @@ export default function HomePage() {
       setGrantOpportunities([]);
       setGrantApplications([]);
       setGrantApplicationApprovals([]);
+      setGrantSubmissionPackages([]);
       setGrantReports([]);
       setGrantDashboard(null);
       setMerchandiseProducts([]);
@@ -20299,6 +20312,73 @@ export default function HomePage() {
     );
   };
 
+  const createGrantSubmissionPackage = () => {
+    if (!selectedOrganizationId || !selectedGrantApplicationId) {
+      addLog("Create or select a grant application first", "bad");
+      return;
+    }
+    const checklist = parseCommaList(grantForm.submission_checklist);
+    runAction(
+      "create-grant-submission-package",
+      () =>
+        apiRequest<GrantSubmissionPackageRead>("/commercial/grants/submission-packages", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            grant_application_id: selectedGrantApplicationId,
+            package_name: grantForm.submission_package_name,
+            submission_method: grantForm.submission_method,
+            portal_url: grantForm.submission_portal_url,
+            checklist_items: checklist,
+            completed_checklist_items: checklist,
+            document_manifest: parseCommaList(grantForm.submission_documents),
+            prepared_by_name: identity.name,
+            status: "submitted",
+            confirmation_reference: grantForm.submission_reference,
+            blockers: [],
+            notes: grantForm.submission_notes
+          }
+        }),
+      (submissionPackage) => {
+        setGrantSubmissionPackages((current) => [
+          submissionPackage,
+          ...current.filter((item) => item.id !== submissionPackage.id)
+        ]);
+        addLog(`${submissionPackage.package_name} grant package ${submissionPackage.status}`, submissionPackage.ready_to_submit ? "good" : "bad");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const confirmGrantSubmissionPackage = (submissionPackage: GrantSubmissionPackageRead) => {
+    runAction(
+      `confirm-grant-submission-package-${submissionPackage.id}`,
+      () =>
+        apiRequest<GrantSubmissionPackageRead>(`/commercial/grants/submission-packages/${submissionPackage.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: "confirmed",
+            confirmation_reference: grantForm.submission_reference || submissionPackage.confirmation_reference,
+            completed_checklist_items: submissionPackage.completed_checklist_items,
+            blockers: [],
+            notes: "Funder confirmed receipt."
+          }
+        }),
+      (updated) => {
+        setGrantSubmissionPackages((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.package_name} confirmed by funder`, "good");
+        if (selectedOrganizationId) {
+          void loadCommercial(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
   const createMerchandiseProductAndOrder = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -27104,6 +27184,7 @@ export default function HomePage() {
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
                 <button type="button" onClick={requestGrantApplicationApproval} disabled={busyAction !== null}>Approve grant</button>
+                <button type="button" onClick={createGrantSubmissionPackage} disabled={busyAction !== null}>Submit grant</button>
                 <button type="button" onClick={createMerchandiseProductAndOrder} disabled={busyAction !== null}>Store</button>
                 <button type="button" onClick={fulfillSelectedMerchandiseOrder} disabled={busyAction !== null}>Fulfill</button>
               </div>
@@ -27385,6 +27466,41 @@ export default function HomePage() {
                 <input value={grantForm.approval_decision_notes} onChange={(event) => setGrantForm({ ...grantForm, approval_decision_notes: event.target.value })} />
               </label>
               <label>
+                Package
+                <input value={grantForm.submission_package_name} onChange={(event) => setGrantForm({ ...grantForm, submission_package_name: event.target.value })} />
+              </label>
+              <label>
+                Submit via
+                <select value={grantForm.submission_method} onChange={(event) => setGrantForm({ ...grantForm, submission_method: event.target.value })}>
+                  <option value="online_portal">Online portal</option>
+                  <option value="email">Email</option>
+                  <option value="mail">Mail</option>
+                  <option value="hand_delivery">Hand delivery</option>
+                  <option value="api">API</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </label>
+              <label>
+                Portal URL
+                <input value={grantForm.submission_portal_url} onChange={(event) => setGrantForm({ ...grantForm, submission_portal_url: event.target.value })} />
+              </label>
+              <label>
+                Reference
+                <input value={grantForm.submission_reference} onChange={(event) => setGrantForm({ ...grantForm, submission_reference: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Checklist
+                <input value={grantForm.submission_checklist} onChange={(event) => setGrantForm({ ...grantForm, submission_checklist: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Documents
+                <input value={grantForm.submission_documents} onChange={(event) => setGrantForm({ ...grantForm, submission_documents: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Submission notes
+                <input value={grantForm.submission_notes} onChange={(event) => setGrantForm({ ...grantForm, submission_notes: event.target.value })} />
+              </label>
+              <label>
                 Report due
                 <input type="date" value={grantForm.report_due_on} onChange={(event) => setGrantForm({ ...grantForm, report_due_on: event.target.value })} />
               </label>
@@ -27509,6 +27625,23 @@ export default function HomePage() {
                     <button type="button" onClick={() => decideGrantApplicationApproval(approval, "approved")}>Approve</button>
                     <button type="button" onClick={() => decideGrantApplicationApproval(approval, "rejected")}>Reject</button>
                   </div>
+                </article>
+              ))}
+              {grantSubmissionPackages.slice(0, 3).map((submissionPackage) => (
+                <article key={submissionPackage.id} className={`task-card ${submissionPackage.ready_to_submit ? "selected" : ""}`}>
+                  <div>
+                    <strong>{submissionPackage.package_name} · {submissionPackage.status.replaceAll("_", " ")}</strong>
+                    <span>
+                      {submissionPackage.project_title ?? "Grant"} · {submissionPackage.submission_method.replaceAll("_", " ")} · {submissionPackage.confirmation_reference ?? "no reference"}
+                    </span>
+                    <small>
+                      {submissionPackage.checklist_completed_count}/{submissionPackage.checklist_total_count} checklist · {submissionPackage.document_count} docs · approval {submissionPackage.approval_status}
+                    </small>
+                    {submissionPackage.blockers.length > 0 ? <small>{submissionPackage.blockers[0]}</small> : null}
+                  </div>
+                  {submissionPackage.status !== "confirmed" ? (
+                    <button type="button" onClick={() => confirmGrantSubmissionPackage(submissionPackage)}>Confirm</button>
+                  ) : null}
                 </article>
               ))}
               {sponsorActivationDashboard ? (

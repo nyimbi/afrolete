@@ -56,6 +56,9 @@ from app.schemas.commercial import (
     GrantOpportunityRead,
     GrantReportCreate,
     GrantReportRead,
+    GrantSubmissionPackageCreate,
+    GrantSubmissionPackageRead,
+    GrantSubmissionPackageUpdate,
     MerchandiseFulfillmentUpdate,
     MerchandiseOrderCreate,
     MerchandiseOrderRead,
@@ -121,6 +124,7 @@ from app.services.commercial import (
     create_grant_application_approval,
     create_grant_opportunity,
     create_grant_report,
+    create_grant_submission_package,
     create_invoice,
     create_financial_budget,
     create_financial_budget_line,
@@ -163,7 +167,9 @@ from app.services.commercial import (
     list_grant_applications,
     list_grant_opportunities,
     list_grant_reports,
+    list_grant_submission_packages,
     grant_application_approval_counts,
+    update_grant_submission_package,
     list_invoices,
     list_commercial_payment_sessions,
     list_sponsors,
@@ -734,6 +740,36 @@ async def decide_grant_application_approval_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> GrantApplicationApprovalRead:
     return await decide_grant_application_approval(db, identity, approval_id, payload, authz)
+
+
+@router.post("/grants/submission-packages", response_model=GrantSubmissionPackageRead, status_code=status.HTTP_201_CREATED)
+async def create_grant_submission_package_route(
+    payload: GrantSubmissionPackageCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantSubmissionPackageRead:
+    return await create_grant_submission_package(db, identity, payload, authz)
+
+
+@router.get("/grants/submission-packages", response_model=list[GrantSubmissionPackageRead])
+async def list_grant_submission_packages_route(
+    organization_id: UUID = Query(),
+    grant_application_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantSubmissionPackageRead]:
+    return await list_grant_submission_packages(db, organization_id, grant_application_id)
+
+
+@router.patch("/grants/submission-packages/{package_id}", response_model=GrantSubmissionPackageRead)
+async def update_grant_submission_package_route(
+    package_id: UUID,
+    payload: GrantSubmissionPackageUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantSubmissionPackageRead:
+    return await update_grant_submission_package(db, identity, package_id, payload, authz)
 
 
 @router.post("/grants/reports", response_model=GrantReportRead, status_code=status.HTTP_201_CREATED)

@@ -4395,6 +4395,33 @@ export type GrantApplicationApprovalRead = {
   funder_name: string | null;
 };
 
+export type GrantSubmissionPackageRead = {
+  id: UUID;
+  organization_id: UUID;
+  grant_application_id: UUID;
+  package_name: string;
+  submission_method: string;
+  portal_url: string | null;
+  checklist_items: string[];
+  completed_checklist_items: string[];
+  document_manifest: string[];
+  prepared_by_name: string | null;
+  status: string;
+  confirmation_reference: string | null;
+  blockers: string[];
+  notes: string | null;
+  project_title: string | null;
+  funder_name: string | null;
+  approval_status: string;
+  checklist_total_count: number;
+  checklist_completed_count: number;
+  document_count: number;
+  blocker_count: number;
+  ready_to_submit: boolean;
+  submitted_at: string | null;
+  confirmed_at: string | null;
+};
+
 export type GrantReportRead = {
   id: UUID;
   organization_id: UUID;

@@ -547,6 +547,47 @@ class GrantApplicationApprovalRead(GrantApplicationApprovalCreate):
     funder_name: str | None = None
 
 
+class GrantSubmissionPackageCreate(BaseModel):
+    organization_id: UUID
+    grant_application_id: UUID
+    package_name: str = Field(min_length=2, max_length=220)
+    submission_method: str = Field(
+        default="online_portal",
+        pattern="^(online_portal|email|mail|hand_delivery|api|manual)$",
+    )
+    portal_url: str | None = Field(default=None, max_length=500)
+    checklist_items: list[str] = Field(default_factory=list, max_length=80)
+    completed_checklist_items: list[str] = Field(default_factory=list, max_length=80)
+    document_manifest: list[str] = Field(default_factory=list, max_length=80)
+    prepared_by_name: str | None = Field(default=None, max_length=180)
+    status: str = Field(default="draft", pattern="^(draft|ready|submitted|confirmed|blocked)$")
+    confirmation_reference: str | None = Field(default=None, max_length=240)
+    blockers: list[str] = Field(default_factory=list, max_length=80)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantSubmissionPackageUpdate(BaseModel):
+    status: str = Field(pattern="^(draft|ready|submitted|confirmed|blocked)$")
+    confirmation_reference: str | None = Field(default=None, max_length=240)
+    completed_checklist_items: list[str] | None = Field(default=None, max_length=80)
+    blockers: list[str] | None = Field(default=None, max_length=80)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantSubmissionPackageRead(GrantSubmissionPackageCreate):
+    id: UUID
+    project_title: str | None = None
+    funder_name: str | None = None
+    approval_status: str = "not_requested"
+    checklist_total_count: int = 0
+    checklist_completed_count: int = 0
+    document_count: int = 0
+    blocker_count: int = 0
+    ready_to_submit: bool = False
+    submitted_at: datetime | None = None
+    confirmed_at: datetime | None = None
+
+
 class GrantReportCreate(BaseModel):
     organization_id: UUID
     grant_application_id: UUID

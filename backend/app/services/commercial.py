@@ -34,6 +34,7 @@ from app.models.commercial import (
     GrantApplication,
     GrantOpportunity,
     GrantReport,
+    GrantSubmissionPackage,
     MerchandiseOrder,
     MerchandiseOrderLine,
     MerchandiseProduct,
@@ -103,6 +104,9 @@ from app.schemas.commercial import (
     GrantDashboardRead,
     GrantOpportunityCreate,
     GrantReportCreate,
+    GrantSubmissionPackageCreate,
+    GrantSubmissionPackageRead,
+    GrantSubmissionPackageUpdate,
     MerchandiseFulfillmentUpdate,
     MerchandiseOrderCreate,
     MerchandiseOrderLineRead,
@@ -1099,6 +1103,85 @@ async def decide_grant_application_approval(
     await db.commit()
     await db.refresh(approval)
     return await grant_application_approval_read(db, approval)
+
+
+async def create_grant_submission_package(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantSubmissionPackageCreate,
+    authz: AuthorizationService,
+) -> GrantSubmissionPackageRead:
+    application = await get_grant_application_for_organization(
+        db,
+        payload.grant_application_id,
+        payload.organization_id,
+    )
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    package = GrantSubmissionPackage(
+        organization_id=payload.organization_id,
+        grant_application_id=application.id,
+        package_name=payload.package_name,
+        submission_method=payload.submission_method,
+        portal_url=payload.portal_url,
+        checklist_json=json.dumps(normalize_text_list(payload.checklist_items)),
+        completed_checklist_json=json.dumps(normalize_text_list(payload.completed_checklist_items)),
+        document_manifest_json=json.dumps(normalize_text_list(payload.document_manifest)),
+        prepared_by_name=payload.prepared_by_name,
+        status=payload.status,
+        confirmation_reference=payload.confirmation_reference,
+        blockers_json=json.dumps(normalize_text_list(payload.blockers)),
+        notes=payload.notes,
+    )
+    await apply_grant_submission_status(db, package, application, payload.status, payload.confirmation_reference)
+    db.add(package)
+    await db.commit()
+    await db.refresh(package)
+    return await grant_submission_package_read(db, package)
+
+
+async def list_grant_submission_packages(
+    db: AsyncSession,
+    organization_id: UUID,
+    grant_application_id: UUID | None = None,
+) -> list[GrantSubmissionPackageRead]:
+    query = select(GrantSubmissionPackage).where(GrantSubmissionPackage.organization_id == organization_id)
+    if grant_application_id is not None:
+        query = query.where(GrantSubmissionPackage.grant_application_id == grant_application_id)
+    packages = (
+        await db.scalars(query.order_by(GrantSubmissionPackage.created_at.desc()))
+    ).all()
+    return [await grant_submission_package_read(db, package) for package in packages]
+
+
+async def update_grant_submission_package(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    package_id: UUID,
+    payload: GrantSubmissionPackageUpdate,
+    authz: AuthorizationService,
+) -> GrantSubmissionPackageRead:
+    package = await db.get(GrantSubmissionPackage, package_id)
+    if package is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grant submission package not found")
+    await ensure_manage_commercial(authz, identity, package.organization_id)
+    application = await get_grant_application_for_organization(
+        db,
+        package.grant_application_id,
+        package.organization_id,
+    )
+    package.status = payload.status
+    if payload.confirmation_reference is not None:
+        package.confirmation_reference = payload.confirmation_reference
+    if payload.completed_checklist_items is not None:
+        package.completed_checklist_json = json.dumps(normalize_text_list(payload.completed_checklist_items))
+    if payload.blockers is not None:
+        package.blockers_json = json.dumps(normalize_text_list(payload.blockers))
+    if payload.notes is not None:
+        package.notes = payload.notes
+    await apply_grant_submission_status(db, package, application, payload.status, package.confirmation_reference)
+    await db.commit()
+    await db.refresh(package)
+    return await grant_submission_package_read(db, package)
 
 
 async def create_grant_report(
@@ -2675,6 +2758,113 @@ def financial_statement_lines_load(value: str) -> list[FinancialStatementLineRea
                 )
             )
     return lines
+
+
+def normalize_text_list(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    normalized: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def grant_submission_json_loads(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return normalize_text_list([str(item) for item in parsed])
+
+
+async def apply_grant_submission_status(
+    db: AsyncSession,
+    package: GrantSubmissionPackage,
+    application: GrantApplication,
+    requested_status: str,
+    confirmation_reference: str | None,
+) -> None:
+    approval_status, pending_count, _, rejected_count = await grant_application_approval_counts(db, application.id)
+    checklist_items = grant_submission_json_loads(package.checklist_json)
+    completed_items = set(grant_submission_json_loads(package.completed_checklist_json))
+    blockers = grant_submission_json_loads(package.blockers_json)
+    missing_items = [item for item in checklist_items if item not in completed_items]
+    readiness_blockers = list(blockers)
+    if approval_status != "approved":
+        readiness_blockers.append(f"Internal approvals are {approval_status}.")
+    if pending_count:
+        readiness_blockers.append(f"{pending_count} approval(s) still pending.")
+    if rejected_count:
+        readiness_blockers.append(f"{rejected_count} approval(s) rejected.")
+    if missing_items:
+        readiness_blockers.append(f"{len(missing_items)} checklist item(s) incomplete.")
+
+    if requested_status in {"ready", "submitted", "confirmed"} and readiness_blockers:
+        package.status = "blocked"
+        package.blockers_json = json.dumps(normalize_text_list(readiness_blockers))
+        return
+
+    now = datetime.now(UTC)
+    package.status = requested_status
+    package.blockers_json = json.dumps(normalize_text_list(blockers))
+    if requested_status in {"submitted", "confirmed"}:
+        package.submitted_at = package.submitted_at or now
+        application.status = "submitted"
+        application.submitted_on = application.submitted_on or now.date()
+    if requested_status == "confirmed":
+        package.confirmed_at = package.confirmed_at or now
+        package.confirmation_reference = confirmation_reference or package.confirmation_reference
+
+
+async def grant_submission_package_read(
+    db: AsyncSession,
+    package: GrantSubmissionPackage,
+) -> GrantSubmissionPackageRead:
+    application = await db.get(GrantApplication, package.grant_application_id)
+    opportunity = (
+        await db.get(GrantOpportunity, application.grant_opportunity_id)
+        if application is not None
+        else None
+    )
+    approval_status, _, _, _ = await grant_application_approval_counts(db, package.grant_application_id)
+    checklist_items = grant_submission_json_loads(package.checklist_json)
+    completed_items = grant_submission_json_loads(package.completed_checklist_json)
+    document_manifest = grant_submission_json_loads(package.document_manifest_json)
+    blockers = grant_submission_json_loads(package.blockers_json)
+    return GrantSubmissionPackageRead(
+        id=package.id,
+        organization_id=package.organization_id,
+        grant_application_id=package.grant_application_id,
+        package_name=package.package_name,
+        submission_method=package.submission_method,
+        portal_url=package.portal_url,
+        checklist_items=checklist_items,
+        completed_checklist_items=completed_items,
+        document_manifest=document_manifest,
+        prepared_by_name=package.prepared_by_name,
+        status=package.status,
+        confirmation_reference=package.confirmation_reference,
+        blockers=blockers,
+        notes=package.notes,
+        project_title=application.project_title if application else None,
+        funder_name=opportunity.funder_name if opportunity else None,
+        approval_status=approval_status,
+        checklist_total_count=len(checklist_items),
+        checklist_completed_count=len(completed_items),
+        document_count=len(document_manifest),
+        blocker_count=len(blockers),
+        ready_to_submit=approval_status == "approved"
+        and not blockers
+        and set(checklist_items).issubset(set(completed_items)),
+        submitted_at=package.submitted_at,
+        confirmed_at=package.confirmed_at,
+    )
 
 
 async def grant_application_approval_read(

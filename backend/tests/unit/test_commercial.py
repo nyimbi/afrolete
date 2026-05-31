@@ -479,6 +479,69 @@ def test_grant_application_internal_approval_workflow(client, identity_headers) 
     assert applications[0]["approval_status"] == "approved"
     assert applications[0]["approval_approved_count"] == 1
 
+    package_response = client.post(
+        "/api/v1/commercial/grants/submission-packages",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "grant_application_id": application["id"],
+            "package_name": "Foundation portal package",
+            "submission_method": "online_portal",
+            "portal_url": "https://grants.example/submit",
+            "checklist_items": [
+                "Board approval secured",
+                "Budget attached",
+                "Impact metrics attached",
+            ],
+            "completed_checklist_items": [
+                "Board approval secured",
+                "Budget attached",
+                "Impact metrics attached",
+            ],
+            "document_manifest": [
+                "application.pdf",
+                "budget.xlsx",
+                "safeguarding-policy.pdf",
+            ],
+            "prepared_by_name": "Grant Manager",
+            "status": "submitted",
+            "confirmation_reference": "YSF-2026-00042",
+            "notes": "Submitted through funder portal after board approval.",
+        },
+    )
+    assert package_response.status_code == 201
+    submission_package = package_response.json()
+    assert submission_package["status"] == "submitted"
+    assert submission_package["ready_to_submit"] is True
+    assert submission_package["checklist_completed_count"] == 3
+    assert submission_package["document_count"] == 3
+    assert submission_package["submitted_at"] is not None
+    assert submission_package["approval_status"] == "approved"
+
+    confirmed_response = client.patch(
+        f"/api/v1/commercial/grants/submission-packages/{submission_package['id']}",
+        headers=identity_headers,
+        json={
+            "status": "confirmed",
+            "confirmation_reference": "YSF-CONFIRMED-00042",
+            "completed_checklist_items": submission_package["completed_checklist_items"],
+            "blockers": [],
+            "notes": "Funder portal confirmed receipt.",
+        },
+    )
+    assert confirmed_response.status_code == 200
+    confirmed = confirmed_response.json()
+    assert confirmed["status"] == "confirmed"
+    assert confirmed["confirmed_at"] is not None
+    assert confirmed["confirmation_reference"] == "YSF-CONFIRMED-00042"
+
+    packages = client.get(
+        f"/api/v1/commercial/grants/submission-packages?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert packages[0]["id"] == submission_package["id"]
+    assert packages[0]["project_title"] == "Scholarship expansion"
+
 
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,

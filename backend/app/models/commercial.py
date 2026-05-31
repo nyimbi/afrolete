@@ -353,6 +353,29 @@ class GrantApplicationApproval(IdMixin, TimestampMixin, Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class GrantSubmissionPackage(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_submission_packages"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "grant_application_id", "package_name", name="uq_grant_submission_packages_name"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    grant_application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("grant_applications.id"), index=True)
+    package_name: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    submission_method: Mapped[str] = mapped_column(String(80), default="online_portal", nullable=False, index=True)
+    portal_url: Mapped[str | None] = mapped_column(String(500))
+    checklist_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    completed_checklist_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    document_manifest_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    prepared_by_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    confirmation_reference: Mapped[str | None] = mapped_column(String(240), index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    blockers_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class GrantReport(IdMixin, TimestampMixin, Base):
     __tablename__ = "grant_reports"
 
