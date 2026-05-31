@@ -4984,6 +4984,39 @@ export type FinancialBudgetSummaryRead = {
   recommendations: string[];
 };
 
+export type FinancialStatementLineRead = {
+  label: string;
+  amount: string;
+  category: string;
+  source: string;
+  note: string | null;
+};
+
+export type FinancialStatementPackageRead = {
+  id: UUID;
+  organization_id: UUID;
+  period_start: string;
+  period_end: string;
+  statement_type: string;
+  basis: string;
+  currency: string;
+  prepared_by_name: string | null;
+  profit_loss: FinancialStatementLineRead[];
+  balance_sheet: FinancialStatementLineRead[];
+  cash_flow: FinancialStatementLineRead[];
+  total_revenue: string;
+  total_expense: string;
+  net_income: string;
+  total_assets: string;
+  total_liabilities: string;
+  net_assets: string;
+  net_cash_change: string;
+  ending_cash: string;
+  highlights: string[];
+  status: string;
+  generated_at: string;
+};
+
 export type CommercialRefundRead = {
   refund_id: string;
   organization_id: UUID;

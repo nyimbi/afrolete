@@ -28,6 +28,7 @@ from app.models.commercial import (
     FinancialBudget,
     FinancialBudgetLine,
     FinancialForecastScenario,
+    FinancialStatementPackage,
     FundraisingCampaign,
     GrantApplication,
     GrantOpportunity,
@@ -90,6 +91,9 @@ from app.schemas.commercial import (
     FinancialBudgetSummaryRead,
     FinancialForecastScenarioCreate,
     FinancialForecastScenarioRead,
+    FinancialStatementCreate,
+    FinancialStatementLineRead,
+    FinancialStatementPackageRead,
     FundraisingCampaignCreate,
     GrantApplicationCreate,
     GrantDashboardRead,
@@ -2082,6 +2086,55 @@ async def financial_budget_summary(db: AsyncSession, organization_id: UUID, budg
     )
 
 
+async def generate_financial_statement_package(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FinancialStatementCreate,
+    authz: AuthorizationService,
+) -> FinancialStatementPackageRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    rows = await financial_statement_source_rows(db, payload.organization_id, payload.period_start, payload.period_end)
+    profit_loss = build_profit_loss_statement(rows)
+    balance_sheet = build_balance_sheet_statement(rows)
+    cash_flow = build_cash_flow_statement(rows)
+    highlights = financial_statement_highlights(profit_loss, balance_sheet, cash_flow)
+    now = datetime.now(UTC)
+    package = FinancialStatementPackage(
+        organization_id=payload.organization_id,
+        statement_type=payload.statement_type,
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        basis=payload.basis,
+        currency=payload.currency.upper(),
+        prepared_by_name=payload.prepared_by_name,
+        profit_loss_json=financial_statement_lines_dump(profit_loss),
+        balance_sheet_json=financial_statement_lines_dump(balance_sheet),
+        cash_flow_json=financial_statement_lines_dump(cash_flow),
+        highlights_json=commercial_json_dumps_list(highlights),
+        status="generated",
+        generated_at=now,
+    )
+    db.add(package)
+    await db.commit()
+    await db.refresh(package)
+    return financial_statement_package_read(package)
+
+
+async def list_financial_statement_packages(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[FinancialStatementPackageRead]:
+    packages = (
+        await db.scalars(
+            select(FinancialStatementPackage)
+            .where(FinancialStatementPackage.organization_id == organization_id)
+            .order_by(FinancialStatementPackage.period_end.desc(), FinancialStatementPackage.generated_at.desc())
+        )
+    ).all()
+    return [financial_statement_package_read(package) for package in packages]
+
+
 async def get_financial_budget(db: AsyncSession, budget_id: UUID) -> FinancialBudget:
     budget = await db.get(FinancialBudget, budget_id)
     if budget is None:
@@ -2269,6 +2322,275 @@ def financial_budget_recommendations(
     if not recommendations:
         recommendations.append(f"{budget.name} is tracking within the current financial guardrails.")
     return recommendations
+
+
+async def financial_statement_source_rows(
+    db: AsyncSession,
+    organization_id: UUID,
+    period_start: date,
+    period_end: date,
+) -> dict[str, list[Any]]:
+    start_dt = datetime.combine(period_start, datetime.min.time(), tzinfo=UTC)
+    end_dt = datetime.combine(period_end, datetime.max.time(), tzinfo=UTC)
+    donations = list(
+        (
+            await db.scalars(
+                select(Donation).where(
+                    Donation.organization_id == organization_id,
+                    Donation.created_at >= start_dt,
+                    Donation.created_at <= end_dt,
+                )
+            )
+        ).all()
+    )
+    payments = list(
+        (
+            await db.scalars(
+                select(FinancePayment).where(
+                    FinancePayment.organization_id == organization_id,
+                    FinancePayment.received_at >= start_dt,
+                    FinancePayment.received_at <= end_dt,
+                )
+            )
+        ).all()
+    )
+    invoices = list(
+        (
+            await db.scalars(
+                select(FinanceInvoice).where(
+                    FinanceInvoice.organization_id == organization_id,
+                    or_(FinanceInvoice.due_on.is_(None), FinanceInvoice.due_on <= period_end),
+                )
+            )
+        ).all()
+    )
+    ticket_orders = list(
+        (
+            await db.scalars(
+                select(TicketOrder).where(
+                    TicketOrder.organization_id == organization_id,
+                    TicketOrder.created_at >= start_dt,
+                    TicketOrder.created_at <= end_dt,
+                )
+            )
+        ).all()
+    )
+    merchandise_orders = list(
+        (
+            await db.scalars(
+                select(MerchandiseOrder).where(
+                    MerchandiseOrder.organization_id == organization_id,
+                    MerchandiseOrder.created_at >= start_dt,
+                    MerchandiseOrder.created_at <= end_dt,
+                )
+            )
+        ).all()
+    )
+    sponsorships = list(
+        (
+            await db.scalars(
+                select(SponsorshipAgreement).where(
+                    SponsorshipAgreement.organization_id == organization_id,
+                    SponsorshipAgreement.status == CommercialStatus.ACTIVE,
+                    or_(SponsorshipAgreement.ends_on.is_(None), SponsorshipAgreement.ends_on >= period_start),
+                    or_(SponsorshipAgreement.starts_on.is_(None), SponsorshipAgreement.starts_on <= period_end),
+                )
+            )
+        ).all()
+    )
+    budget_lines = list(
+        (
+            await db.scalars(
+                select(FinancialBudgetLine)
+                .join(FinancialBudget, FinancialBudget.id == FinancialBudgetLine.budget_id)
+                .where(
+                    FinancialBudgetLine.organization_id == organization_id,
+                    FinancialBudgetLine.status == "active",
+                    FinancialBudget.period_start <= period_end,
+                    FinancialBudget.period_end >= period_start,
+                )
+            )
+        ).all()
+    )
+    return {
+        "donations": donations,
+        "payments": payments,
+        "invoices": invoices,
+        "ticket_orders": ticket_orders,
+        "merchandise_orders": merchandise_orders,
+        "sponsorships": sponsorships,
+        "budget_lines": budget_lines,
+    }
+
+
+def build_profit_loss_statement(rows: dict[str, list[Any]]) -> list[FinancialStatementLineRead]:
+    sponsorship_revenue = money_sum(item.value_amount for item in rows["sponsorships"])
+    donation_revenue = money_sum(item.amount for item in rows["donations"])
+    ticket_revenue = money_sum(item.total_amount for item in rows["ticket_orders"] if item.status == CommercialStatus.PAID)
+    merchandise_revenue = money_sum(item.total_amount for item in rows["merchandise_orders"] if item.status == CommercialStatus.PAID)
+    invoice_revenue = money_sum(item.amount_due for item in rows["invoices"] if item.status != CommercialStatus.DRAFT)
+    budget_expense = money_sum(
+        item.amount_actual for item in rows["budget_lines"] if item.line_type == "expense"
+    )
+    cost_of_goods = money_sum(
+        item.total_amount * Decimal("0.55") for item in rows["merchandise_orders"] if item.status == CommercialStatus.PAID
+    )
+    return [
+        statement_line("Sponsorship revenue", sponsorship_revenue, "revenue", "sponsorships"),
+        statement_line("Fundraising donations", donation_revenue, "revenue", "donations"),
+        statement_line("Ticket sales", ticket_revenue, "revenue", "ticket_orders"),
+        statement_line("Merchandise sales", merchandise_revenue, "revenue", "merchandise_orders"),
+        statement_line("Commercial invoices billed", invoice_revenue, "revenue", "finance_invoices"),
+        statement_line("Budgeted operating expenses used", -budget_expense, "expense", "financial_budget_lines"),
+        statement_line("Estimated merchandise cost of goods", -cost_of_goods, "expense", "merchandise_orders"),
+    ]
+
+
+def build_balance_sheet_statement(rows: dict[str, list[Any]]) -> list[FinancialStatementLineRead]:
+    payments = money_sum(item.amount for item in rows["payments"])
+    donations = money_sum(item.amount for item in rows["donations"])
+    ticket_cash = money_sum(item.total_amount for item in rows["ticket_orders"] if item.status == CommercialStatus.PAID)
+    merchandise_cash = money_sum(item.total_amount for item in rows["merchandise_orders"] if item.status == CommercialStatus.PAID)
+    outstanding = money_sum(
+        max(item.amount_due - item.amount_paid, Decimal("0")) for item in rows["invoices"] if item.status != CommercialStatus.PAID
+    )
+    budget_liabilities = money_sum(
+        item.amount_actual for item in rows["budget_lines"] if item.line_type == "expense" and item.restricted
+    )
+    operating_expense = money_sum(item.amount_actual for item in rows["budget_lines"] if item.line_type == "expense")
+    cash = (payments + donations + ticket_cash + merchandise_cash - operating_expense).quantize(Decimal("0.01"))
+    liabilities = budget_liabilities.quantize(Decimal("0.01"))
+    net_assets = (cash + outstanding - liabilities).quantize(Decimal("0.01"))
+    return [
+        statement_line("Cash and cash equivalents", cash, "asset", "payments_donations_ticketing_merchandise"),
+        statement_line("Accounts receivable", outstanding, "asset", "finance_invoices"),
+        statement_line("Restricted obligations", -liabilities, "liability", "restricted_budget_lines"),
+        statement_line("Net assets", net_assets, "net_assets", "derived"),
+    ]
+
+
+def build_cash_flow_statement(rows: dict[str, list[Any]]) -> list[FinancialStatementLineRead]:
+    invoice_cash = money_sum(item.amount for item in rows["payments"])
+    donation_cash = money_sum(item.amount for item in rows["donations"])
+    ticket_cash = money_sum(item.total_amount for item in rows["ticket_orders"] if item.status == CommercialStatus.PAID)
+    merchandise_cash = money_sum(item.total_amount for item in rows["merchandise_orders"] if item.status == CommercialStatus.PAID)
+    operating_outflow = money_sum(item.amount_actual for item in rows["budget_lines"] if item.line_type == "expense")
+    return [
+        statement_line("Invoice collections", invoice_cash, "operating_inflow", "finance_payments"),
+        statement_line("Donation collections", donation_cash, "operating_inflow", "donations"),
+        statement_line("Ticket collections", ticket_cash, "operating_inflow", "ticket_orders"),
+        statement_line("Merchandise collections", merchandise_cash, "operating_inflow", "merchandise_orders"),
+        statement_line("Operating cash outflows", -operating_outflow, "operating_outflow", "financial_budget_lines"),
+    ]
+
+
+def financial_statement_highlights(
+    profit_loss: list[FinancialStatementLineRead],
+    balance_sheet: list[FinancialStatementLineRead],
+    cash_flow: list[FinancialStatementLineRead],
+) -> list[str]:
+    revenue = statement_category_total(profit_loss, "revenue")
+    expense = abs(statement_category_total(profit_loss, "expense"))
+    net_income = (revenue - expense).quantize(Decimal("0.01"))
+    cash_change = money_sum(line.amount for line in cash_flow)
+    receivables = next((line.amount for line in balance_sheet if line.label == "Accounts receivable"), Decimal("0"))
+    highlights = [f"Net income for the period is {net_income}.", f"Net cash change is {cash_change}."]
+    if receivables > 0:
+        highlights.append(f"Accounts receivable needs collection follow-up: {receivables}.")
+    if expense > revenue:
+        highlights.append("Expenses exceed revenue; review budget controls before board approval.")
+    else:
+        highlights.append("Revenue covers recorded operating expenses for this management period.")
+    return highlights
+
+
+def financial_statement_package_read(package: FinancialStatementPackage) -> FinancialStatementPackageRead:
+    profit_loss = financial_statement_lines_load(package.profit_loss_json)
+    balance_sheet = financial_statement_lines_load(package.balance_sheet_json)
+    cash_flow = financial_statement_lines_load(package.cash_flow_json)
+    total_revenue = statement_category_total(profit_loss, "revenue")
+    total_expense = abs(statement_category_total(profit_loss, "expense"))
+    total_assets = statement_category_total(balance_sheet, "asset")
+    total_liabilities = abs(statement_category_total(balance_sheet, "liability"))
+    return FinancialStatementPackageRead(
+        id=package.id,
+        organization_id=package.organization_id,
+        period_start=package.period_start,
+        period_end=package.period_end,
+        statement_type=package.statement_type,
+        basis=package.basis,
+        currency=package.currency,
+        prepared_by_name=package.prepared_by_name,
+        profit_loss=profit_loss,
+        balance_sheet=balance_sheet,
+        cash_flow=cash_flow,
+        total_revenue=total_revenue,
+        total_expense=total_expense,
+        net_income=(total_revenue - total_expense).quantize(Decimal("0.01")),
+        total_assets=total_assets,
+        total_liabilities=total_liabilities,
+        net_assets=(total_assets - total_liabilities).quantize(Decimal("0.01")),
+        net_cash_change=money_sum(line.amount for line in cash_flow),
+        ending_cash=next((line.amount for line in balance_sheet if line.label == "Cash and cash equivalents"), Decimal("0.00")),
+        highlights=commercial_json_loads_list(package.highlights_json),
+        status=package.status,
+        generated_at=package.generated_at,
+    )
+
+
+def statement_line(label: str, amount: Decimal, category: str, source: str, note: str | None = None) -> FinancialStatementLineRead:
+    return FinancialStatementLineRead(
+        label=label,
+        amount=amount.quantize(Decimal("0.01")),
+        category=category,
+        source=source,
+        note=note,
+    )
+
+
+def statement_category_total(lines: list[FinancialStatementLineRead], category: str) -> Decimal:
+    return money_sum(line.amount for line in lines if line.category == category)
+
+
+def money_sum(values) -> Decimal:
+    return sum(values, Decimal("0")).quantize(Decimal("0.01"))
+
+
+def financial_statement_lines_dump(lines: list[FinancialStatementLineRead]) -> str:
+    return json.dumps(
+        [
+            {
+                "label": line.label,
+                "amount": str(line.amount),
+                "category": line.category,
+                "source": line.source,
+                "note": line.note,
+            }
+            for line in lines
+        ]
+    )
+
+
+def financial_statement_lines_load(value: str) -> list[FinancialStatementLineRead]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    lines: list[FinancialStatementLineRead] = []
+    for item in parsed:
+        if isinstance(item, dict):
+            lines.append(
+                FinancialStatementLineRead(
+                    label=str(item.get("label", "Line")),
+                    amount=Decimal(str(item.get("amount", "0"))),
+                    category=str(item.get("category", "other")),
+                    source=str(item.get("source", "derived")),
+                    note=str(item["note"]) if item.get("note") is not None else None,
+                )
+            )
+    return lines
 
 
 def commercial_json_dumps_list(values: list[str]) -> str:

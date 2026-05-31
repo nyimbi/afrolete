@@ -258,6 +258,152 @@ def test_donor_crm_tracks_lifetime_giving_touchpoints_and_stewardship(client, id
     assert complete_response.json()["status"] == "completed"
 
 
+def test_financial_statement_package_generates_pl_balance_sheet_and_cash_flow(client, identity_headers) -> None:
+    organization, team, event = create_commercial_context(client, identity_headers)
+
+    sponsor = client.post(
+        "/api/v1/commercial/sponsors",
+        headers=identity_headers,
+        json={"organization_id": organization["id"], "name": "Board Sponsor", "contact_email": "board@example.com"},
+    ).json()
+    client.post(
+        "/api/v1/commercial/sponsorships",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "sponsor_id": sponsor["id"],
+            "event_id": event["id"],
+            "name": "June sponsor",
+            "tier": "Gold",
+            "value_amount": "5000.00",
+            "starts_on": "2026-06-01",
+            "ends_on": "2026-06-30",
+        },
+    )
+    campaign = client.post(
+        "/api/v1/commercial/campaigns",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "name": "June appeal",
+            "purpose": "Scholarship access",
+            "goal_amount": "10000.00",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/donations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "campaign_id": campaign["id"],
+            "donor_name": "Statement Donor",
+            "donor_email": "statement@example.com",
+            "amount": "1200.00",
+        },
+    )
+    ticket_product = client.post(
+        "/api/v1/commercial/tickets/products",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "event_id": event["id"],
+            "name": "June match",
+            "price": "100.00",
+            "capacity": 100,
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/tickets/orders",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "ticket_product_id": ticket_product["id"],
+            "buyer_name": "Family Fan",
+            "buyer_email": "fan@example.com",
+            "quantity": 3,
+        },
+    )
+    invoice = client.post(
+        "/api/v1/commercial/invoices",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "invoice_number": "STATEMENT-1",
+            "title": "Training services",
+            "amount_due": "800.00",
+            "due_on": "2026-06-15",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/payments",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "invoice_id": invoice["id"],
+            "amount": "500.00",
+            "method": "bank_transfer",
+        },
+    )
+    budget = client.post(
+        "/api/v1/commercial/budgets",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "June operating budget",
+            "fiscal_year": 2026,
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "currency": "USD",
+            "status": "active",
+        },
+    ).json()
+    client.post(
+        "/api/v1/commercial/budgets/lines",
+        headers=identity_headers,
+        json={
+            "budget_id": budget["id"],
+            "line_type": "expense",
+            "category": "Travel",
+            "amount_budgeted": "700.00",
+            "amount_actual": "650.00",
+            "restricted": True,
+        },
+    )
+
+    statement_response = client.post(
+        "/api/v1/commercial/financial-statements",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "period_start": "2026-05-01",
+            "period_end": "2026-06-30",
+            "statement_type": "monthly",
+            "basis": "management",
+            "currency": "USD",
+            "prepared_by_name": "Treasurer",
+        },
+    )
+    assert statement_response.status_code == 201
+    statement = statement_response.json()
+    assert statement["total_revenue"] == "7300.00"
+    assert statement["total_expense"] == "650.00"
+    assert statement["net_income"] == "6650.00"
+    assert statement["ending_cash"] == "1350.00"
+    assert statement["net_cash_change"] == "1350.00"
+    assert any(line["label"] == "Accounts receivable" and line["amount"] == "300.00" for line in statement["balance_sheet"])
+    assert len(statement["profit_loss"]) >= 5
+    assert statement["highlights"]
+
+    list_response = client.get(
+        f"/api/v1/commercial/financial-statements?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["id"] == statement["id"]
+
+
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,
     identity_headers,

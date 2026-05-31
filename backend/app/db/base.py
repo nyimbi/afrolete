@@ -76,6 +76,7 @@ from app.models.commercial import (  # noqa: F401,E402
     FinancialBudget,
     FinancialBudgetLine,
     FinancialForecastScenario,
+    FinancialStatementPackage,
     FundraisingCampaign,
     GrantApplication,
     GrantOpportunity,

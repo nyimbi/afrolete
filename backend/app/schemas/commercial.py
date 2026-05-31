@@ -963,6 +963,48 @@ class FinancialBudgetSummaryRead(BaseModel):
     recommendations: list[str]
 
 
+class FinancialStatementLineRead(BaseModel):
+    label: str
+    amount: Decimal
+    category: str
+    source: str
+    note: str | None = None
+
+
+class FinancialStatementCreate(BaseModel):
+    organization_id: UUID
+    period_start: date
+    period_end: date
+    statement_type: str = Field(default="monthly", pattern="^(monthly|quarterly|annual|board|audit)$")
+    basis: str = Field(default="management", pattern="^(cash|accrual|management)$")
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    prepared_by_name: str | None = Field(default=None, max_length=180)
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "FinancialStatementCreate":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be on or after period_start")
+        return self
+
+
+class FinancialStatementPackageRead(FinancialStatementCreate):
+    id: UUID
+    profit_loss: list[FinancialStatementLineRead]
+    balance_sheet: list[FinancialStatementLineRead]
+    cash_flow: list[FinancialStatementLineRead]
+    total_revenue: Decimal
+    total_expense: Decimal
+    net_income: Decimal
+    total_assets: Decimal
+    total_liabilities: Decimal
+    net_assets: Decimal
+    net_cash_change: Decimal
+    ending_cash: Decimal
+    highlights: list[str]
+    status: str
+    generated_at: datetime
+
+
 class TaxQuoteRead(BaseModel):
     organization_id: UUID
     jurisdiction: str

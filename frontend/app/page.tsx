@@ -296,6 +296,7 @@ import type {
   FinancialBudgetRead,
   FinancialBudgetSummaryRead,
   FinancialForecastScenarioRead,
+  FinancialStatementPackageRead,
   FixtureMatchEventRead,
   FixtureOfficialAssignmentRead,
   FundraisingCampaignRead,
@@ -2352,6 +2353,8 @@ export default function HomePage() {
   const [financialBudgetLines, setFinancialBudgetLines] = useState<FinancialBudgetLineRead[]>([]);
   const [financialBudgetSummary, setFinancialBudgetSummary] = useState<FinancialBudgetSummaryRead | null>(null);
   const [financialForecastScenarios, setFinancialForecastScenarios] = useState<FinancialForecastScenarioRead[]>([]);
+  const [financialStatements, setFinancialStatements] = useState<FinancialStatementPackageRead[]>([]);
+  const [financialStatement, setFinancialStatement] = useState<FinancialStatementPackageRead | null>(null);
   const [commercialSummary, setCommercialSummary] = useState<CommercialSummaryRead | null>(null);
   const [taxQuote, setTaxQuote] = useState<TaxQuoteRead | null>(null);
   const [commercialTaxFiling, setCommercialTaxFiling] = useState<CommercialTaxFilingRead | null>(null);
@@ -3913,6 +3916,14 @@ export default function HomePage() {
     cash_adjustment_amount: "-10000.00",
     membership_growth_percent: "15.00",
     facility_utilization_percent: "62.50"
+  });
+  const [financialStatementForm, setFinancialStatementForm] = useState({
+    period_start: "2026-05-01",
+    period_end: "2026-06-30",
+    statement_type: "monthly",
+    basis: "management",
+    currency: "USD",
+    prepared_by_name: "Treasurer"
   });
   const [reportForm, setReportForm] = useState({
     name: "Weekly intelligence brief",
@@ -5580,6 +5591,7 @@ export default function HomePage() {
       ticketAccessDashboardData,
       invoiceData,
       budgetData,
+      statementData,
       summaryData,
       dashboardData,
       payoutData,
@@ -5621,6 +5633,7 @@ export default function HomePage() {
       apiRequest<TicketAccessDashboardRead>(`/commercial/tickets/access-dashboard?organization_id=${organizationId}`),
       apiRequest<FinanceInvoiceRead[]>(`/commercial/invoices?organization_id=${organizationId}`),
       apiRequest<FinancialBudgetRead[]>(`/commercial/budgets?organization_id=${organizationId}`),
+      apiRequest<FinancialStatementPackageRead[]>(`/commercial/financial-statements?organization_id=${organizationId}`),
       apiRequest<CommercialSummaryRead>(`/commercial/summary?organization_id=${organizationId}`),
       apiRequest<SponsorshipDashboardRead[]>(
         `/commercial/sponsorship-dashboard?organization_id=${organizationId}`
@@ -5662,6 +5675,8 @@ export default function HomePage() {
     setTicketAccessDashboard(ticketAccessDashboardData);
     setInvoices(invoiceData);
     setFinancialBudgets(budgetData);
+    setFinancialStatements(statementData);
+    setFinancialStatement(statementData[0] ?? null);
     setCommercialSummary(summaryData);
     setSponsorshipDashboard(dashboardData);
     setCommercialPayouts(payoutData);
@@ -6320,6 +6335,8 @@ export default function HomePage() {
       setFinancialBudgetLines([]);
       setFinancialForecastScenarios([]);
       setFinancialBudgetSummary(null);
+      setFinancialStatements([]);
+      setFinancialStatement(null);
       setSelectedFinancialBudgetId("");
       setCommercialSummary(null);
       setTaxQuote(null);
@@ -20673,6 +20690,36 @@ export default function HomePage() {
     );
   };
 
+  const generateFinancialStatementPackage = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before generating statements", "bad");
+      return;
+    }
+    runAction(
+      "generate-financial-statements",
+      () =>
+        apiRequest<FinancialStatementPackageRead>("/commercial/financial-statements", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            period_start: financialStatementForm.period_start,
+            period_end: financialStatementForm.period_end,
+            statement_type: financialStatementForm.statement_type,
+            basis: financialStatementForm.basis,
+            currency: financialStatementForm.currency.toUpperCase(),
+            prepared_by_name: financialStatementForm.prepared_by_name
+          }
+        }),
+      (statement) => {
+        setFinancialStatement(statement);
+        setFinancialStatements((current) => [statement, ...current.filter((item) => item.id !== statement.id)]);
+        addLog(`Financial statements generated: net income ${statement.net_income}`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const quoteCommercialTax = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -27605,6 +27652,7 @@ export default function HomePage() {
                 <button type="button" onClick={createInvoiceAndPayment} disabled={busyAction !== null}>Invoice</button>
                 <button type="button" onClick={createFinancialBudgetPlan} disabled={busyAction !== null}>Budget</button>
                 <button type="button" onClick={refreshFinancialBudgetSummary} disabled={busyAction !== null}>Refresh budget</button>
+                <button type="button" onClick={generateFinancialStatementPackage} disabled={busyAction !== null}>Statements</button>
                 <button type="button" onClick={refundSelectedInvoice} disabled={busyAction !== null}>Refund invoice</button>
                 <button type="button" onClick={quoteCommercialTax} disabled={busyAction !== null}>Tax</button>
                 <button type="button" onClick={fileCommercialTax} disabled={busyAction !== null}>File tax</button>
@@ -27663,6 +27711,18 @@ export default function HomePage() {
               <div>
                 <span className="muted">Variance alerts</span>
                 <strong>{financialBudgetSummary?.variance_alert_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Net income</span>
+                <strong>{financialStatement?.net_income ?? "0.00"}</strong>
+              </div>
+              <div>
+                <span className="muted">Net assets</span>
+                <strong>{financialStatement?.net_assets ?? "0.00"}</strong>
+              </div>
+              <div>
+                <span className="muted">Cash change</span>
+                <strong>{financialStatement?.net_cash_change ?? "0.00"}</strong>
               </div>
             </div>
             <div className="form-grid">
@@ -27850,8 +27910,82 @@ export default function HomePage() {
                 Cash adjustment
                 <input value={financialBudgetForm.cash_adjustment_amount} onChange={(event) => setFinancialBudgetForm({ ...financialBudgetForm, cash_adjustment_amount: event.target.value })} />
               </label>
+              <label>
+                Statement start
+                <input type="date" value={financialStatementForm.period_start} onChange={(event) => setFinancialStatementForm({ ...financialStatementForm, period_start: event.target.value })} />
+              </label>
+              <label>
+                Statement end
+                <input type="date" value={financialStatementForm.period_end} onChange={(event) => setFinancialStatementForm({ ...financialStatementForm, period_end: event.target.value })} />
+              </label>
+              <label>
+                Statement type
+                <select value={financialStatementForm.statement_type} onChange={(event) => setFinancialStatementForm({ ...financialStatementForm, statement_type: event.target.value })}>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="annual">Annual</option>
+                  <option value="board">Board</option>
+                  <option value="audit">Audit</option>
+                </select>
+              </label>
+              <label>
+                Statement basis
+                <select value={financialStatementForm.basis} onChange={(event) => setFinancialStatementForm({ ...financialStatementForm, basis: event.target.value })}>
+                  <option value="management">Management</option>
+                  <option value="cash">Cash</option>
+                  <option value="accrual">Accrual</option>
+                </select>
+              </label>
+              <label>
+                Statement currency
+                <input value={financialStatementForm.currency} onChange={(event) => setFinancialStatementForm({ ...financialStatementForm, currency: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Prepared by
+                <input value={financialStatementForm.prepared_by_name} onChange={(event) => setFinancialStatementForm({ ...financialStatementForm, prepared_by_name: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {financialStatement ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{financialStatement.statement_type} statements · {financialStatement.net_income} net income</strong>
+                    <span>
+                      Assets {financialStatement.total_assets} · liabilities {financialStatement.total_liabilities} · ending cash {financialStatement.ending_cash}
+                    </span>
+                    <small>{financialStatement.highlights[0] ?? "P&L, balance sheet, and cash flow package generated."}</small>
+                  </div>
+                </article>
+              ) : null}
+              {financialStatement?.profit_loss.slice(0, 4).map((line) => (
+                <article key={`pl-${line.label}-${line.source}`} className="task-card">
+                  <div>
+                    <strong>P&L · {line.label}</strong>
+                    <span>{line.amount} · {line.category} · {line.source}</span>
+                  </div>
+                </article>
+              ))}
+              {financialStatement?.cash_flow.slice(0, 3).map((line) => (
+                <article key={`cash-${line.label}-${line.source}`} className="task-card">
+                  <div>
+                    <strong>Cash flow · {line.label}</strong>
+                    <span>{line.amount} · {line.category.replaceAll("_", " ")}</span>
+                  </div>
+                </article>
+              ))}
+              {financialStatements.slice(0, 3).map((statement) => (
+                <button
+                  type="button"
+                  key={statement.id}
+                  className={`task-card ${statement.id === financialStatement?.id ? "selected" : ""}`}
+                  onClick={() => setFinancialStatement(statement)}
+                >
+                  <div>
+                    <strong>{statement.period_start} to {statement.period_end}</strong>
+                    <span>{statement.basis} · net income {statement.net_income} · cash {statement.ending_cash}</span>
+                  </div>
+                </button>
+              ))}
               {financialBudgetSummary ? (
                 <article className="task-card">
                   <div>

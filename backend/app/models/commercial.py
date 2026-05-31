@@ -625,6 +625,24 @@ class FinancialForecastScenario(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
 
 
+class FinancialStatementPackage(IdMixin, TimestampMixin, Base):
+    __tablename__ = "financial_statement_packages"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    statement_type: Mapped[str] = mapped_column(String(80), default="monthly", nullable=False, index=True)
+    period_start: Mapped[date] = mapped_column(nullable=False, index=True)
+    period_end: Mapped[date] = mapped_column(nullable=False, index=True)
+    basis: Mapped[str] = mapped_column(String(40), default="management", nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    prepared_by_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    profit_loss_json: Mapped[str] = mapped_column(Text, nullable=False)
+    balance_sheet_json: Mapped[str] = mapped_column(Text, nullable=False)
+    cash_flow_json: Mapped[str] = mapped_column(Text, nullable=False)
+    highlights_json: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="generated", nullable=False, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class CommercialPaymentSession(IdMixin, TimestampMixin, Base):
     __tablename__ = "commercial_payment_sessions"
     __table_args__ = (UniqueConstraint("organization_id", "provider", "local_session_id"),)

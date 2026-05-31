@@ -42,6 +42,8 @@ from app.schemas.commercial import (
     FinancialBudgetSummaryRead,
     FinancialForecastScenarioCreate,
     FinancialForecastScenarioRead,
+    FinancialStatementCreate,
+    FinancialStatementPackageRead,
     FundraisingCampaignCreate,
     FundraisingCampaignRead,
     GrantApplicationCreate,
@@ -137,6 +139,7 @@ from app.services.commercial import (
     complete_donor_stewardship_plan,
     donor_dashboard,
     execute_payment_settlement_payout,
+    generate_financial_statement_package,
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
     issue_complimentary_tickets,
@@ -150,6 +153,7 @@ from app.services.commercial import (
     list_financial_budget_lines,
     list_financial_budgets,
     list_financial_forecast_scenarios,
+    list_financial_statement_packages,
     list_grant_applications,
     list_grant_opportunities,
     list_grant_reports,
@@ -1110,6 +1114,24 @@ async def financial_budget_summary_route(
     db: AsyncSession = Depends(get_db),
 ) -> FinancialBudgetSummaryRead:
     return await financial_budget_summary(db, organization_id, budget_id)
+
+
+@router.post("/financial-statements", response_model=FinancialStatementPackageRead, status_code=status.HTTP_201_CREATED)
+async def generate_financial_statement_package_route(
+    payload: FinancialStatementCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FinancialStatementPackageRead:
+    return await generate_financial_statement_package(db, identity, payload, authz)
+
+
+@router.get("/financial-statements", response_model=list[FinancialStatementPackageRead])
+async def list_financial_statement_packages_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[FinancialStatementPackageRead]:
+    return await list_financial_statement_packages(db, organization_id)
 
 
 @router.get("/tax-quote", response_model=TaxQuoteRead)
