@@ -114,6 +114,8 @@ client.communications.messages.dispatch(
 subscriptions = client.billing.subscriptions.list(organization_id=organization["id"])
 meters = client.billing.meters.list()
 if subscriptions and meters:
+    # Billing subscriptions are tenant-paid AfroLete hosting accounts. Club member
+    # dues remain organization-managed receivables outside this SDK billing lane.
     client.billing.usage.record(
         {
             "organization_id": organization["id"],

@@ -11,8 +11,17 @@ from app.models.enums import BillingCycle, BillingInvoiceStatus, SubscriptionSta
 class BillingPlanCreate(BaseModel):
     code: str = Field(min_length=2, max_length=80)
     name: str = Field(min_length=2, max_length=160)
-    description: str | None = Field(default=None, max_length=4000)
-    base_price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    description: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="AfroLete hosting plan description for tenant organizations, not member dues.",
+    )
+    base_price: Decimal = Field(
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="Base hosting amount charged to the club, school, association, or tenant organization.",
+    )
     currency: str = Field(default="USD", min_length=3, max_length=3)
     billing_cycle: BillingCycle = BillingCycle.MONTHLY
     included_athletes: int = Field(default=0, ge=0)
@@ -30,15 +39,27 @@ class BillingPlanRead(BillingPlanCreate):
 
 
 class SubscriptionCreate(BaseModel):
-    organization_id: UUID
+    organization_id: UUID = Field(
+        description="Tenant organization that pays AfroLete for platform hosting."
+    )
     billing_plan_id: UUID
     billing_cycle: BillingCycle = BillingCycle.MONTHLY
     current_period_start: date
     current_period_end: date
     trial_ends_on: date | None = None
     next_billing_on: date | None = None
-    seats_purchased: int = Field(default=0, ge=0)
-    negotiated_price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    seats_purchased: int = Field(
+        default=0,
+        ge=0,
+        description="Tenant-paid platform seats or capacity; this is not a member receivable.",
+    )
+    negotiated_price: Decimal | None = Field(
+        default=None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="Negotiated AfroLete hosting price paid by the tenant organization.",
+    )
     discount_code: str | None = Field(default=None, max_length=80)
     external_customer_id: str | None = Field(default=None, max_length=180)
     external_subscription_id: str | None = Field(default=None, max_length=180)
@@ -87,7 +108,7 @@ class UsageRecordRead(UsageRecordCreate):
 
 
 class SaaSInvoiceCreate(BaseModel):
-    organization_id: UUID
+    organization_id: UUID = Field(description="Tenant organization responsible for this AfroLete hosting invoice.")
     subscription_id: UUID
     invoice_number: str = Field(min_length=2, max_length=80)
     period_start: date

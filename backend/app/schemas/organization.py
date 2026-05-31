@@ -934,10 +934,23 @@ class MembershipRead(BaseModel):
 
 
 class MemberSubscriptionPlanCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=180)
-    description: str | None = Field(default=None, max_length=4000)
+    name: str = Field(
+        min_length=2,
+        max_length=180,
+        description="Club-managed dues or membership-fee plan; not an AfroLete hosting subscription.",
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="Member-facing dues description controlled by the tenant organization.",
+    )
     member_role: str | None = Field(default=None, max_length=80)
-    amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    amount: Decimal = Field(
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="Amount the tenant organization charges its member.",
+    )
     currency: str = Field(default="KES", min_length=3, max_length=3)
     billing_interval: str = Field(default="monthly", pattern="^(weekly|monthly|quarterly|term|season|annual|one_time)$")
     due_day: int | None = Field(default=None, ge=1, le=31)
@@ -987,7 +1000,12 @@ class MemberSubscriptionRead(BaseModel):
 
 
 class MemberSubscriptionPaymentCreate(BaseModel):
-    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    amount: Decimal = Field(
+        gt=0,
+        max_digits=12,
+        decimal_places=2,
+        description="Payment collected by or on behalf of the club for member dues.",
+    )
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     provider: str = Field(default="mpesa", min_length=2, max_length=80)
     method: str = Field(default="mobile_money", min_length=2, max_length=80)

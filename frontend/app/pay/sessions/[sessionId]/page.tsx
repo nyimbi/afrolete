@@ -202,7 +202,7 @@ function HostedPaymentExperience() {
               {checkoutKind === "commercial"
                 ? "Secure sponsor invoice portal"
                 : checkoutKind === "saas"
-                  ? "Secure subscription invoice portal"
+                  ? "Secure club hosting invoice portal"
                   : checkoutKind === "registration"
                     ? "Secure registration fee portal"
                     : checkoutKind === "facility"

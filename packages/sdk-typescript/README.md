@@ -113,6 +113,8 @@ const [subscription] = await client.billing.subscriptions.list({
 const [meter] = await client.billing.meters.list();
 
 if (subscription && meter) {
+  // Billing subscriptions are tenant-paid AfroLete hosting accounts. Club member
+  // dues remain organization-managed receivables outside this SDK billing lane.
   await client.billing.usage.record({
     organization_id: organization.id,
     subscription_id: subscription.id,

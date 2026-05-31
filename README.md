@@ -176,7 +176,8 @@ Major capability areas include:
   hosted payments, approvals, GPS tracking, geofences, expenses, payouts,
   carpooling, driver ratings, backup drivers, and route-risk guidance.
 - Finance, sponsorship, fundraising, ticketing, invoices, payments, refunds,
-  tax, accounting, payouts, sponsor portals, public support showcases, and
+  tax, accounting, payouts, sponsor portals, public support showcases,
+  club-managed member dues with M-Pesa/mobile-money collection support, and
   venue digital-signage sponsor rotations with playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
@@ -188,10 +189,12 @@ Major capability areas include:
   billing reads and usage metering, marketplace listings, outbound webhooks,
   inbound provider callback contracts, replay, retry workers, database or
   Redis-backed quotas, and integration catalogs.
-- SaaS billing and subscriptions: plans, tenant subscriptions, lifecycle
-  actions, entitlements, enforcement, metering, recurring invoices, dunning,
-  late fees, payment retries, checkout links, signed tax filing packages,
-  provider webhooks, and billing summaries.
+- SaaS billing and subscriptions: AfroLete hosting plans paid by the tenant
+  organization, tenant subscriptions, lifecycle actions, entitlements,
+  enforcement, metering, recurring invoices, dunning, late fees, payment
+  retries, checkout links, signed tax filing packages, provider webhooks, and
+  billing summaries. Member dues are a separate club-managed receivables
+  workflow, not AfroLete platform hosting.
 - Offline/PWA operation: installable frontend shell, service worker caching,
   encrypted travel-manifest cache, signed offline artifacts, offline mutation
   outbox, and replay controls.

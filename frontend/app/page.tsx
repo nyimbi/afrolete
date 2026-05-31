@@ -20060,7 +20060,7 @@ export default function HomePage() {
           body: {
             code: `${billingForm.plan_code}-${Date.now()}`,
             name: billingForm.plan_name,
-            description: "Tiered SaaS plan for sports organizations.",
+            description: "Tenant-paid AfroLete hosting plan for sports organizations.",
             base_price: String(billingForm.base_price),
             billing_cycle: billingForm.billing_cycle,
             included_athletes: billingForm.included_athletes,
@@ -20088,7 +20088,7 @@ export default function HomePage() {
             discount_code: "EARLY",
             external_customer_id: `cus_${selectedOrganizationId.slice(0, 8)}`,
             external_subscription_id: `sub_${Date.now()}`,
-            notes: "Created from AfroLete billing console."
+            notes: "Club-paid AfroLete hosting account created from the billing console."
           }
         });
         return { plan, subscription };
@@ -20101,7 +20101,7 @@ export default function HomePage() {
         ]);
         setSelectedBillingPlanId(plan.id);
         setSelectedSubscriptionId(subscription.id);
-        addLog(`${selectedOrganization?.name ?? "Tenant"} subscribed to ${plan.name}`, "good");
+        addLog(`${selectedOrganization?.name ?? "Tenant"} hosting set to ${plan.name}`, "good");
         void loadBilling(selectedOrganizationId);
       }
     );
@@ -20182,7 +20182,7 @@ export default function HomePage() {
             amount: String(billingForm.payment_amount),
             provider: "manual",
             external_payment_id: `pay_${Date.now()}`,
-            notes: "SaaS payment captured from billing console."
+            notes: "Club hosting payment captured from billing console."
           }
         });
         return { invoice, payment };
@@ -20191,7 +20191,7 @@ export default function HomePage() {
         setSaasInvoices((current) => [invoice, ...current.filter((item) => item.id !== invoice.id)]);
         setSaasPayments((current) => [payment, ...current.filter((item) => item.id !== payment.id)]);
         setSelectedSaasInvoiceId(invoice.id);
-        addLog(`SaaS invoice ${invoice.invoice_number} paid ${payment.amount}`, "good");
+        addLog(`Club hosting invoice ${invoice.invoice_number} paid ${payment.amount}`, "good");
         void loadBilling(selectedOrganizationId);
       }
     );
@@ -21945,7 +21945,7 @@ export default function HomePage() {
             <div className="panel-head">
               <div>
                 <p className="section-label">Member dues</p>
-                <h2>Club subscriptions</h2>
+                <h2>Member dues ledger</h2>
               </div>
               <button type="button" onClick={createMemberDuesPlan} disabled={busyAction !== null}>Plan</button>
             </div>
@@ -22016,7 +22016,7 @@ export default function HomePage() {
                   <div>
                     <strong>{plan.name}</strong>
                     <span>{plan.amount} {plan.currency} · {plan.billing_interval.replaceAll("_", " ")} · grace {plan.grace_period_days}d</span>
-                    <small>{plan.benefits ?? "Club-managed member dues plan, separate from AfroLete SaaS billing."}</small>
+                    <small>{plan.benefits ?? "Club-managed dues collected through M-Pesa/manual rails, separate from AfroLete hosting."}</small>
                   </div>
                 </article>
               ))}
@@ -26223,11 +26223,11 @@ export default function HomePage() {
           <div className="panel form-panel">
             <div className="panel-head">
               <div>
-                <p className="section-label">SaaS billing</p>
-                <h2>Plans and subscriptions</h2>
+                <p className="section-label">Club-paid hosting</p>
+                <h2>Tenant plans</h2>
               </div>
               <div className="event-toolbar">
-                <button type="button" onClick={createBillingPlanAndSubscription} disabled={busyAction !== null}>Subscribe</button>
+                <button type="button" onClick={createBillingPlanAndSubscription} disabled={busyAction !== null}>Bill club</button>
                 <button type="button" onClick={quoteBillingTax} disabled={busyAction !== null}>Tax</button>
                 <button type="button" onClick={deliverBillingTaxFiling} disabled={busyAction !== null}>File Tax</button>
                 <button type="button" onClick={quoteBillingProration} disabled={busyAction !== null}>Prorate</button>
@@ -26243,7 +26243,7 @@ export default function HomePage() {
             <div className="score-summary">
               <strong>{billingSummary?.monthly_recurring_revenue ?? "0.00"}</strong>
               <span>MRR</span>
-              <small>{billingSummary ? `${billingSummary.active_subscriptions} active · ${billingSummary.entitlements} entitlements` : "No billing summary"}</small>
+              <small>{billingSummary ? `${billingSummary.active_subscriptions} club-paid hosting accounts · ${billingSummary.entitlements} entitlements` : "No billing summary"}</small>
             </div>
             <div className="form-grid">
               <label>
@@ -26259,11 +26259,11 @@ export default function HomePage() {
                 </select>
               </label>
               <label>
-                Base price
+                Club price
                 <input type="number" min="0" value={billingForm.base_price} onChange={(event) => setBillingForm({ ...billingForm, base_price: Number(event.target.value) })} />
               </label>
               <label>
-                Negotiated
+                Contract price
                 <input type="number" min="0" value={billingForm.negotiated_price} onChange={(event) => setBillingForm({ ...billingForm, negotiated_price: Number(event.target.value) })} />
               </label>
               <label>
@@ -26352,7 +26352,7 @@ export default function HomePage() {
                   onClick={() => setSelectedSubscriptionId(subscription.id)}
                 >
                   <div>
-                    <strong>{subscription.status} · {subscription.billing_cycle}</strong>
+                    <strong>Club hosting · {subscription.status} · {subscription.billing_cycle}</strong>
                     <span>{subscription.current_period_start} to {subscription.current_period_end} · cancel end {subscription.cancel_at_period_end ? "yes" : "no"}</span>
                   </div>
                 </button>

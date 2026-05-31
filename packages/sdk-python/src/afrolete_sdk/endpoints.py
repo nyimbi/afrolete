@@ -282,7 +282,7 @@ AFROLETE_SDK_ENDPOINTS: tuple[dict[str, Any], ...] = tuple([
     "method": "GET",
     "path": "/sdk/billing/plans",
     "category": "billing",
-    "summary": "List SaaS billing plans for tenant provisioning sync.",
+    "summary": "List tenant-paid AfroLete hosting plans for provisioning sync.",
     "required_scopes": [
       "read:billing",
       "write:billing"
@@ -295,7 +295,7 @@ AFROLETE_SDK_ENDPOINTS: tuple[dict[str, Any], ...] = tuple([
     "method": "GET",
     "path": "/sdk/billing/subscriptions",
     "category": "billing",
-    "summary": "List tenant SaaS subscriptions.",
+    "summary": "List tenant-paid AfroLete hosting subscriptions.",
     "required_scopes": [
       "read:billing",
       "write:billing"
@@ -348,7 +348,7 @@ AFROLETE_SDK_ENDPOINTS: tuple[dict[str, Any], ...] = tuple([
     "method": "GET",
     "path": "/sdk/billing/invoices",
     "category": "billing",
-    "summary": "List tenant SaaS invoices.",
+    "summary": "List tenant-paid AfroLete hosting invoices.",
     "required_scopes": [
       "read:billing",
       "write:billing"

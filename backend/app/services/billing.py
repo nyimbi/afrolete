@@ -173,7 +173,7 @@ async def create_invoice(
     usage_records = await list_usage_records(db, payload.organization_id)
     meters = {meter.id: meter for meter in await list_usage_meters(db)}
     usage_total = Decimal("0")
-    line_parts = [f"Base plan {plan.name}: {plan.base_price}"]
+    line_parts = [f"Club hosting plan {plan.name}: {plan.base_price}"]
     for record in usage_records:
         if record.subscription_id != subscription.id:
             continue
@@ -337,7 +337,7 @@ async def create_recurring_invoice_for_subscription(
     base_price = subscription.negotiated_price or plan.base_price
     line_parts = [
         (
-            f"Recurring {enum_value(subscription.billing_cycle)} subscription {plan.name}: "
+            f"Recurring {enum_value(subscription.billing_cycle)} club hosting {plan.name}: "
             f"{money(base_price)} {plan.currency}"
         )
     ]
@@ -1688,7 +1688,7 @@ def saas_invoice_hosted_checkout_read(
         invoice_number=invoice.invoice_number,
         organization_id=invoice.organization_id,
         subscription_id=invoice.subscription_id,
-        title=f"AfroLete subscription invoice {invoice.invoice_number}",
+        title=f"AfroLete club hosting invoice {invoice.invoice_number}",
         memo=invoice.line_items,
         due_on=invoice.due_on,
         amount_due=invoice.total,
