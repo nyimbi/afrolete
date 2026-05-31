@@ -266,6 +266,30 @@ class DonationTaxReceipt(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class RecurringDonation(IdMixin, TimestampMixin, Base):
+    __tablename__ = "recurring_donations"
+    __table_args__ = (UniqueConstraint("organization_id", "name", "donor_profile_id", name="uq_recurring_donations_org_name_donor"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    campaign_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("fundraising_campaigns.id"), index=True)
+    donor_profile_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("donor_profiles.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    frequency: Mapped[str] = mapped_column(String(40), default="monthly", nullable=False, index=True)
+    started_on: Mapped[date] = mapped_column(index=True)
+    next_charge_on: Mapped[date] = mapped_column(index=True)
+    ends_on: Mapped[date | None] = mapped_column(index=True)
+    payment_provider: Mapped[str] = mapped_column(String(80), default="manual", nullable=False, index=True)
+    payment_method: Mapped[str] = mapped_column(String(80), default="recurring_pledge", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    total_collected: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    donation_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_donation_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("donations.id"), index=True)
+    tax_receipt_auto_issue: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class DonorProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "donor_profiles"
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_donor_profiles_org_email"),)

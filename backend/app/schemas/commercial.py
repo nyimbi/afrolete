@@ -415,6 +415,67 @@ class DonationTaxReceiptRead(BaseModel):
     notes: str | None
 
 
+class RecurringDonationCreate(BaseModel):
+    organization_id: UUID
+    campaign_id: UUID
+    donor_profile_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    frequency: str = Field(default="monthly", pattern="^(weekly|monthly|quarterly|annual)$")
+    started_on: date
+    next_charge_on: date
+    ends_on: date | None = None
+    payment_provider: str = Field(default="manual", min_length=2, max_length=80)
+    payment_method: str = Field(default="recurring_pledge", min_length=2, max_length=80)
+    tax_receipt_auto_issue: bool = True
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class RecurringDonationUpdate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    frequency: str | None = Field(default=None, pattern="^(weekly|monthly|quarterly|annual)$")
+    next_charge_on: date | None = None
+    ends_on: date | None = None
+    payment_provider: str | None = Field(default=None, min_length=2, max_length=80)
+    payment_method: str | None = Field(default=None, min_length=2, max_length=80)
+    status: str | None = Field(default=None, pattern="^(active|paused|cancelled|completed)$")
+    tax_receipt_auto_issue: bool | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class RecurringDonationRead(RecurringDonationCreate):
+    id: UUID
+    donor_name: str | None = None
+    donor_email: str | None = None
+    campaign_name: str | None = None
+    status: str
+    total_collected: Decimal
+    donation_count: int
+    last_donation_id: UUID | None
+
+
+class RecurringDonationRunCreate(BaseModel):
+    organization_id: UUID
+    as_of: date | None = None
+    limit: int = Field(default=500, ge=1, le=5000)
+    dry_run: bool = False
+
+
+class RecurringDonationRunRead(BaseModel):
+    organization_id: UUID
+    as_of: date
+    eligible_count: int
+    processed_count: int
+    skipped_count: int
+    dry_run: bool
+    recurring_donation_ids: list[UUID]
+    donation_ids: list[UUID]
+    receipt_ids: list[UUID]
+    total_processed: Decimal
+
+
 class DonorProfileCreate(BaseModel):
     organization_id: UUID
     name: str = Field(min_length=2, max_length=180)

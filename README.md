@@ -179,7 +179,7 @@ Major capability areas include:
   carpooling, driver ratings, backup drivers, and route-risk guidance.
 - Finance, sponsorship, fundraising, ticketing, invoices, payments, refunds,
   tax, accounting, payouts, sponsor portals, public support showcases,
-  donor CRM, stewardship, donation tax receipts, grant opportunity discovery/matching/alerts,
+  donor CRM, stewardship, recurring donations, donation tax receipts, grant opportunity discovery/matching/alerts,
   saved grant searches with scheduled alert runs, grant application internal approvals, submission
   packages, award payments, expenditures, compliance obligations, milestones,
   auto-generated funder reports, grant portfolio utilization/impact/ROI

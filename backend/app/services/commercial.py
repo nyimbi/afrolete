@@ -43,6 +43,7 @@ from app.models.commercial import (
     MerchandiseOrder,
     MerchandiseOrderLine,
     MerchandiseProduct,
+    RecurringDonation,
     Sponsor,
     SponsorActivationCampaign,
     SponsorActivationPlacement,
@@ -138,6 +139,11 @@ from app.schemas.commercial import (
     MerchandiseProductCreate,
     MerchandiseStoreDashboardRead,
     PaymentSettlementRead,
+    RecurringDonationCreate,
+    RecurringDonationRead,
+    RecurringDonationRunCreate,
+    RecurringDonationRunRead,
+    RecurringDonationUpdate,
     SponsorCreate,
     SponsorActivationCampaignCreate,
     SponsorActivationCampaignRead,
@@ -823,6 +829,18 @@ async def issue_donation_tax_receipt(
     existing = await db.scalar(select(DonationTaxReceipt).where(DonationTaxReceipt.donation_id == donation_id))
     if existing is not None:
         return donation_tax_receipt_read(existing)
+    receipt = await build_donation_tax_receipt(db, donation, payload)
+    db.add(receipt)
+    await db.commit()
+    await db.refresh(receipt)
+    return donation_tax_receipt_read(receipt)
+
+
+async def build_donation_tax_receipt(
+    db: AsyncSession,
+    donation: Donation,
+    payload: DonationTaxReceiptCreate,
+) -> DonationTaxReceipt:
     organization = await get_organization(db, donation.organization_id)
     donor = await db.get(DonorProfile, donation.donor_profile_id) if donation.donor_profile_id else None
     issued_on = payload.issued_on or date.today()
@@ -847,7 +865,7 @@ async def issue_donation_tax_receipt(
         message=donation.message,
     )
     checksum = sha256(content.encode()).hexdigest()
-    receipt = DonationTaxReceipt(
+    return DonationTaxReceipt(
         organization_id=donation.organization_id,
         donation_id=donation.id,
         donor_profile_id=donor.id if donor is not None else None,
@@ -867,10 +885,6 @@ async def issue_donation_tax_receipt(
         download_filename=f"{receipt_number.lower()}-tax-receipt.md",
         notes=payload.notes,
     )
-    db.add(receipt)
-    await db.commit()
-    await db.refresh(receipt)
-    return donation_tax_receipt_read(receipt)
 
 
 async def list_donation_tax_receipts(
@@ -887,6 +901,173 @@ async def list_donation_tax_receipts(
         statement = statement.where(DonationTaxReceipt.donation_id == donation_id)
     receipts = (await db.scalars(statement)).all()
     return [donation_tax_receipt_read(receipt) for receipt in receipts]
+
+
+async def create_recurring_donation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: RecurringDonationCreate,
+    authz: AuthorizationService,
+) -> RecurringDonationRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    await get_campaign_for_organization(db, payload.campaign_id, payload.organization_id)
+    donor = await get_donor_profile_for_organization(db, payload.donor_profile_id, payload.organization_id)
+    recurring = RecurringDonation(
+        organization_id=payload.organization_id,
+        campaign_id=payload.campaign_id,
+        donor_profile_id=payload.donor_profile_id,
+        name=payload.name,
+        amount=payload.amount,
+        currency=payload.currency.upper(),
+        frequency=payload.frequency,
+        started_on=payload.started_on,
+        next_charge_on=payload.next_charge_on,
+        ends_on=payload.ends_on,
+        payment_provider=payload.payment_provider.strip().lower(),
+        payment_method=payload.payment_method.strip().lower(),
+        status="active",
+        tax_receipt_auto_issue=payload.tax_receipt_auto_issue,
+        notes=payload.notes,
+    )
+    db.add(recurring)
+    await db.commit()
+    await db.refresh(recurring)
+    return await recurring_donation_read(db, recurring, donor=donor)
+
+
+async def list_recurring_donations(db: AsyncSession, organization_id: UUID) -> list[RecurringDonationRead]:
+    recurring_donations = (
+        await db.scalars(
+            select(RecurringDonation)
+            .where(RecurringDonation.organization_id == organization_id)
+            .order_by(RecurringDonation.status, RecurringDonation.next_charge_on, RecurringDonation.created_at.desc())
+        )
+    ).all()
+    return [await recurring_donation_read(db, recurring) for recurring in recurring_donations]
+
+
+async def update_recurring_donation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recurring_donation_id: UUID,
+    payload: RecurringDonationUpdate,
+    authz: AuthorizationService,
+) -> RecurringDonationRead:
+    recurring = await db.get(RecurringDonation, recurring_donation_id)
+    if recurring is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring donation not found")
+    await ensure_manage_commercial(authz, identity, recurring.organization_id)
+    updates = payload.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        if field == "currency" and value is not None:
+            value = value.upper()
+        if field in {"payment_provider", "payment_method"} and value is not None:
+            value = value.strip().lower()
+        setattr(recurring, field, value)
+    await db.commit()
+    await db.refresh(recurring)
+    return await recurring_donation_read(db, recurring)
+
+
+async def run_recurring_donations(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: RecurringDonationRunCreate,
+    authz: AuthorizationService,
+) -> RecurringDonationRunRead:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    as_of = payload.as_of or date.today()
+    recurring_donations = (
+        await db.scalars(
+            select(RecurringDonation)
+            .where(RecurringDonation.organization_id == payload.organization_id)
+            .where(RecurringDonation.status == "active")
+            .where(RecurringDonation.next_charge_on <= as_of)
+            .order_by(RecurringDonation.next_charge_on, RecurringDonation.created_at)
+            .limit(payload.limit)
+        )
+    ).all()
+    processed_count = 0
+    skipped_count = 0
+    total_processed = Decimal("0.00")
+    recurring_ids: list[UUID] = []
+    donation_ids: list[UUID] = []
+    receipt_ids: list[UUID] = []
+    for recurring in recurring_donations:
+        if recurring.ends_on is not None and recurring.next_charge_on > recurring.ends_on:
+            if not payload.dry_run:
+                recurring.status = "completed"
+            skipped_count += 1
+            continue
+        recurring_ids.append(recurring.id)
+        if payload.dry_run:
+            processed_count += 1
+            total_processed += recurring.amount
+            continue
+        donor = await db.get(DonorProfile, recurring.donor_profile_id)
+        campaign = await get_campaign_for_organization(db, recurring.campaign_id, recurring.organization_id)
+        if donor is None:
+            skipped_count += 1
+            continue
+        donation = Donation(
+            organization_id=recurring.organization_id,
+            campaign_id=recurring.campaign_id,
+            donor_profile_id=recurring.donor_profile_id,
+            donor_name=donor.name,
+            donor_email=donor.email,
+            amount=recurring.amount,
+            currency=recurring.currency.upper(),
+            external_reference=f"RECUR-{str(recurring.id).split('-')[0].upper()}-{recurring.next_charge_on.isoformat()}",
+            message=f"Recurring donation: {recurring.name}",
+            status=CommercialStatus.PAID,
+        )
+        db.add(donation)
+        await db.flush()
+        donation_ids.append(donation.id)
+        campaign.raised_amount += recurring.amount
+        donor.lifetime_giving += recurring.amount
+        donor.last_gift_amount = recurring.amount
+        donor.last_gift_on = recurring.next_charge_on
+        if campaign.raised_amount >= campaign.goal_amount:
+            campaign.status = CommercialStatus.COMPLETED
+        recurring.total_collected = (recurring.total_collected + recurring.amount).quantize(Decimal("0.01"))
+        recurring.donation_count += 1
+        recurring.last_donation_id = donation.id
+        recurring.next_charge_on = next_recurring_donation_date(recurring.next_charge_on, recurring.frequency)
+        if recurring.ends_on is not None and recurring.next_charge_on > recurring.ends_on:
+            recurring.status = "completed"
+        if recurring.tax_receipt_auto_issue:
+            receipt = await build_donation_tax_receipt(
+                db,
+                donation,
+                DonationTaxReceiptCreate(
+                    issued_on=as_of,
+                    tax_year=as_of.year,
+                    jurisdiction="local",
+                    deductible_amount=recurring.amount,
+                    notes=f"Auto-issued for recurring donation {recurring.name}.",
+                ),
+            )
+            db.add(receipt)
+            await db.flush()
+            receipt_ids.append(receipt.id)
+        processed_count += 1
+        total_processed += recurring.amount
+    if not payload.dry_run:
+        await db.commit()
+    return RecurringDonationRunRead(
+        organization_id=payload.organization_id,
+        as_of=as_of,
+        eligible_count=len(recurring_donations),
+        processed_count=processed_count,
+        skipped_count=skipped_count,
+        dry_run=payload.dry_run,
+        recurring_donation_ids=recurring_ids,
+        donation_ids=donation_ids,
+        receipt_ids=receipt_ids,
+        total_processed=total_processed.quantize(Decimal("0.01")),
+    )
+
 
 async def create_donor_profile(
     db: AsyncSession,
@@ -4255,6 +4436,64 @@ def donation_tax_receipt_read(receipt: DonationTaxReceipt) -> DonationTaxReceipt
         download_filename=receipt.download_filename,
         notes=receipt.notes,
     )
+
+
+async def recurring_donation_read(
+    db: AsyncSession,
+    recurring: RecurringDonation,
+    donor: DonorProfile | None = None,
+    campaign: FundraisingCampaign | None = None,
+) -> RecurringDonationRead:
+    donor = donor or await db.get(DonorProfile, recurring.donor_profile_id)
+    campaign = campaign or await db.get(FundraisingCampaign, recurring.campaign_id)
+    return RecurringDonationRead(
+        id=recurring.id,
+        organization_id=recurring.organization_id,
+        campaign_id=recurring.campaign_id,
+        donor_profile_id=recurring.donor_profile_id,
+        name=recurring.name,
+        amount=recurring.amount,
+        currency=recurring.currency,
+        frequency=recurring.frequency,
+        started_on=recurring.started_on,
+        next_charge_on=recurring.next_charge_on,
+        ends_on=recurring.ends_on,
+        payment_provider=recurring.payment_provider,
+        payment_method=recurring.payment_method,
+        tax_receipt_auto_issue=recurring.tax_receipt_auto_issue,
+        notes=recurring.notes,
+        donor_name=donor.name if donor else None,
+        donor_email=donor.email if donor else None,
+        campaign_name=campaign.name if campaign else None,
+        status=recurring.status,
+        total_collected=recurring.total_collected,
+        donation_count=recurring.donation_count,
+        last_donation_id=recurring.last_donation_id,
+    )
+
+
+def next_recurring_donation_date(value: date, frequency: str) -> date:
+    if frequency == "weekly":
+        return value + timedelta(days=7)
+    if frequency == "quarterly":
+        return commercial_add_months(value, 3)
+    if frequency == "annual":
+        return commercial_add_months(value, 12)
+    return commercial_add_months(value, 1)
+
+
+def commercial_add_months(value: date, months: int) -> date:
+    month = value.month - 1 + months
+    year = value.year + month // 12
+    month = month % 12 + 1
+    day = min(value.day, days_in_month(year, month))
+    return date(year, month, day)
+
+
+def days_in_month(year: int, month: int) -> int:
+    if month == 12:
+        return (date(year + 1, 1, 1) - date(year, month, 1)).days
+    return (date(year, month + 1, 1) - date(year, month, 1)).days
 
 
 def render_donation_tax_receipt_markdown(

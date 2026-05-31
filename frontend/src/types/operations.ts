@@ -4753,6 +4753,44 @@ export type DonationTaxReceiptRead = {
   notes: string | null;
 };
 
+export type RecurringDonationRead = {
+  id: UUID;
+  organization_id: UUID;
+  campaign_id: UUID;
+  donor_profile_id: UUID;
+  name: string;
+  amount: string;
+  currency: string;
+  frequency: string;
+  started_on: string;
+  next_charge_on: string;
+  ends_on: string | null;
+  payment_provider: string;
+  payment_method: string;
+  tax_receipt_auto_issue: boolean;
+  notes: string | null;
+  donor_name: string | null;
+  donor_email: string | null;
+  campaign_name: string | null;
+  status: string;
+  total_collected: string;
+  donation_count: number;
+  last_donation_id: UUID | null;
+};
+
+export type RecurringDonationRunRead = {
+  organization_id: UUID;
+  as_of: string;
+  eligible_count: number;
+  processed_count: number;
+  skipped_count: number;
+  dry_run: boolean;
+  recurring_donation_ids: UUID[];
+  donation_ids: UUID[];
+  receipt_ids: UUID[];
+  total_processed: string;
+};
+
 export type DonorProfileRead = {
   id: UUID;
   organization_id: UUID;

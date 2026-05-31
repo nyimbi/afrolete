@@ -83,6 +83,11 @@ from app.schemas.commercial import (
     MerchandiseProductRead,
     MerchandiseStoreDashboardRead,
     PaymentSettlementRead,
+    RecurringDonationCreate,
+    RecurringDonationRead,
+    RecurringDonationRunCreate,
+    RecurringDonationRunRead,
+    RecurringDonationUpdate,
     SponsorCreate,
     SponsorActivationCampaignCreate,
     SponsorActivationCampaignRead,
@@ -151,6 +156,7 @@ from app.services.commercial import (
     create_merchandise_order,
     create_merchandise_product,
     create_commercial_invoice_provider_checkout,
+    create_recurring_donation,
     create_sponsor,
     create_sponsor_activation_campaign,
     create_sponsor_activation_placement,
@@ -193,14 +199,17 @@ from app.services.commercial import (
     list_grant_reports,
     list_grant_saved_searches,
     list_grant_submission_packages,
+    list_recurring_donations,
     grant_application_approval_counts,
     grant_award_summary,
     grant_portfolio_summary,
     update_grant_opportunity_match,
     run_grant_saved_search,
     run_grant_saved_search_alert_scheduler,
+    run_recurring_donations,
     update_grant_saved_search,
     update_grant_submission_package,
+    update_recurring_donation,
     list_invoices,
     list_commercial_payment_sessions,
     list_sponsors,
@@ -646,6 +655,45 @@ async def list_donation_tax_receipts_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[DonationTaxReceiptRead]:
     return await list_donation_tax_receipts(db, organization_id, donation_id)
+
+
+@router.post("/recurring-donations", response_model=RecurringDonationRead, status_code=status.HTTP_201_CREATED)
+async def create_recurring_donation_route(
+    payload: RecurringDonationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RecurringDonationRead:
+    return await create_recurring_donation(db, identity, payload, authz)
+
+
+@router.get("/recurring-donations", response_model=list[RecurringDonationRead])
+async def list_recurring_donations_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[RecurringDonationRead]:
+    return await list_recurring_donations(db, organization_id)
+
+
+@router.patch("/recurring-donations/{recurring_donation_id}", response_model=RecurringDonationRead)
+async def update_recurring_donation_route(
+    recurring_donation_id: UUID,
+    payload: RecurringDonationUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RecurringDonationRead:
+    return await update_recurring_donation(db, identity, recurring_donation_id, payload, authz)
+
+
+@router.post("/recurring-donations/run", response_model=RecurringDonationRunRead)
+async def run_recurring_donations_route(
+    payload: RecurringDonationRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> RecurringDonationRunRead:
+    return await run_recurring_donations(db, identity, payload, authz)
 
 
 @router.post("/donors", response_model=DonorProfileRead, status_code=status.HTTP_201_CREATED)

@@ -419,6 +419,8 @@ import type {
   OrganizationType,
   ParticipationClearanceRead,
   PaymentSettlementRead,
+  RecurringDonationRead,
+  RecurringDonationRunRead,
   CommercialInvoiceProviderCheckoutRead,
   CommercialSettlementPayoutRead,
   CommercialSettlementPayoutCallbackRead,
@@ -2382,6 +2384,8 @@ export default function HomePage() {
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
   const [donations, setDonations] = useState<DonationRead[]>([]);
   const [donationTaxReceipts, setDonationTaxReceipts] = useState<DonationTaxReceiptRead[]>([]);
+  const [recurringDonations, setRecurringDonations] = useState<RecurringDonationRead[]>([]);
+  const [recurringDonationRun, setRecurringDonationRun] = useState<RecurringDonationRunRead | null>(null);
   const [donorProfiles, setDonorProfiles] = useState<DonorProfileRead[]>([]);
   const [donorInteractions, setDonorInteractions] = useState<DonorInteractionRead[]>([]);
   const [donorStewardshipPlans, setDonorStewardshipPlans] = useState<DonorStewardshipPlanRead[]>([]);
@@ -3911,7 +3915,11 @@ export default function HomePage() {
     recognition_level: "Founding supporter",
     impact_story_needed: true,
     tax_receipt_jurisdiction: "Kenya",
-    organization_tax_id: "PIN-AFROLETE-123"
+    organization_tax_id: "PIN-AFROLETE-123",
+    recurring_name: "Monthly facility supporter",
+    recurring_amount: "250.00",
+    recurring_frequency: "monthly",
+    recurring_next_charge_on: "2026-07-01"
   });
   const [grantForm, setGrantForm] = useState({
     funder_name: "Youth Sport Foundation",
@@ -5835,6 +5843,7 @@ export default function HomePage() {
       campaignData,
       donationData,
       donationTaxReceiptData,
+      recurringDonationData,
       donorProfileData,
       donorInteractionData,
       donorStewardshipPlanData,
@@ -5885,6 +5894,7 @@ export default function HomePage() {
       apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
       apiRequest<DonationRead[]>(`/commercial/donations?organization_id=${organizationId}`),
       apiRequest<DonationTaxReceiptRead[]>(`/commercial/donation-tax-receipts?organization_id=${organizationId}`),
+      apiRequest<RecurringDonationRead[]>(`/commercial/recurring-donations?organization_id=${organizationId}`),
       apiRequest<DonorProfileRead[]>(`/commercial/donors?organization_id=${organizationId}`),
       apiRequest<DonorInteractionRead[]>(`/commercial/donor-interactions?organization_id=${organizationId}`),
       apiRequest<DonorStewardshipPlanRead[]>(`/commercial/donor-stewardship-plans?organization_id=${organizationId}`),
@@ -5937,6 +5947,7 @@ export default function HomePage() {
     setCampaigns(campaignData);
     setDonations(donationData);
     setDonationTaxReceipts(donationTaxReceiptData);
+    setRecurringDonations(recurringDonationData);
     setDonorProfiles(donorProfileData);
     setDonorInteractions(donorInteractionData);
     setDonorStewardshipPlans(donorStewardshipPlanData);
@@ -6626,6 +6637,8 @@ export default function HomePage() {
       setCampaigns([]);
       setDonations([]);
       setDonationTaxReceipts([]);
+      setRecurringDonations([]);
+      setRecurringDonationRun(null);
       setDonorProfiles([]);
       setDonorInteractions([]);
       setDonorStewardshipPlans([]);
@@ -21192,6 +21205,73 @@ export default function HomePage() {
     );
   };
 
+  const createRecurringDonation = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const donor = donorProfiles.find((item) => item.id === selectedDonorProfileId) ?? donorProfiles[0];
+    const campaign = campaigns.find((item) => item.id === selectedCampaignId) ?? campaigns[0];
+    if (!donor || !campaign) {
+      addLog("Create a campaign and donor before adding a recurring gift", "bad");
+      return;
+    }
+    runAction(
+      "create-recurring-donation",
+      () =>
+        apiRequest<RecurringDonationRead>("/commercial/recurring-donations", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            campaign_id: campaign.id,
+            donor_profile_id: donor.id,
+            name: campaignForm.recurring_name,
+            amount: campaignForm.recurring_amount,
+            currency: "KES",
+            frequency: campaignForm.recurring_frequency,
+            started_on: campaignForm.recurring_next_charge_on,
+            next_charge_on: campaignForm.recurring_next_charge_on,
+            payment_provider: "mpesa",
+            payment_method: "recurring_stk",
+            tax_receipt_auto_issue: true,
+            notes: "Recurring gift authorized from the commercial console."
+          }
+        }),
+      async (recurring) => {
+        setRecurringDonations((current) => [recurring, ...current.filter((item) => item.id !== recurring.id)]);
+        await loadCommercial(selectedOrganizationId);
+        addLog(`${recurring.name} recurring gift active`, "good");
+      }
+    );
+  };
+
+  const runRecurringDonations = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "run-recurring-donations",
+      () =>
+        apiRequest<RecurringDonationRunRead>("/commercial/recurring-donations/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            as_of: campaignForm.recurring_next_charge_on,
+            limit: 250,
+            dry_run: false
+          }
+        }),
+      async (run) => {
+        setRecurringDonationRun(run);
+        await loadCommercial(selectedOrganizationId);
+        addLog(`${run.processed_count} recurring donation(s) processed`, run.processed_count > 0 ? "good" : "bad");
+      }
+    );
+  };
+
   const createDonorStewardshipWorkflow = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -28831,6 +28911,8 @@ export default function HomePage() {
                 <button type="button" onClick={createSponsorStewardshipWorkflow} disabled={busyAction !== null}>Steward</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
                 <button type="button" onClick={issueDonationTaxReceipt} disabled={busyAction !== null}>Tax receipt</button>
+                <button type="button" onClick={createRecurringDonation} disabled={busyAction !== null}>Recurring gift</button>
+                <button type="button" onClick={runRecurringDonations} disabled={busyAction !== null}>Run gifts</button>
                 <button type="button" onClick={createDonorStewardshipWorkflow} disabled={busyAction !== null}>Donor CRM</button>
                 <button type="button" onClick={completeSelectedDonorStewardshipPlan} disabled={busyAction !== null}>Complete donor</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
@@ -28986,6 +29068,27 @@ export default function HomePage() {
               <label>
                 Tax ID
                 <input value={campaignForm.organization_tax_id} onChange={(event) => setCampaignForm({ ...campaignForm, organization_tax_id: event.target.value })} />
+              </label>
+              <label>
+                Recurring gift
+                <input value={campaignForm.recurring_name} onChange={(event) => setCampaignForm({ ...campaignForm, recurring_name: event.target.value })} />
+              </label>
+              <label>
+                Gift amount
+                <input value={campaignForm.recurring_amount} onChange={(event) => setCampaignForm({ ...campaignForm, recurring_amount: event.target.value })} />
+              </label>
+              <label>
+                Frequency
+                <select value={campaignForm.recurring_frequency} onChange={(event) => setCampaignForm({ ...campaignForm, recurring_frequency: event.target.value })}>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="annual">Annual</option>
+                </select>
+              </label>
+              <label>
+                Next gift
+                <input type="date" value={campaignForm.recurring_next_charge_on} onChange={(event) => setCampaignForm({ ...campaignForm, recurring_next_charge_on: event.target.value })} />
               </label>
               <label>
                 Donor phone
@@ -29299,6 +29402,23 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {recurringDonationRun ? (
+                <article className={`task-card ${recurringDonationRun.processed_count > 0 ? "selected" : ""}`}>
+                  <div>
+                    <strong>{recurringDonationRun.processed_count} recurring gifts processed</strong>
+                    <span>{recurringDonationRun.total_processed} collected · {recurringDonationRun.receipt_ids.length} receipts · {recurringDonationRun.skipped_count} skipped</span>
+                  </div>
+                </article>
+              ) : null}
+              {recurringDonations.slice(0, 3).map((recurring) => (
+                <article key={recurring.id} className={`task-card ${recurring.status === "active" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{recurring.name}</strong>
+                    <span>{recurring.donor_name ?? "Donor"} · {recurring.amount} {recurring.currency} · {recurring.frequency}</span>
+                    <small>{recurring.donation_count} gifts · {recurring.total_collected} collected · next {recurring.next_charge_on}</small>
+                  </div>
+                </article>
+              ))}
               {donorStewardshipPlans.slice(0, 3).map((plan) => (
                 <article key={plan.id} className={`task-card ${plan.overdue ? "risk-card" : ""}`}>
                   <div>

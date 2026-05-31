@@ -457,6 +457,62 @@ def test_donor_crm_tracks_lifetime_giving_touchpoints_and_stewardship(client, id
     assert donor["lifetime_giving"] == "1250.00"
     assert donor["donation_count"] == 1
 
+    recurring_response = client.post(
+        "/api/v1/commercial/recurring-donations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "campaign_id": campaign["id"],
+            "donor_profile_id": donor["id"],
+            "name": "Monthly facility supporter",
+            "amount": "250.00",
+            "currency": "KES",
+            "frequency": "monthly",
+            "started_on": "2026-07-01",
+            "next_charge_on": "2026-07-01",
+            "payment_provider": "mpesa",
+            "payment_method": "recurring_stk",
+            "tax_receipt_auto_issue": True,
+            "notes": "Donor authorized a recurring monthly gift.",
+        },
+    )
+    assert recurring_response.status_code == 201
+    recurring = recurring_response.json()
+    assert recurring["donor_name"] == "Community Donor"
+    assert recurring["campaign_name"] == "Facility access fund"
+    assert recurring["status"] == "active"
+
+    recurring_run_response = client.post(
+        "/api/v1/commercial/recurring-donations/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "as_of": "2026-07-01",
+            "limit": 10,
+        },
+    )
+    assert recurring_run_response.status_code == 200
+    recurring_run = recurring_run_response.json()
+    assert recurring_run["eligible_count"] == 1
+    assert recurring_run["processed_count"] == 1
+    assert recurring_run["total_processed"] == "250.00"
+    assert len(recurring_run["donation_ids"]) == 1
+    assert len(recurring_run["receipt_ids"]) == 1
+
+    recurring_list = client.get(
+        f"/api/v1/commercial/recurring-donations?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert recurring_list[0]["donation_count"] == 1
+    assert recurring_list[0]["total_collected"] == "250.00"
+    assert recurring_list[0]["next_charge_on"] == "2026-08-01"
+
+    all_receipts = client.get(
+        f"/api/v1/commercial/donation-tax-receipts?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert len(all_receipts) == 2
+
     interaction_response = client.post(
         "/api/v1/commercial/donor-interactions",
         headers=identity_headers,
@@ -508,7 +564,7 @@ def test_donor_crm_tracks_lifetime_giving_touchpoints_and_stewardship(client, id
     dashboard = dashboard_response.json()
     assert dashboard["donor_count"] == 1
     assert dashboard["major_donor_count"] == 1
-    assert dashboard["lifetime_giving"] == "1250.00"
+    assert dashboard["lifetime_giving"] == "1500.00"
     assert dashboard["active_plan_count"] == 1
     assert dashboard["impact_story_needed_count"] == 1
 
