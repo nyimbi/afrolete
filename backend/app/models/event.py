@@ -551,6 +551,9 @@ class IncidentInsuranceClaim(IdMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         GUID(), ForeignKey("organizations.id"), index=True
     )
+    insurance_policy_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("insurance_policies.id"), index=True
+    )
     incident_id: Mapped[UUID] = mapped_column(
         GUID(), ForeignKey("safeguarding_incidents.id"), index=True
     )
@@ -583,6 +586,37 @@ class IncidentInsuranceClaim(IdMixin, TimestampMixin, Base):
     documentation_checklist_json: Mapped[str | None] = mapped_column(Text)
     submission_payload: Mapped[str | None] = mapped_column(Text)
     communication_log: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class InsurancePolicy(IdMixin, TimestampMixin, Base):
+    __tablename__ = "insurance_policies"
+    __table_args__ = (UniqueConstraint("organization_id", "policy_number", name="uq_insurance_policies_org_policy_number"),)
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    policy_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    provider_name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    policy_number: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    group_number: Mapped[str | None] = mapped_column(String(160), index=True)
+    broker_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    broker_email: Mapped[str | None] = mapped_column(String(320))
+    broker_phone: Mapped[str | None] = mapped_column(String(64))
+    coverage_summary: Mapped[str | None] = mapped_column(Text)
+    covered_subjects: Mapped[str | None] = mapped_column(Text)
+    exclusions: Mapped[str | None] = mapped_column(Text)
+    coverage_limit_cents: Mapped[int] = mapped_column(default=0, nullable=False)
+    deductible_cents: Mapped[int] = mapped_column(default=0, nullable=False)
+    premium_cents: Mapped[int] = mapped_column(default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    effective_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    expires_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    renewal_notice_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    certificate_url: Mapped[str | None] = mapped_column(String(500))
+    document_url: Mapped[str | None] = mapped_column(String(500))
     notes: Mapped[str | None] = mapped_column(Text)
 
 

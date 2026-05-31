@@ -186,6 +186,7 @@ from app.models.event import (  # noqa: F401,E402
     IncidentInsuranceClaim,
     IncidentMedicalClearance,
     IncidentReportPackage,
+    InsurancePolicy,
     SafeguardingEvidencePolicyRule,
     SafeguardingIncident,
     SafeguardingIncidentAccessGrant,

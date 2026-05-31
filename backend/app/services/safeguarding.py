@@ -50,6 +50,7 @@ from app.models.event import (
     IncidentInsuranceClaim,
     IncidentMedicalClearance,
     IncidentReportPackage,
+    InsurancePolicy,
     SafeguardingEvidencePolicyRule,
     SafeguardingIncident,
     SafeguardingIncidentAccessGrant,
@@ -133,6 +134,12 @@ from app.schemas.safeguarding import (
     IncidentInsuranceClaimCreate,
     IncidentInsuranceClaimProviderSyncRead,
     IncidentInsuranceClaimUpdate,
+    InsuranceCoverageVerificationCreate,
+    InsuranceCoverageVerificationRead,
+    InsurancePolicyCreate,
+    InsurancePolicyRead,
+    InsurancePolicyUpdate,
+    InsurancePortfolioSummaryRead,
     IncidentMedicalClearanceCreate,
     IncidentMedicalClearanceProviderSyncRead,
     IncidentMedicalClearanceUpdate,
@@ -176,6 +183,24 @@ MEDICAL_INCIDENT_TYPES = {
     SafeguardingIncidentType.MEDICAL,
 }
 BLOCKING_MEDICAL_FOLLOW_UP_VALUES = {"yes", "urgent", "required", "true"}
+
+CLAIM_TYPE_POLICY_TYPES = {
+    "injury_medical": {"accident_medical", "medical", "participant_accident", "travel_accident"},
+    "liability": {"general_liability", "directors_officers", "event_liability"},
+    "equipment_damage": {"equipment", "equipment_property", "property"},
+    "property_damage": {"property", "equipment_property", "facility_property"},
+    "travel": {"travel", "travel_accident", "event_cancellation"},
+    "other": {"general_liability", "other"},
+}
+OPEN_INSURANCE_CLAIM_STATUSES = {
+    InsuranceClaimStatus.DRAFT,
+    InsuranceClaimStatus.READY,
+    InsuranceClaimStatus.SUBMITTED,
+    InsuranceClaimStatus.ACKNOWLEDGED,
+    InsuranceClaimStatus.IN_REVIEW,
+    InsuranceClaimStatus.APPROVED,
+    InsuranceClaimStatus.PARTIALLY_PAID,
+}
 
 
 def normalize_provider_profile(value: str | None, default: str) -> str:
@@ -357,6 +382,107 @@ async def ensure_org_manage(
     )
     if not can_manage:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def get_insurance_policy(db: AsyncSession, policy_id: UUID) -> InsurancePolicy:
+    policy = await db.get(InsurancePolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insurance policy not found")
+    return policy
+
+
+async def get_insurance_policy_for_organization(
+    db: AsyncSession,
+    policy_id: UUID,
+    organization_id: UUID,
+) -> InsurancePolicy:
+    policy = await get_insurance_policy(db, policy_id)
+    if policy.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insurance policy not found")
+    return policy
+
+
+def insurance_policy_covers_claim_type(policy: InsurancePolicy, claim_type: object) -> bool:
+    claim_type_value = getattr(claim_type, "value", str(claim_type))
+    policy_type = policy.policy_type.strip().lower()
+    return policy_type in CLAIM_TYPE_POLICY_TYPES.get(claim_type_value, {policy_type})
+
+
+def insurance_policy_active_on(policy: InsurancePolicy, activity_date: date) -> bool:
+    return policy.status in {"active", "expiring"} and policy.effective_on <= activity_date <= policy.expires_on
+
+
+def insurance_policy_renewal_due(policy: InsurancePolicy, today: date) -> bool:
+    if policy.status not in {"active", "expiring"}:
+        return False
+    return (policy.expires_on - today).days <= policy.renewal_notice_days
+
+
+async def best_insurance_policy_for_claim_type(
+    db: AsyncSession,
+    organization_id: UUID,
+    claim_type: object,
+    activity_date: date,
+) -> InsurancePolicy | None:
+    policies = list(
+        (
+            await db.scalars(
+                select(InsurancePolicy)
+                .where(InsurancePolicy.organization_id == organization_id)
+                .where(InsurancePolicy.status.in_(["active", "expiring"]))
+                .order_by(InsurancePolicy.expires_on.asc(), InsurancePolicy.coverage_limit_cents.desc())
+            )
+        ).all()
+    )
+    for policy in policies:
+        if insurance_policy_covers_claim_type(policy, claim_type) and insurance_policy_active_on(policy, activity_date):
+            return policy
+    return None
+
+
+async def insurance_policy_read(db: AsyncSession, policy: InsurancePolicy) -> InsurancePolicyRead:
+    claims = list(
+        (
+            await db.scalars(
+                select(IncidentInsuranceClaim).where(
+                    IncidentInsuranceClaim.organization_id == policy.organization_id,
+                    IncidentInsuranceClaim.insurance_policy_id == policy.id,
+                )
+            )
+        ).all()
+    )
+    today = today_utc()
+    return InsurancePolicyRead(
+        id=policy.id,
+        organization_id=policy.organization_id,
+        name=policy.name,
+        policy_type=policy.policy_type,
+        provider_name=policy.provider_name,
+        policy_number=policy.policy_number,
+        group_number=policy.group_number,
+        broker_name=policy.broker_name,
+        broker_email=policy.broker_email,
+        broker_phone=policy.broker_phone,
+        coverage_summary=policy.coverage_summary,
+        covered_subjects=policy.covered_subjects,
+        exclusions=policy.exclusions,
+        coverage_limit_cents=policy.coverage_limit_cents,
+        deductible_cents=policy.deductible_cents,
+        premium_cents=policy.premium_cents,
+        currency=policy.currency,
+        effective_on=policy.effective_on,
+        expires_on=policy.expires_on,
+        renewal_notice_days=policy.renewal_notice_days,
+        certificate_url=policy.certificate_url,
+        document_url=policy.document_url,
+        notes=policy.notes,
+        status=policy.status,
+        claim_count=len(claims),
+        open_claim_count=sum(1 for claim in claims if claim.status in OPEN_INSURANCE_CLAIM_STATUSES),
+        paid_claims_cents=sum(claim.paid_amount_cents for claim in claims),
+        renewal_due=insurance_policy_renewal_due(policy, today),
+        days_until_expiry=(policy.expires_on - today).days,
+    )
 
 
 async def ensure_manage_safeguarding_incident(
@@ -2784,6 +2910,193 @@ async def update_incident_report_package(
     return package
 
 
+async def create_insurance_policy(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: InsurancePolicyCreate,
+    authz: AuthorizationService,
+) -> InsurancePolicy:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    existing = await db.scalar(
+        select(InsurancePolicy).where(
+            InsurancePolicy.organization_id == payload.organization_id,
+            InsurancePolicy.policy_number == payload.policy_number,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Insurance policy number already exists")
+    policy = InsurancePolicy(**payload.model_dump())
+    db.add(policy)
+    await db.commit()
+    await db.refresh(policy)
+    return policy
+
+
+async def list_insurance_policies(
+    db: AsyncSession,
+    organization_id: UUID,
+    status_filter: str | None = None,
+) -> list[InsurancePolicyRead]:
+    statement = select(InsurancePolicy).where(InsurancePolicy.organization_id == organization_id)
+    if status_filter is not None:
+        statement = statement.where(InsurancePolicy.status == status_filter)
+    policies = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    InsurancePolicy.expires_on.asc(),
+                    InsurancePolicy.name.asc(),
+                    InsurancePolicy.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+    return [
+        await insurance_policy_read(db, policy)
+        for policy in policies
+    ]
+
+
+async def update_insurance_policy(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    policy_id: UUID,
+    payload: InsurancePolicyUpdate,
+    authz: AuthorizationService,
+) -> InsurancePolicy:
+    policy = await get_insurance_policy(db, policy_id)
+    await ensure_org_manage(authz, policy.organization_id, identity)
+    update_data = payload.model_dump(exclude_unset=True)
+    effective_on = update_data.get("effective_on", policy.effective_on)
+    expires_on = update_data.get("expires_on", policy.expires_on)
+    if expires_on < effective_on:
+        raise HTTPException(status_code=422, detail="expires_on must be on or after effective_on")
+    if "policy_number" in update_data and update_data["policy_number"] != policy.policy_number:
+        existing = await db.scalar(
+            select(InsurancePolicy).where(
+                InsurancePolicy.organization_id == policy.organization_id,
+                InsurancePolicy.policy_number == update_data["policy_number"],
+                InsurancePolicy.id != policy.id,
+            )
+        )
+        if existing is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Insurance policy number already exists")
+    for field, value in update_data.items():
+        setattr(policy, field, value)
+    await db.commit()
+    await db.refresh(policy)
+    return policy
+
+
+async def insurance_portfolio_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> InsurancePortfolioSummaryRead:
+    policies = list(
+        (
+            await db.scalars(
+                select(InsurancePolicy).where(InsurancePolicy.organization_id == organization_id)
+            )
+        ).all()
+    )
+    claims = list(
+        (
+            await db.scalars(
+                select(IncidentInsuranceClaim).where(IncidentInsuranceClaim.organization_id == organization_id)
+            )
+        ).all()
+    )
+    today = today_utc()
+    active_policies = [policy for policy in policies if insurance_policy_active_on(policy, today)]
+    expiring_policies = [policy for policy in policies if insurance_policy_renewal_due(policy, today)]
+    return InsurancePortfolioSummaryRead(
+        organization_id=organization_id,
+        policy_count=len(policies),
+        active_policy_count=len(active_policies),
+        expiring_policy_count=len(expiring_policies),
+        annual_premium_cents=sum(policy.premium_cents for policy in active_policies),
+        coverage_limit_cents=sum(policy.coverage_limit_cents for policy in active_policies),
+        claim_count=len(claims),
+        open_claim_count=sum(1 for claim in claims if claim.status in OPEN_INSURANCE_CLAIM_STATUSES),
+        paid_claims_cents=sum(claim.paid_amount_cents for claim in claims),
+        currencies=sorted({policy.currency for policy in policies} | {claim.currency for claim in claims}),
+        renewal_alerts=[
+            f"{policy.name} ({policy.policy_number}) expires on {policy.expires_on.isoformat()}."
+            for policy in expiring_policies[:10]
+        ],
+    )
+
+
+async def verify_insurance_coverage(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: InsuranceCoverageVerificationCreate,
+    authz: AuthorizationService,
+) -> InsuranceCoverageVerificationRead:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    activity_date = payload.activity_date or today_utc()
+    if payload.incident_id is not None:
+        incident = await db.get(SafeguardingIncident, payload.incident_id)
+        if incident is None or incident.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+        activity_date = incident.occurred_at.date()
+    policy = None
+    if payload.policy_id is not None:
+        policy = await get_insurance_policy_for_organization(db, payload.policy_id, payload.organization_id)
+    else:
+        policy = await best_insurance_policy_for_claim_type(
+            db,
+            payload.organization_id,
+            payload.claim_type,
+            activity_date,
+        )
+    if policy is None:
+        return InsuranceCoverageVerificationRead(
+            organization_id=payload.organization_id,
+            claim_type=payload.claim_type,
+            policy_id=None,
+            policy_number=None,
+            provider_name=None,
+            covered=False,
+            coverage_limit_cents=0,
+            deductible_cents=0,
+            estimated_payable_cents=0,
+            currency="USD",
+            reason="No active matching policy covers this claim type and date.",
+            renewal_due=False,
+            certificate_url=None,
+        )
+    covers_type = insurance_policy_covers_claim_type(policy, payload.claim_type)
+    active = insurance_policy_active_on(policy, activity_date)
+    within_limit = payload.amount_cents <= 0 or policy.coverage_limit_cents <= 0 or payload.amount_cents <= policy.coverage_limit_cents
+    covered = covers_type and active and within_limit
+    if not covers_type:
+        reason = f"{policy.policy_type} does not normally cover {payload.claim_type.value} claims."
+    elif not active:
+        reason = f"Policy is not active on {activity_date.isoformat()}."
+    elif not within_limit:
+        reason = "Requested amount exceeds the recorded coverage limit."
+    else:
+        reason = "Coverage appears valid for this claim type and incident date."
+    payable_base = min(payload.amount_cents, policy.coverage_limit_cents) if policy.coverage_limit_cents else payload.amount_cents
+    estimated_payable = max(payable_base - policy.deductible_cents, 0) if covered else 0
+    return InsuranceCoverageVerificationRead(
+        organization_id=payload.organization_id,
+        claim_type=payload.claim_type,
+        policy_id=policy.id,
+        policy_number=policy.policy_number,
+        provider_name=policy.provider_name,
+        covered=covered,
+        coverage_limit_cents=policy.coverage_limit_cents,
+        deductible_cents=policy.deductible_cents,
+        estimated_payable_cents=estimated_payable,
+        currency=policy.currency,
+        reason=reason,
+        renewal_due=insurance_policy_renewal_due(policy, today_utc()),
+        certificate_url=policy.certificate_url,
+    )
+
+
 async def create_incident_insurance_claim(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -2794,11 +3107,23 @@ async def create_incident_insurance_claim(
     incident = await db.get(SafeguardingIncident, payload.incident_id)
     if incident is None or incident.organization_id != payload.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    selected_policy: InsurancePolicy | None = None
+    if payload.insurance_policy_id is not None:
+        selected_policy = await get_insurance_policy_for_organization(
+            db,
+            payload.insurance_policy_id,
+            payload.organization_id,
+        )
     if payload.claimant_person_id is not None:
         await validate_person_in_organization(db, payload.organization_id, payload.claimant_person_id)
+    create_data = payload.model_dump()
+    if selected_policy is not None:
+        create_data["provider_name"] = selected_policy.provider_name
+        create_data["policy_number"] = create_data.get("policy_number") or selected_policy.policy_number
+        create_data["currency"] = selected_policy.currency
     claim = IncidentInsuranceClaim(
         prepared_by_person_id=identity.person_id,
-        **payload.model_dump(),
+        **create_data,
     )
     db.add(claim)
     await db.commit()
@@ -2844,6 +3169,12 @@ async def update_incident_insurance_claim(
     if payload.claimant_person_id is not None:
         await validate_person_in_organization(db, claim.organization_id, payload.claimant_person_id)
         claim.claimant_person_id = payload.claimant_person_id
+    if payload.insurance_policy_id is not None:
+        selected_policy = await get_insurance_policy_for_organization(db, payload.insurance_policy_id, claim.organization_id)
+        claim.insurance_policy_id = selected_policy.id
+        claim.provider_name = selected_policy.provider_name
+        claim.policy_number = selected_policy.policy_number
+        claim.currency = selected_policy.currency
     if payload.status is not None:
         claim.status = payload.status
         if payload.status == InsuranceClaimStatus.SUBMITTED:
@@ -3067,6 +3398,7 @@ def incident_insurance_claim_provider_payload(
         "claim_id": str(claim.id),
         "organization_id": str(claim.organization_id),
         "incident_id": str(claim.incident_id),
+        "insurance_policy_id": str(claim.insurance_policy_id) if claim.insurance_policy_id else None,
         "claim_type": claim.claim_type.value,
         "status": claim.status.value,
         "provider_name": claim.provider_name,
@@ -3100,6 +3432,7 @@ def incident_insurance_claim_provider_schema(
     action: str,
 ) -> dict[str, object]:
     field_map = {
+        "afrolete_policy_id": "insurance_policy_id",
         "policy_id": "policy_number",
         "claim_reference": "claim_number",
         "loss_type": "claim_type",

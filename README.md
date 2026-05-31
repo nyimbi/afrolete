@@ -151,7 +151,8 @@ Major capability areas include:
   attendance, RSVPs, venue logistics, transport, weather, risk, and scheduling.
 - Consent, safeguarding, minor participation clearance, family portals,
   incident management, background checks, compliance credentials, medical
-  clearance, regulatory packages, and emergency action plans.
+  clearance, regulatory packages, insurance policy portfolios, coverage
+  verification, insurer claim workflows, and emergency action plans.
 - Performance metric definitions, observations, assessments, ALS-style scores,
   goals, awards, trend analysis, benchmarks, forecasts, injury-risk signals,
   wearable data, stored video, MediaPipe/OpenCV pose extraction workers,

@@ -348,6 +348,9 @@ import type {
   IncidentReportPackageProviderSubmissionRead,
   IncidentInsuranceClaimRead,
   IncidentInsuranceClaimProviderSyncRead,
+  InsuranceCoverageVerificationRead,
+  InsurancePolicyRead,
+  InsurancePortfolioSummaryRead,
   IncidentMedicalClearanceRead,
   IncidentMedicalClearanceProviderSyncRead,
   IncidentReportPackageRead,
@@ -2495,6 +2498,10 @@ export default function HomePage() {
   const [incidentReportPackageArtifact, setIncidentReportPackageArtifact] = useState<IncidentReportPackageArtifactRead | null>(null);
   const [incidentReportPackageArtifactLink, setIncidentReportPackageArtifactLink] = useState<IncidentReportPackageArtifactLinkRead | null>(null);
   const [incidentReportPackageSubmission, setIncidentReportPackageSubmission] = useState<IncidentReportPackageProviderSubmissionRead | null>(null);
+  const [insurancePolicies, setInsurancePolicies] = useState<InsurancePolicyRead[]>([]);
+  const [insurancePortfolioSummary, setInsurancePortfolioSummary] = useState<InsurancePortfolioSummaryRead | null>(null);
+  const [insuranceCoverageVerification, setInsuranceCoverageVerification] =
+    useState<InsuranceCoverageVerificationRead | null>(null);
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
   const [incidentInsuranceClaimProviderSync, setIncidentInsuranceClaimProviderSync] = useState<IncidentInsuranceClaimProviderSyncRead | null>(null);
   const [incidentMedicalClearances, setIncidentMedicalClearances] = useState<IncidentMedicalClearanceRead[]>([]);
@@ -2968,6 +2975,20 @@ export default function HomePage() {
   const [insuranceClaimForm, setInsuranceClaimForm] = useState({
     provider_name: "Athletic Health Insurers",
     policy_number: "POL-2026-001",
+    policy_name: "Accident Medical 2026",
+    policy_type: "accident_medical",
+    group_number: "RFC-2026",
+    broker_name: "Nairobi Sports Brokers",
+    broker_email: "broker@example.com",
+    coverage_summary: "Primary athlete injury coverage for sanctioned training and competition.",
+    covered_subjects: "Registered athletes, training sessions, matches, and approved travel.",
+    effective_on: "2026-01-01",
+    expires_on: "2026-12-31",
+    renewal_notice_days: 90,
+    coverage_limit: "25000",
+    deductible: "0",
+    premium: "12000",
+    certificate_url: "https://example.test/certificates/ahi-2026.pdf",
     claim_type: "injury_medical" as InsuranceClaimType,
     claimed_amount: "3800",
     reserve_amount: "5000",
@@ -4548,6 +4569,21 @@ export default function HomePage() {
       { identity }
     );
     setIncidentInsuranceClaims(data);
+  }, [identity]);
+
+  const loadInsurancePortfolio = useCallback(async (organizationId: string) => {
+    const [policies, summary] = await Promise.all([
+      apiRequest<InsurancePolicyRead[]>(
+        `/safeguarding/insurance-policies?organization_id=${organizationId}`,
+        { identity }
+      ),
+      apiRequest<InsurancePortfolioSummaryRead>(
+        `/safeguarding/insurance-portfolio/summary?organization_id=${organizationId}`,
+        { identity }
+      )
+    ]);
+    setInsurancePolicies(policies);
+    setInsurancePortfolioSummary(summary);
   }, [identity]);
 
   const loadIncidentMedicalClearances = useCallback(async (organizationId: string) => {
@@ -6289,6 +6325,9 @@ export default function HomePage() {
       setIncidentReportPackageArtifact(null);
       setIncidentReportPackageArtifactLink(null);
       setIncidentReportPackageSubmission(null);
+      setInsurancePolicies([]);
+      setInsurancePortfolioSummary(null);
+      setInsuranceCoverageVerification(null);
       setIncidentInsuranceClaims([]);
       setIncidentInsuranceClaimProviderSync(null);
       setIncidentMedicalClearances([]);
@@ -6520,6 +6559,7 @@ export default function HomePage() {
       await loadComplianceCredentials(selectedOrganizationId);
       await loadComplianceSummary(selectedOrganizationId);
       await loadIncidentReportPackages(selectedOrganizationId);
+      await loadInsurancePortfolio(selectedOrganizationId);
       await loadIncidentInsuranceClaims(selectedOrganizationId);
       await loadIncidentMedicalClearances(selectedOrganizationId);
       await loadAgents(selectedOrganizationId);
@@ -6560,6 +6600,7 @@ export default function HomePage() {
     loadComplianceCredentials,
     loadComplianceSummary,
     loadIncidentReportPackages,
+    loadInsurancePortfolio,
     loadIncidentInsuranceClaims,
     loadIncidentMedicalClearances,
     loadAgents,
@@ -10531,11 +10572,88 @@ export default function HomePage() {
 
   const claimAmountCents = (value: string) => Math.round((Number(value) || 0) * 100);
 
+  const createInsurancePolicy = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating an insurance policy", "bad");
+      return;
+    }
+    runAction(
+      "create-insurance-policy",
+      () =>
+        apiRequest<InsurancePolicyRead>("/safeguarding/insurance-policies", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: insuranceClaimForm.policy_name,
+            policy_type: insuranceClaimForm.policy_type,
+            provider_name: insuranceClaimForm.provider_name,
+            policy_number: `${insuranceClaimForm.policy_number}-${Date.now()}`,
+            group_number: insuranceClaimForm.group_number || null,
+            broker_name: insuranceClaimForm.broker_name || null,
+            broker_email: insuranceClaimForm.broker_email || null,
+            coverage_summary: insuranceClaimForm.coverage_summary || null,
+            covered_subjects: insuranceClaimForm.covered_subjects || null,
+            coverage_limit_cents: claimAmountCents(insuranceClaimForm.coverage_limit),
+            deductible_cents: claimAmountCents(insuranceClaimForm.deductible),
+            premium_cents: claimAmountCents(insuranceClaimForm.premium),
+            currency: insuranceClaimForm.currency,
+            effective_on: insuranceClaimForm.effective_on,
+            expires_on: insuranceClaimForm.expires_on,
+            renewal_notice_days: insuranceClaimForm.renewal_notice_days,
+            certificate_url: insuranceClaimForm.certificate_url || null,
+            status: "active"
+          }
+        }),
+      async (policy) => {
+        setInsurancePolicies((current) => [policy, ...current.filter((item) => item.id !== policy.id)]);
+        setInsuranceClaimForm((current) => ({
+          ...current,
+          provider_name: policy.provider_name,
+          policy_number: policy.policy_number,
+          currency: policy.currency
+        }));
+        if (selectedOrganizationId) {
+          await loadInsurancePortfolio(selectedOrganizationId);
+        }
+        addLog(`${policy.name} insurance policy is active`, "good");
+      }
+    );
+  };
+
+  const verifyInsuranceCoverage = (incident?: SafeguardingIncidentRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before verifying coverage", "bad");
+      return;
+    }
+    const policy = insurancePolicies[0] ?? null;
+    runAction(
+      "verify-insurance-coverage",
+      () =>
+        apiRequest<InsuranceCoverageVerificationRead>("/safeguarding/insurance-coverage/verify", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            claim_type: insuranceClaimForm.claim_type,
+            incident_id: incident?.id ?? null,
+            policy_id: policy?.id ?? null,
+            amount_cents: claimAmountCents(insuranceClaimForm.claimed_amount)
+          }
+        }),
+      (verification) => {
+        setInsuranceCoverageVerification(verification);
+        addLog(verification.covered ? `Coverage verified with ${verification.provider_name}` : verification.reason, verification.covered ? "good" : "neutral");
+      }
+    );
+  };
+
   const createIncidentInsuranceClaim = (incident: SafeguardingIncidentRead) => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
       return;
     }
+    const policy = insurancePolicies[0] ?? null;
     runAction(
       `create-insurance-claim-${incident.id}`,
       () =>
@@ -10545,10 +10663,11 @@ export default function HomePage() {
           body: {
             organization_id: selectedOrganizationId,
             incident_id: incident.id,
+            insurance_policy_id: policy?.id ?? null,
             claimant_person_id: incident.athlete_person_id,
             claim_type: insuranceClaimForm.claim_type,
-            provider_name: insuranceClaimForm.provider_name,
-            policy_number: insuranceClaimForm.policy_number || null,
+            provider_name: policy?.provider_name ?? insuranceClaimForm.provider_name,
+            policy_number: policy?.policy_number ?? (insuranceClaimForm.policy_number || null),
             claimed_amount_cents: claimAmountCents(insuranceClaimForm.claimed_amount),
             currency: insuranceClaimForm.currency,
             reserve_amount_cents: claimAmountCents(insuranceClaimForm.reserve_amount),
@@ -10571,11 +10690,14 @@ export default function HomePage() {
             notes: insuranceClaimForm.notes || null
           }
         }),
-      (claim) => {
+      async (claim) => {
         setIncidentInsuranceClaims((current) => [
           claim,
           ...current.filter((item) => item.id !== claim.id)
         ]);
+        if (selectedOrganizationId) {
+          await loadInsurancePortfolio(selectedOrganizationId);
+        }
         addLog(`${claim.provider_name} claim drafted`, "good");
       }
     );
@@ -35720,6 +35842,8 @@ export default function HomePage() {
               <button type="button" onClick={createBackgroundCheck} disabled={busyAction !== null}>Request check</button>
               <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
               <button type="button" onClick={createSafeguardingIncident} disabled={busyAction !== null}>Log incident</button>
+              <button type="button" onClick={createInsurancePolicy} disabled={busyAction !== null}>Policy</button>
+              <button type="button" onClick={() => verifyInsuranceCoverage(safeguardingIncidents[0])} disabled={busyAction !== null}>Coverage</button>
               <button type="button" onClick={createSafeguardingEvidencePolicyRule} disabled={busyAction !== null}>Policy rule</button>
               <button type="button" onClick={reconcileCompliance} disabled={busyAction !== null}>Reconcile</button>
             </div>
@@ -35748,6 +35872,14 @@ export default function HomePage() {
             <div>
               <span className="muted">Regulatory</span>
               <strong>{complianceSummary?.regulatory_incidents ?? 0}</strong>
+            </div>
+            <div>
+              <span className="muted">Insurance policies</span>
+              <strong>{insurancePortfolioSummary ? `${insurancePortfolioSummary.active_policy_count}/${insurancePortfolioSummary.policy_count}` : "0/0"}</strong>
+            </div>
+            <div>
+              <span className="muted">Open claims</span>
+              <strong>{insurancePortfolioSummary?.open_claim_count ?? 0}</strong>
             </div>
             <div>
               <span className="muted">Family accounts</span>
@@ -35988,12 +36120,63 @@ export default function HomePage() {
           </div>
           <div className="form-grid three">
             <label>
+              Policy name
+              <input value={insuranceClaimForm.policy_name} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, policy_name: event.target.value })} />
+            </label>
+            <label>
+              Policy type
+              <select value={insuranceClaimForm.policy_type} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, policy_type: event.target.value })}>
+                <option value="accident_medical">Accident medical</option>
+                <option value="general_liability">General liability</option>
+                <option value="equipment_property">Equipment/property</option>
+                <option value="travel_accident">Travel accident</option>
+                <option value="event_cancellation">Event cancellation</option>
+                <option value="directors_officers">Directors and officers</option>
+              </select>
+            </label>
+            <label>
               Insurer
               <input value={insuranceClaimForm.provider_name} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, provider_name: event.target.value })} />
             </label>
             <label>
               Policy
               <input value={insuranceClaimForm.policy_number} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, policy_number: event.target.value })} />
+            </label>
+            <label>
+              Group
+              <input value={insuranceClaimForm.group_number} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, group_number: event.target.value })} />
+            </label>
+            <label>
+              Broker
+              <input value={insuranceClaimForm.broker_name} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, broker_name: event.target.value })} />
+            </label>
+            <label>
+              Broker email
+              <input value={insuranceClaimForm.broker_email} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, broker_email: event.target.value })} />
+            </label>
+            <label>
+              Effective
+              <input type="date" value={insuranceClaimForm.effective_on} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, effective_on: event.target.value })} />
+            </label>
+            <label>
+              Expires
+              <input type="date" value={insuranceClaimForm.expires_on} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, expires_on: event.target.value })} />
+            </label>
+            <label>
+              Renewal days
+              <input type="number" min="0" value={insuranceClaimForm.renewal_notice_days} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, renewal_notice_days: Number(event.target.value) })} />
+            </label>
+            <label>
+              Coverage limit
+              <input type="number" min="0" value={insuranceClaimForm.coverage_limit} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, coverage_limit: event.target.value })} />
+            </label>
+            <label>
+              Deductible
+              <input type="number" min="0" value={insuranceClaimForm.deductible} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, deductible: event.target.value })} />
+            </label>
+            <label>
+              Premium
+              <input type="number" min="0" value={insuranceClaimForm.premium} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, premium: event.target.value })} />
             </label>
             <label>
               Claim type
@@ -36021,6 +36204,18 @@ export default function HomePage() {
             <label>
               Tracking URL
               <input value={insuranceClaimForm.tracking_url} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, tracking_url: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Coverage
+              <input value={insuranceClaimForm.coverage_summary} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, coverage_summary: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Covered subjects
+              <input value={insuranceClaimForm.covered_subjects} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, covered_subjects: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Certificate URL
+              <input value={insuranceClaimForm.certificate_url} onChange={(event) => setInsuranceClaimForm({ ...insuranceClaimForm, certificate_url: event.target.value })} />
             </label>
             <label className="wide-field">
               Claim notes
@@ -36229,12 +36424,49 @@ export default function HomePage() {
                 </a>
               </article>
             ) : null}
+            {insurancePortfolioSummary ? (
+              <article className="task-card selected">
+                <div>
+                  <strong>Insurance portfolio · {insurancePortfolioSummary.active_policy_count}/{insurancePortfolioSummary.policy_count}</strong>
+                  <span>
+                    {insurancePortfolioSummary.currencies[0] ?? "USD"} {(insurancePortfolioSummary.annual_premium_cents / 100).toFixed(2)} premium · {(insurancePortfolioSummary.coverage_limit_cents / 100).toFixed(2)} coverage
+                  </span>
+                  <span>{insurancePortfolioSummary.claim_count} claims · {insurancePortfolioSummary.open_claim_count} open · {(insurancePortfolioSummary.paid_claims_cents / 100).toFixed(2)} paid</span>
+                  <span>{insurancePortfolioSummary.renewal_alerts[0] ?? "No renewal alerts"}</span>
+                </div>
+              </article>
+            ) : null}
+            {insuranceCoverageVerification ? (
+              <article className={`task-card ${insuranceCoverageVerification.covered ? "selected" : "risk-card"}`}>
+                <div>
+                  <strong>{insuranceCoverageVerification.covered ? "Coverage verified" : "Coverage review"}</strong>
+                  <span>{insuranceCoverageVerification.provider_name ?? "No insurer"} · {insuranceCoverageVerification.policy_number ?? "No policy"}</span>
+                  <span>
+                    Limit {(insuranceCoverageVerification.coverage_limit_cents / 100).toFixed(2)} · payable {(insuranceCoverageVerification.estimated_payable_cents / 100).toFixed(2)} {insuranceCoverageVerification.currency}
+                  </span>
+                  <span>{insuranceCoverageVerification.reason}</span>
+                </div>
+              </article>
+            ) : null}
+            {insurancePolicies.slice(0, 4).map((policy) => (
+              <article key={policy.id} className={`task-card ${policy.renewal_due ? "risk-card" : ""}`}>
+                <div>
+                  <strong>{policy.name}</strong>
+                  <span>{policy.provider_name} · {policy.policy_type} · {policy.status}</span>
+                  <span>{policy.policy_number} · expires {policy.expires_on} · {policy.days_until_expiry ?? 0} days</span>
+                  <span>
+                    {(policy.coverage_limit_cents / 100).toFixed(2)} coverage · {(policy.premium_cents / 100).toFixed(2)} premium · {policy.claim_count} claims
+                  </span>
+                  <span>{policy.broker_name ?? "No broker"} · {policy.certificate_url ?? "No certificate"}</span>
+                </div>
+              </article>
+            ))}
             {incidentInsuranceClaims.slice(0, 4).map((claim) => (
               <article key={claim.id} className="task-card">
                 <div>
                   <strong>{claim.provider_name}</strong>
                   <span>{claim.claim_type} · {claim.status} · {claim.currency} {(claim.claimed_amount_cents / 100).toFixed(2)} claimed</span>
-                  <span>{claim.policy_number ?? "No policy"} · {claim.claim_number ?? "No claim number"}</span>
+                  <span>{claim.policy_number ?? "No policy"} · {claim.insurance_policy_id ? `policy ${claim.insurance_policy_id.slice(0, 8)}` : "unlinked"} · {claim.claim_number ?? "No claim number"}</span>
                   <span>{claim.paid_amount_cents ? `${claim.currency} ${(claim.paid_amount_cents / 100).toFixed(2)} paid` : claim.notes ?? "Awaiting insurer update"}</span>
                 </div>
                 <div className="event-toolbar">

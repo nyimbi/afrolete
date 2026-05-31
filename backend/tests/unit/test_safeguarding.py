@@ -1240,6 +1240,115 @@ def test_insurance_claim_provider_submit_and_status_poll_record_only(client, ide
     assert claim_payload["provider_schema"]["field_map"]["policy_id"] == "policy_number"
 
 
+def test_insurance_policy_portfolio_links_coverage_and_claims(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={"name": "Insurance Portfolio Club", "organization_type": "club"},
+    ).json()
+    incident = client.post(
+        "/api/v1/safeguarding/incidents",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_type": "injury",
+            "severity": "medium",
+            "occurred_at": "2026-05-28T11:15:00Z",
+            "location": "Training pitch",
+            "title": "Covered ankle injury",
+            "description": "Athlete rolled ankle during training.",
+            "immediate_action": "First aid and clinic referral.",
+            "medical_follow_up_required": "yes",
+        },
+    ).json()
+
+    policy_response = client.post(
+        "/api/v1/safeguarding/insurance-policies",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Accident Medical 2026",
+            "policy_type": "accident_medical",
+            "provider_name": "Athletic Health Insurers",
+            "policy_number": "AHI-2026-001",
+            "group_number": "RFC-2026",
+            "broker_name": "Nairobi Sports Brokers",
+            "broker_email": "broker@example.com",
+            "coverage_summary": "Primary athlete injury coverage.",
+            "covered_subjects": "Registered athletes, sanctioned training, matches, and travel.",
+            "coverage_limit_cents": 2500000,
+            "deductible_cents": 0,
+            "premium_cents": 1200000,
+            "currency": "USD",
+            "effective_on": "2026-01-01",
+            "expires_on": "2026-12-31",
+            "renewal_notice_days": 365,
+            "certificate_url": "https://example.test/certificates/ahi-2026.pdf",
+        },
+    )
+    assert policy_response.status_code == 201
+    policy = policy_response.json()
+    assert policy["renewal_due"] is True
+    assert policy["claim_count"] == 0
+
+    coverage_response = client.post(
+        "/api/v1/safeguarding/insurance-coverage/verify",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_id": incident["id"],
+            "claim_type": "injury_medical",
+            "amount_cents": 125000,
+        },
+    )
+    assert coverage_response.status_code == 200
+    coverage = coverage_response.json()
+    assert coverage["covered"] is True
+    assert coverage["policy_id"] == policy["id"]
+    assert coverage["policy_number"] == "AHI-2026-001"
+    assert coverage["estimated_payable_cents"] == 125000
+    assert coverage["certificate_url"].endswith("ahi-2026.pdf")
+
+    claim_response = client.post(
+        "/api/v1/safeguarding/insurance-claims",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "incident_id": incident["id"],
+            "insurance_policy_id": policy["id"],
+            "provider_name": "Placeholder Provider",
+            "claim_type": "injury_medical",
+            "claimed_amount_cents": 125000,
+            "currency": "KES",
+            "reserve_amount_cents": 150000,
+        },
+    )
+    assert claim_response.status_code == 201
+    claim = claim_response.json()
+    assert claim["insurance_policy_id"] == policy["id"]
+    assert claim["provider_name"] == "Athletic Health Insurers"
+    assert claim["policy_number"] == "AHI-2026-001"
+    assert claim["currency"] == "USD"
+
+    listed_policies = client.get(
+        f"/api/v1/safeguarding/insurance-policies?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert listed_policies[0]["claim_count"] == 1
+    assert listed_policies[0]["open_claim_count"] == 1
+
+    summary = client.get(
+        f"/api/v1/safeguarding/insurance-portfolio/summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert summary["policy_count"] == 1
+    assert summary["active_policy_count"] == 1
+    assert summary["expiring_policy_count"] == 1
+    assert summary["annual_premium_cents"] == 1200000
+    assert summary["open_claim_count"] == 1
+    assert "Accident Medical 2026" in summary["renewal_alerts"][0]
+
+
 def test_medical_clearance_provider_submit_and_status_poll_record_only(
     client,
     identity_headers,

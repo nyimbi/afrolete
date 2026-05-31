@@ -76,6 +76,12 @@ from app.schemas.safeguarding import (
     IncidentInsuranceClaimProviderSyncRead,
     IncidentInsuranceClaimRead,
     IncidentInsuranceClaimUpdate,
+    InsuranceCoverageVerificationCreate,
+    InsuranceCoverageVerificationRead,
+    InsurancePolicyCreate,
+    InsurancePolicyRead,
+    InsurancePolicyUpdate,
+    InsurancePortfolioSummaryRead,
     IncidentMedicalClearanceCreate,
     IncidentMedicalClearanceProviderSyncRead,
     IncidentMedicalClearanceRead,
@@ -130,7 +136,9 @@ from app.services.safeguarding import (
     list_guardian_account_readiness,
     list_guardians_for_athlete,
     get_my_family_dashboard,
+    create_insurance_policy,
     list_incident_insurance_claims,
+    list_insurance_policies,
     poll_incident_insurance_claim_provider_status,
     poll_incident_medical_clearance_provider_status,
     list_incident_medical_clearances,
@@ -156,6 +164,8 @@ from app.services.safeguarding import (
     revoke_safeguarding_incident_access_grant,
     submit_background_check_to_screening_provider,
     submit_incident_report_package_to_regulator,
+    insurance_policy_read,
+    insurance_portfolio_summary,
     update_background_check,
     update_compliance_credential,
     update_incident_insurance_claim,
@@ -166,6 +176,8 @@ from app.services.safeguarding import (
     upload_background_check_evidence_document,
     update_incident_medical_clearance,
     update_incident_report_package,
+    update_insurance_policy,
+    verify_insurance_coverage,
     update_safeguarding_evidence_policy_rule,
     update_safeguarding_incident,
 )
@@ -324,6 +336,7 @@ def to_insurance_claim_read(claim) -> IncidentInsuranceClaimRead:
     return IncidentInsuranceClaimRead(
         id=claim.id,
         organization_id=claim.organization_id,
+        insurance_policy_id=claim.insurance_policy_id,
         incident_id=claim.incident_id,
         claimant_person_id=claim.claimant_person_id,
         prepared_by_person_id=claim.prepared_by_person_id,
@@ -925,6 +938,62 @@ async def read_background_check_evidence_document_route(
             "X-Afrolete-Background-Check-Evidence-Checksum": str(evidence["checksum"]),
         },
     )
+
+
+@router.post("/insurance-policies", response_model=InsurancePolicyRead, status_code=201)
+async def create_insurance_policy_route(
+    payload: InsurancePolicyCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> InsurancePolicyRead:
+    policy = await create_insurance_policy(db, identity, payload, authz)
+    return await insurance_policy_read(db, policy)
+
+
+@router.get("/insurance-policies", response_model=list[InsurancePolicyRead])
+async def list_insurance_policies_route(
+    organization_id: UUID = Query(),
+    status_filter: str | None = Query(default=None, alias="status"),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[InsurancePolicyRead]:
+    await ensure_org_manage(authz, organization_id, identity)
+    return await list_insurance_policies(db, organization_id, status_filter)
+
+
+@router.patch("/insurance-policies/{policy_id}", response_model=InsurancePolicyRead)
+async def update_insurance_policy_route(
+    policy_id: UUID,
+    payload: InsurancePolicyUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> InsurancePolicyRead:
+    policy = await update_insurance_policy(db, identity, policy_id, payload, authz)
+    return await insurance_policy_read(db, policy)
+
+
+@router.get("/insurance-portfolio/summary", response_model=InsurancePortfolioSummaryRead)
+async def insurance_portfolio_summary_route(
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> InsurancePortfolioSummaryRead:
+    await ensure_org_manage(authz, organization_id, identity)
+    return await insurance_portfolio_summary(db, organization_id)
+
+
+@router.post("/insurance-coverage/verify", response_model=InsuranceCoverageVerificationRead)
+async def verify_insurance_coverage_route(
+    payload: InsuranceCoverageVerificationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> InsuranceCoverageVerificationRead:
+    return await verify_insurance_coverage(db, identity, payload, authz)
 
 
 @router.post("/insurance-claims", response_model=IncidentInsuranceClaimRead, status_code=201)

@@ -6730,6 +6730,7 @@ export type IncidentReportPackageProviderSubmissionRead = {
 export type IncidentInsuranceClaimRead = {
   id: UUID;
   organization_id: UUID;
+  insurance_policy_id: UUID | null;
   incident_id: UUID;
   claimant_person_id: UUID | null;
   prepared_by_person_id: UUID | null;
@@ -6753,6 +6754,68 @@ export type IncidentInsuranceClaimRead = {
   communication_log: string | null;
   notes: string | null;
   created_at: string;
+};
+
+export type InsurancePolicyRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  policy_type: string;
+  provider_name: string;
+  policy_number: string;
+  group_number: string | null;
+  broker_name: string | null;
+  broker_email: string | null;
+  broker_phone: string | null;
+  coverage_summary: string | null;
+  covered_subjects: string | null;
+  exclusions: string | null;
+  coverage_limit_cents: number;
+  deductible_cents: number;
+  premium_cents: number;
+  currency: string;
+  effective_on: string;
+  expires_on: string;
+  renewal_notice_days: number;
+  certificate_url: string | null;
+  document_url: string | null;
+  notes: string | null;
+  status: string;
+  claim_count: number;
+  open_claim_count: number;
+  paid_claims_cents: number;
+  renewal_due: boolean;
+  days_until_expiry: number | null;
+};
+
+export type InsuranceCoverageVerificationRead = {
+  organization_id: UUID;
+  claim_type: InsuranceClaimType;
+  policy_id: UUID | null;
+  policy_number: string | null;
+  provider_name: string | null;
+  covered: boolean;
+  coverage_limit_cents: number;
+  deductible_cents: number;
+  estimated_payable_cents: number;
+  currency: string;
+  reason: string;
+  renewal_due: boolean;
+  certificate_url: string | null;
+};
+
+export type InsurancePortfolioSummaryRead = {
+  organization_id: UUID;
+  policy_count: number;
+  active_policy_count: number;
+  expiring_policy_count: number;
+  annual_premium_cents: number;
+  coverage_limit_cents: number;
+  claim_count: number;
+  open_claim_count: number;
+  paid_claims_cents: number;
+  currencies: string[];
+  renewal_alerts: string[];
 };
 
 export type IncidentInsuranceClaimProviderSyncRead = {

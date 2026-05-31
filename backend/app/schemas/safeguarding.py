@@ -1170,6 +1170,7 @@ class IncidentReportPackageProviderSubmissionRead(BaseModel):
 class IncidentInsuranceClaimCreate(BaseModel):
     organization_id: UUID
     incident_id: UUID
+    insurance_policy_id: UUID | None = None
     claimant_person_id: UUID | None = None
     claim_type: InsuranceClaimType = InsuranceClaimType.INJURY_MEDICAL
     provider_name: str = Field(min_length=2, max_length=240)
@@ -1186,6 +1187,7 @@ class IncidentInsuranceClaimCreate(BaseModel):
 
 class IncidentInsuranceClaimUpdate(BaseModel):
     status: InsuranceClaimStatus | None = None
+    insurance_policy_id: UUID | None = None
     claimant_person_id: UUID | None = None
     policy_number: str | None = Field(default=None, max_length=160)
     claim_number: str | None = Field(default=None, max_length=160)
@@ -1206,6 +1208,7 @@ class IncidentInsuranceClaimUpdate(BaseModel):
 class IncidentInsuranceClaimRead(BaseModel):
     id: UUID
     organization_id: UUID
+    insurance_policy_id: UUID | None
     incident_id: UUID
     claimant_person_id: UUID | None
     prepared_by_person_id: UUID | None
@@ -1229,6 +1232,111 @@ class IncidentInsuranceClaimRead(BaseModel):
     communication_log: str | None
     notes: str | None
     created_at: datetime
+
+
+class InsurancePolicyCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    policy_type: str = Field(default="accident_medical", min_length=2, max_length=80)
+    provider_name: str = Field(min_length=2, max_length=240)
+    policy_number: str = Field(min_length=2, max_length=160)
+    group_number: str | None = Field(default=None, max_length=160)
+    broker_name: str | None = Field(default=None, max_length=180)
+    broker_email: str | None = Field(default=None, max_length=320)
+    broker_phone: str | None = Field(default=None, max_length=64)
+    coverage_summary: str | None = Field(default=None, max_length=8000)
+    covered_subjects: str | None = Field(default=None, max_length=4000)
+    exclusions: str | None = Field(default=None, max_length=4000)
+    coverage_limit_cents: int = Field(default=0, ge=0)
+    deductible_cents: int = Field(default=0, ge=0)
+    premium_cents: int = Field(default=0, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    effective_on: date
+    expires_on: date
+    renewal_notice_days: int = Field(default=90, ge=0, le=730)
+    certificate_url: str | None = Field(default=None, max_length=500)
+    document_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="active", pattern="^(draft|active|expiring|expired|cancelled|archived)$")
+
+    @model_validator(mode="after")
+    def valid_period(self) -> "InsurancePolicyCreate":
+        if self.expires_on < self.effective_on:
+            raise ValueError("expires_on must be on or after effective_on")
+        return self
+
+
+class InsurancePolicyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    policy_type: str | None = Field(default=None, min_length=2, max_length=80)
+    status: str | None = Field(default=None, pattern="^(draft|active|expiring|expired|cancelled|archived)$")
+    provider_name: str | None = Field(default=None, min_length=2, max_length=240)
+    policy_number: str | None = Field(default=None, min_length=2, max_length=160)
+    group_number: str | None = Field(default=None, max_length=160)
+    broker_name: str | None = Field(default=None, max_length=180)
+    broker_email: str | None = Field(default=None, max_length=320)
+    broker_phone: str | None = Field(default=None, max_length=64)
+    coverage_summary: str | None = Field(default=None, max_length=8000)
+    covered_subjects: str | None = Field(default=None, max_length=4000)
+    exclusions: str | None = Field(default=None, max_length=4000)
+    coverage_limit_cents: int | None = Field(default=None, ge=0)
+    deductible_cents: int | None = Field(default=None, ge=0)
+    premium_cents: int | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    effective_on: date | None = None
+    expires_on: date | None = None
+    renewal_notice_days: int | None = Field(default=None, ge=0, le=730)
+    certificate_url: str | None = Field(default=None, max_length=500)
+    document_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class InsurancePolicyRead(InsurancePolicyCreate):
+    id: UUID
+    claim_count: int = 0
+    open_claim_count: int = 0
+    paid_claims_cents: int = 0
+    renewal_due: bool = False
+    days_until_expiry: int | None = None
+
+
+class InsuranceCoverageVerificationCreate(BaseModel):
+    organization_id: UUID
+    claim_type: InsuranceClaimType = InsuranceClaimType.INJURY_MEDICAL
+    incident_id: UUID | None = None
+    policy_id: UUID | None = None
+    activity_date: date | None = None
+    amount_cents: int = Field(default=0, ge=0)
+
+
+class InsuranceCoverageVerificationRead(BaseModel):
+    organization_id: UUID
+    claim_type: InsuranceClaimType
+    policy_id: UUID | None
+    policy_number: str | None
+    provider_name: str | None
+    covered: bool
+    coverage_limit_cents: int
+    deductible_cents: int
+    estimated_payable_cents: int
+    currency: str
+    reason: str
+    renewal_due: bool
+    certificate_url: str | None
+
+
+class InsurancePortfolioSummaryRead(BaseModel):
+    organization_id: UUID
+    policy_count: int
+    active_policy_count: int
+    expiring_policy_count: int
+    annual_premium_cents: int
+    coverage_limit_cents: int
+    claim_count: int
+    open_claim_count: int
+    paid_claims_cents: int
+    currencies: list[str]
+    renewal_alerts: list[str]
 
 
 class IncidentInsuranceClaimProviderSyncRead(BaseModel):
