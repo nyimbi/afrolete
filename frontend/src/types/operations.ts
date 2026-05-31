@@ -3120,6 +3120,63 @@ export type FacilityMaintenanceDashboardRead = {
   recommendation: string;
 };
 
+export type FacilitySafetyAuditFindingRead = {
+  id: UUID;
+  organization_id: UUID;
+  audit_id: UUID;
+  work_order_id: UUID | null;
+  checklist_section: string;
+  checklist_item: string;
+  result: "pass" | "warning" | "fail" | "not_applicable";
+  severity: "low" | "medium" | "high" | "critical";
+  risk_rating: number | null;
+  status: "open" | "in_progress" | "closed" | "waived";
+  corrective_action: string | null;
+  assigned_to_person_id: UUID | null;
+  due_at: string | null;
+  evidence_url: string | null;
+  closed_at: string | null;
+  notes: string | null;
+};
+
+export type FacilitySafetyAuditRead = {
+  id: UUID;
+  organization_id: UUID;
+  facility_id: UUID | null;
+  equipment_item_id: UUID | null;
+  facility_maintenance_schedule_id: UUID | null;
+  auditor_person_id: UUID | null;
+  audit_type: string;
+  standard_ref: string | null;
+  status: "draft" | "scheduled" | "in_progress" | "completed" | "requires_action" | "closed";
+  risk_level: "low" | "medium" | "high" | "critical";
+  scheduled_for: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  score: number | null;
+  pass_count: number;
+  warning_count: number;
+  fail_count: number;
+  corrective_action_count: number;
+  location_detail: string | null;
+  summary: string | null;
+  notes: string | null;
+  findings: FacilitySafetyAuditFindingRead[];
+};
+
+export type FacilitySafetyAuditSummaryRead = {
+  organization_id: UUID;
+  total_audits: number;
+  open_audits: number;
+  requires_action_audits: number;
+  open_findings: number;
+  overdue_findings: number;
+  corrective_work_orders: number;
+  average_score: number | null;
+  risk_counts: Record<string, number>;
+  recommendation: string;
+};
+
 export type FacilityLeaseAgreementRead = {
   id: UUID;
   organization_id: UUID;

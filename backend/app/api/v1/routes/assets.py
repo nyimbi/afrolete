@@ -122,6 +122,11 @@ from app.schemas.assets import (
     FacilityMaintenanceScheduleRead,
     FacilityMaintenanceScheduleRunRead,
     FacilityMaintenanceScheduleUpdate,
+    FacilitySafetyAuditCreate,
+    FacilitySafetyAuditFindingRead,
+    FacilitySafetyAuditFindingUpdate,
+    FacilitySafetyAuditRead,
+    FacilitySafetyAuditSummaryRead,
     FacilityUtilityAlertRead,
     FacilityUtilityAlertUpdate,
     FacilityUtilityDashboardRead,
@@ -177,6 +182,7 @@ from app.services.assets import (
     create_facility_booking,
     create_facility_lease_agreement,
     create_facility_maintenance_schedule,
+    create_facility_safety_audit,
     create_public_facility_waitlist_entry,
     create_recurring_facility_bookings,
     create_equipment_lease_invoice,
@@ -192,6 +198,7 @@ from app.services.assets import (
     facility_access_lockdown_dashboard,
     facility_availability,
     facility_maintenance_dashboard,
+    facility_safety_audit_summary,
     facility_utility_dashboard,
     facility_utilization,
     generate_facility_lease_invoice,
@@ -225,6 +232,7 @@ from app.services.assets import (
     list_facility_bookings,
     list_facility_lease_agreements,
     list_facility_maintenance_schedules,
+    list_facility_safety_audits,
     list_facility_utility_meters,
     list_supplier_orders,
     list_work_orders,
@@ -250,6 +258,7 @@ from app.services.assets import (
     update_facility_booking_status,
     update_facility_lease_agreement,
     update_facility_maintenance_schedule,
+    update_facility_safety_audit_finding,
     update_facility_waitlist_entry,
     supplier_scorecard,
     update_emergency_action_plan,
@@ -1157,6 +1166,51 @@ async def facility_maintenance_dashboard_route(
     db: AsyncSession = Depends(get_db),
 ) -> FacilityMaintenanceDashboardRead:
     return await facility_maintenance_dashboard(db, organization_id, facility_id=facility_id)
+
+
+@router.post("/safety-audits", response_model=FacilitySafetyAuditRead, status_code=status.HTTP_201_CREATED)
+async def create_facility_safety_audit_route(
+    payload: FacilitySafetyAuditCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilitySafetyAuditRead:
+    return await create_facility_safety_audit(db, identity, payload, authz)
+
+
+@router.get("/safety-audits", response_model=list[FacilitySafetyAuditRead])
+async def list_facility_safety_audits_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: AsyncSession = Depends(get_db),
+) -> list[FacilitySafetyAuditRead]:
+    return await list_facility_safety_audits(
+        db,
+        organization_id,
+        facility_id=facility_id,
+        status_filter=status_filter,
+    )
+
+
+@router.get("/safety-audits/summary", response_model=FacilitySafetyAuditSummaryRead)
+async def facility_safety_audit_summary_route(
+    organization_id: UUID = Query(),
+    facility_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> FacilitySafetyAuditSummaryRead:
+    return await facility_safety_audit_summary(db, organization_id, facility_id=facility_id)
+
+
+@router.patch("/safety-audit-findings/{finding_id}", response_model=FacilitySafetyAuditFindingRead)
+async def update_facility_safety_audit_finding_route(
+    finding_id: UUID,
+    payload: FacilitySafetyAuditFindingUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> FacilitySafetyAuditFindingRead:
+    return await update_facility_safety_audit_finding(db, identity, finding_id, payload, authz)
 
 
 @router.post("/facility-leases", response_model=FacilityLeaseAgreementRead, status_code=status.HTTP_201_CREATED)

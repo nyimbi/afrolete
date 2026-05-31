@@ -353,6 +353,60 @@ class FacilityMaintenanceSchedule(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class FacilitySafetyAudit(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_safety_audits"
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    facility_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("facilities.id"), index=True)
+    equipment_item_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("equipment_items.id"), index=True)
+    facility_maintenance_schedule_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("facility_maintenance_schedules.id"), index=True
+    )
+    auditor_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    audit_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    standard_ref: Mapped[str | None] = mapped_column(String(240), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    risk_level: Mapped[str] = mapped_column(String(40), default="medium", nullable=False, index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    score: Mapped[int | None] = mapped_column(Integer)
+    pass_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    warning_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    corrective_action_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    location_detail: Mapped[str | None] = mapped_column(String(240))
+    summary: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class FacilitySafetyAuditFinding(IdMixin, TimestampMixin, Base):
+    __tablename__ = "facility_safety_audit_findings"
+    __table_args__ = (
+        UniqueConstraint("audit_id", "checklist_section", "checklist_item", name="uq_safety_audit_finding_item"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    audit_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("facility_safety_audits.id"), nullable=False, index=True)
+    work_order_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("maintenance_work_orders.id"), index=True)
+    checklist_section: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    checklist_item: Mapped[str] = mapped_column(String(240), nullable=False)
+    result: Mapped[str] = mapped_column(String(40), default="pass", nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(40), default="low", nullable=False, index=True)
+    risk_rating: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
+    corrective_action: Mapped[str | None] = mapped_column(Text)
+    assigned_to_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    evidence_url: Mapped[str | None] = mapped_column(String(500))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class FacilityLeaseAgreement(IdMixin, TimestampMixin, Base):
     __tablename__ = "facility_lease_agreements"
 

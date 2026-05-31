@@ -278,6 +278,9 @@ import type {
   FacilityMaintenanceScheduleRead,
   FacilityMaintenanceScheduleRunRead,
   FacilityRead,
+  FacilitySafetyAuditFindingRead,
+  FacilitySafetyAuditRead,
+  FacilitySafetyAuditSummaryRead,
   FacilityType,
   FacilityUtilizationRead,
   FinanceInvoiceRead,
@@ -2243,6 +2246,8 @@ export default function HomePage() {
   const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrderRead[]>([]);
   const [maintenanceSchedules, setMaintenanceSchedules] = useState<FacilityMaintenanceScheduleRead[]>([]);
   const [maintenanceDashboard, setMaintenanceDashboard] = useState<FacilityMaintenanceDashboardRead | null>(null);
+  const [facilitySafetyAudits, setFacilitySafetyAudits] = useState<FacilitySafetyAuditRead[]>([]);
+  const [facilitySafetyAuditSummary, setFacilitySafetyAuditSummary] = useState<FacilitySafetyAuditSummaryRead | null>(null);
   const [facilityLeases, setFacilityLeases] = useState<FacilityLeaseAgreementRead[]>([]);
   const [facilityLeaseInvoice, setFacilityLeaseInvoice] = useState<FacilityLeaseInvoiceRead | null>(null);
   const [facilityAccessCredentials, setFacilityAccessCredentials] = useState<FacilityAccessCredentialRead[]>([]);
@@ -3409,6 +3414,23 @@ export default function HomePage() {
     condition_threshold: "below 120 Gmax",
     warranty_expires_on: "2027-06-01",
     notes: "Inspect surface, goals, lights, drainage, and emergency access."
+  });
+  const [facilitySafetyAuditForm, setFacilitySafetyAuditForm] = useState({
+    audit_type: "facility_safety",
+    standard_ref: "ISO 45001 / FIFA Quality Programme",
+    risk_level: "medium" as FacilitySafetyAuditRead["risk_level"],
+    scheduled_for: "2026-06-02T09:00",
+    completed_at: "2026-06-02T10:15",
+    location_detail: "North goal area",
+    summary: "Digital inspection completed with corrective actions tracked.",
+    checklist_section: "Goalposts and nets",
+    checklist_item: "Goalpost base free of rust",
+    result: "fail" as FacilitySafetyAuditFindingRead["result"],
+    severity: "high" as FacilitySafetyAuditFindingRead["severity"],
+    risk_rating: 18,
+    corrective_action: "Sand, prime, and repaint the goalpost base.",
+    evidence_url: "local://safety-audits/goal-rust.jpg",
+    create_work_orders: true
   });
   const [facilityLeaseForm, setFacilityLeaseForm] = useState({
     lessor_name: "Riverside FC",
@@ -5137,6 +5159,8 @@ export default function HomePage() {
       workOrderData,
       maintenanceScheduleData,
       maintenanceDashboardData,
+      safetyAuditData,
+      safetyAuditSummaryData,
       facilityLeaseData,
       accessCredentialData,
       accessDashboardData,
@@ -5182,6 +5206,8 @@ export default function HomePage() {
       apiRequest<MaintenanceWorkOrderRead[]>(`/assets/work-orders?organization_id=${organizationId}`),
       apiRequest<FacilityMaintenanceScheduleRead[]>(`/assets/maintenance-schedules?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityMaintenanceDashboardRead>(`/assets/maintenance-dashboard?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilitySafetyAuditRead[]>(`/assets/safety-audits?organization_id=${organizationId}${facilityQuery}`),
+      apiRequest<FacilitySafetyAuditSummaryRead>(`/assets/safety-audits/summary?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityLeaseAgreementRead[]>(`/assets/facility-leases?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityAccessCredentialRead[]>(`/assets/access-credentials?organization_id=${organizationId}${facilityQuery}`),
       apiRequest<FacilityAccessDashboardRead>(`/assets/access-dashboard?organization_id=${organizationId}${facilityQuery}`),
@@ -5288,6 +5314,8 @@ export default function HomePage() {
     setWorkOrders(workOrderData);
     setMaintenanceSchedules(maintenanceScheduleData);
     setMaintenanceDashboard(maintenanceDashboardData);
+    setFacilitySafetyAudits(safetyAuditData);
+    setFacilitySafetyAuditSummary(safetyAuditSummaryData);
     setFacilityLeases(facilityLeaseData);
     setFacilityAccessCredentials(accessCredentialData);
     setFacilityAccessDashboard(accessDashboardData);
@@ -5994,6 +6022,8 @@ export default function HomePage() {
       setWorkOrders([]);
       setMaintenanceSchedules([]);
       setMaintenanceDashboard(null);
+      setFacilitySafetyAudits([]);
+      setFacilitySafetyAuditSummary(null);
       setFacilityLeases([]);
       setFacilityLeaseInvoice(null);
       setFacilityAccessCredentials([]);
@@ -17044,6 +17074,94 @@ export default function HomePage() {
     );
   };
 
+  const createFacilitySafetyAudit = () => {
+    if (!selectedOrganizationId || !selectedFacilityId) {
+      addLog("Select a facility before recording a safety audit", "bad");
+      return;
+    }
+    runAction(
+      "create-facility-safety-audit",
+      () =>
+        apiRequest<FacilitySafetyAuditRead>("/assets/safety-audits", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            facility_id: selectedFacilityId,
+            equipment_item_id: selectedEquipmentId || null,
+            facility_maintenance_schedule_id: maintenanceSchedules[0]?.id ?? null,
+            auditor_person_id: selectedAthleteId || null,
+            audit_type: facilitySafetyAuditForm.audit_type,
+            standard_ref: facilitySafetyAuditForm.standard_ref || null,
+            status: "completed",
+            risk_level: facilitySafetyAuditForm.risk_level,
+            scheduled_for: new Date(facilitySafetyAuditForm.scheduled_for).toISOString(),
+            completed_at: new Date(facilitySafetyAuditForm.completed_at).toISOString(),
+            location_detail: facilitySafetyAuditForm.location_detail || null,
+            summary: facilitySafetyAuditForm.summary || null,
+            create_work_orders: facilitySafetyAuditForm.create_work_orders,
+            findings: [
+              {
+                checklist_section: "Field surface",
+                checklist_item: "No holes or depressions",
+                result: "pass",
+                severity: "low",
+                notes: "Surface check passed from digital audit console."
+              },
+              {
+                checklist_section: facilitySafetyAuditForm.checklist_section,
+                checklist_item: facilitySafetyAuditForm.checklist_item,
+                result: facilitySafetyAuditForm.result,
+                severity: facilitySafetyAuditForm.severity,
+                risk_rating: facilitySafetyAuditForm.risk_rating,
+                corrective_action: facilitySafetyAuditForm.corrective_action || null,
+                assigned_to_person_id: selectedAthleteId || null,
+                due_at: new Date(facilitySafetyAuditForm.completed_at).toISOString(),
+                evidence_url: facilitySafetyAuditForm.evidence_url || null,
+                notes: "Captured from the operations console audit workflow."
+              }
+            ]
+          }
+        }),
+      (audit) => {
+        setFacilitySafetyAudits((current) => [
+          audit,
+          ...current.filter((item) => item.id !== audit.id)
+        ]);
+        addLog(`${audit.audit_type.replaceAll("_", " ")} audit ${audit.status}`, audit.status === "requires_action" ? "neutral" : "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId);
+      }
+    );
+  };
+
+  const closeFacilitySafetyFinding = (finding: FacilitySafetyAuditFindingRead) => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+    runAction(
+      "close-facility-safety-finding",
+      () =>
+        apiRequest<FacilitySafetyAuditFindingRead>(`/assets/safety-audit-findings/${finding.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            status: "closed",
+            notes: "Corrective action verified from the operations console."
+          }
+        }),
+      (updated) => {
+        setFacilitySafetyAudits((current) =>
+          current.map((audit) => ({
+            ...audit,
+            findings: audit.findings.map((item) => (item.id === updated.id ? updated : item))
+          }))
+        );
+        addLog(`${updated.checklist_item} finding closed`, "good");
+        void loadAssets(selectedOrganizationId, selectedFacilityId || undefined);
+      }
+    );
+  };
+
   const createFacilityLease = () => {
     if (!selectedOrganizationId || !selectedFacilityId) {
       addLog("Select a facility before creating a lease", "bad");
@@ -24656,6 +24774,7 @@ export default function HomePage() {
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createMaintenanceSchedule} disabled={busyAction !== null}>Schedule</button>
+                <button type="button" onClick={createFacilitySafetyAudit} disabled={busyAction !== null}>Audit</button>
                 <button type="button" onClick={createFacilityLease} disabled={busyAction !== null}>Lease</button>
                 <button type="button" onClick={issueFacilityAccessCredential} disabled={busyAction !== null}>Access</button>
                 <button type="button" onClick={() => scanFacilityAccessCredential()} disabled={busyAction !== null}>Scan</button>
@@ -24690,6 +24809,16 @@ export default function HomePage() {
                 <span className="muted">Safety due</span>
                 <strong>{maintenanceDashboard?.safety_due_count ?? 0}</strong>
                 <span className="muted">compliance-sensitive</span>
+              </div>
+              <div>
+                <span className="muted">Audit score</span>
+                <strong>{facilitySafetyAuditSummary?.average_score ?? "n/a"}</strong>
+                <span className="muted">{facilitySafetyAuditSummary?.requires_action_audits ?? 0} need action</span>
+              </div>
+              <div>
+                <span className="muted">Findings</span>
+                <strong>{facilitySafetyAuditSummary?.open_findings ?? 0}</strong>
+                <span className="muted">{facilitySafetyAuditSummary?.overdue_findings ?? 0} overdue · {facilitySafetyAuditSummary?.corrective_work_orders ?? 0} work orders</span>
               </div>
               <div>
                 <span className="muted">Cost YTD</span>
@@ -24834,6 +24963,79 @@ export default function HomePage() {
               <label className="checkbox-label">
                 <input type="checkbox" checked={maintenanceScheduleForm.safety_related} onChange={(event) => setMaintenanceScheduleForm({ ...maintenanceScheduleForm, safety_related: event.target.checked })} />
                 Safety schedule
+              </label>
+            </div>
+            <div className="form-grid">
+              <label>
+                Audit type
+                <input value={facilitySafetyAuditForm.audit_type} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, audit_type: event.target.value })} />
+              </label>
+              <label>
+                Standard
+                <input value={facilitySafetyAuditForm.standard_ref} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, standard_ref: event.target.value })} />
+              </label>
+              <label>
+                Audit risk
+                <select value={facilitySafetyAuditForm.risk_level} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, risk_level: event.target.value as FacilitySafetyAuditRead["risk_level"] })}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label>
+                Scheduled
+                <input type="datetime-local" value={facilitySafetyAuditForm.scheduled_for} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, scheduled_for: event.target.value })} />
+              </label>
+              <label>
+                Completed
+                <input type="datetime-local" value={facilitySafetyAuditForm.completed_at} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, completed_at: event.target.value })} />
+              </label>
+              <label>
+                Location
+                <input value={facilitySafetyAuditForm.location_detail} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, location_detail: event.target.value })} />
+              </label>
+              <label>
+                Section
+                <input value={facilitySafetyAuditForm.checklist_section} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, checklist_section: event.target.value })} />
+              </label>
+              <label>
+                Checklist item
+                <input value={facilitySafetyAuditForm.checklist_item} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, checklist_item: event.target.value })} />
+              </label>
+              <label>
+                Result
+                <select value={facilitySafetyAuditForm.result} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, result: event.target.value as FacilitySafetyAuditFindingRead["result"] })}>
+                  <option value="pass">Pass</option>
+                  <option value="warning">Warning</option>
+                  <option value="fail">Fail</option>
+                  <option value="not_applicable">Not applicable</option>
+                </select>
+              </label>
+              <label>
+                Finding severity
+                <select value={facilitySafetyAuditForm.severity} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, severity: event.target.value as FacilitySafetyAuditFindingRead["severity"] })}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label>
+                Risk rating
+                <input type="number" min="1" max="25" value={facilitySafetyAuditForm.risk_rating} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, risk_rating: Number(event.target.value) })} />
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={facilitySafetyAuditForm.create_work_orders} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, create_work_orders: event.target.checked })} />
+                Create corrective work
+              </label>
+              <label className="wide-field">
+                Corrective action
+                <input value={facilitySafetyAuditForm.corrective_action} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, corrective_action: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Evidence
+                <input value={facilitySafetyAuditForm.evidence_url} onChange={(event) => setFacilitySafetyAuditForm({ ...facilitySafetyAuditForm, evidence_url: event.target.value })} />
               </label>
             </div>
             <div className="form-grid">
@@ -25273,6 +25475,25 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {facilitySafetyAudits.slice(0, 3).map((audit) => (
+                <article key={audit.id} className={`task-card ${audit.status === "requires_action" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{audit.audit_type.replaceAll("_", " ")} · score {audit.score ?? "n/a"}</strong>
+                    <span>{audit.risk_level} risk · {audit.status.replaceAll("_", " ")} · {audit.corrective_action_count} corrective action(s)</span>
+                    <span>{audit.standard_ref ?? "No standard"} · {audit.completed_at ? new Date(audit.completed_at).toLocaleString() : "not completed"}</span>
+                  </div>
+                </article>
+              ))}
+              {facilitySafetyAudits.flatMap((audit) => audit.findings).filter((finding) => ["open", "in_progress"].includes(finding.status)).slice(0, 3).map((finding) => (
+                <article key={finding.id} className="task-card">
+                  <div>
+                    <strong>{finding.checklist_item}</strong>
+                    <span>{finding.checklist_section} · {finding.result} · {finding.severity}</span>
+                    <span>{finding.corrective_action ?? "No corrective action"}{finding.work_order_id ? " · work order generated" : ""}</span>
+                  </div>
+                  <button type="button" onClick={() => closeFacilitySafetyFinding(finding)}>Close</button>
+                </article>
+              ))}
               {maintenanceSchedules.slice(0, 4).map((schedule) => (
                 <article key={schedule.id} className="task-card">
                   <div>

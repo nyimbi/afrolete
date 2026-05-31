@@ -53,6 +53,8 @@ from app.models.assets import (
     FacilityBookingWaitlistEntry,
     FacilityLeaseAgreement,
     FacilityMaintenanceSchedule,
+    FacilitySafetyAudit,
+    FacilitySafetyAuditFinding,
     FacilityUtilityAlert,
     FacilityUtilityMeter,
     FacilityUtilityReading,
@@ -196,6 +198,12 @@ from app.schemas.assets import (
     FacilityMaintenanceScheduleRead,
     FacilityMaintenanceScheduleRunRead,
     FacilityMaintenanceScheduleUpdate,
+    FacilitySafetyAuditCreate,
+    FacilitySafetyAuditFindingCreate,
+    FacilitySafetyAuditFindingRead,
+    FacilitySafetyAuditFindingUpdate,
+    FacilitySafetyAuditRead,
+    FacilitySafetyAuditSummaryRead,
     FacilityUtilityAlertRead,
     FacilityUtilityAlertUpdate,
     FacilityUtilityDashboardRead,
@@ -1431,6 +1439,194 @@ async def facility_maintenance_dashboard(
         cost_by_facility=cost_by_facility,
         recommendation=facility_maintenance_recommendation(overdue_count, safety_due_count, budget_remaining),
     )
+
+
+async def create_facility_safety_audit(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: FacilitySafetyAuditCreate,
+    authz: AuthorizationService,
+) -> FacilitySafetyAuditRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_assets(authz, identity, payload.organization_id)
+    if payload.facility_id is not None:
+        await get_facility_for_organization(db, payload.facility_id, payload.organization_id)
+    if payload.equipment_item_id is not None:
+        await get_equipment_for_organization(db, payload.equipment_item_id, payload.organization_id)
+    if payload.facility_maintenance_schedule_id is not None:
+        schedule = await get_facility_maintenance_schedule(db, payload.facility_maintenance_schedule_id)
+        if schedule.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Maintenance schedule not found")
+    if payload.auditor_person_id is not None:
+        await get_person_member_for_organization(db, payload.auditor_person_id, payload.organization_id)
+    for finding in payload.findings:
+        if finding.assigned_to_person_id is not None:
+            await get_person_member_for_organization(db, finding.assigned_to_person_id, payload.organization_id)
+
+    counts = safety_audit_counts(payload.findings)
+    now = datetime.now(UTC)
+    completed_at = payload.completed_at
+    if payload.status in {"completed", "requires_action", "closed"}:
+        completed_at = completed_at or now
+    derived_status = safety_audit_status(payload.status, counts["fail"], counts["warning"])
+    audit = FacilitySafetyAudit(
+        organization_id=payload.organization_id,
+        facility_id=payload.facility_id,
+        equipment_item_id=payload.equipment_item_id,
+        facility_maintenance_schedule_id=payload.facility_maintenance_schedule_id,
+        auditor_person_id=payload.auditor_person_id,
+        audit_type=payload.audit_type,
+        standard_ref=payload.standard_ref,
+        status=derived_status,
+        risk_level=safety_audit_risk_level(payload.risk_level, payload.findings),
+        scheduled_for=payload.scheduled_for,
+        started_at=payload.started_at or now,
+        completed_at=completed_at,
+        score=safety_audit_score(counts),
+        pass_count=counts["pass"],
+        warning_count=counts["warning"],
+        fail_count=counts["fail"],
+        corrective_action_count=counts["corrective"],
+        location_detail=payload.location_detail,
+        summary=payload.summary,
+        notes=payload.notes,
+    )
+    db.add(audit)
+    await db.flush()
+
+    for item in payload.findings:
+        finding = FacilitySafetyAuditFinding(
+            organization_id=payload.organization_id,
+            audit_id=audit.id,
+            checklist_section=item.checklist_section,
+            checklist_item=item.checklist_item,
+            result=item.result,
+            severity=item.severity,
+            risk_rating=item.risk_rating,
+            status="open" if safety_finding_requires_action(item.result) else "closed",
+            corrective_action=item.corrective_action,
+            assigned_to_person_id=item.assigned_to_person_id,
+            due_at=item.due_at,
+            evidence_url=item.evidence_url,
+            closed_at=now if not safety_finding_requires_action(item.result) else None,
+            notes=item.notes,
+        )
+        db.add(finding)
+        await db.flush()
+        if payload.create_work_orders and safety_finding_requires_action(item.result):
+            finding.work_order_id = await create_safety_audit_work_order(db, audit, finding)
+
+    if audit.completed_at is not None:
+        if audit.facility_id is not None:
+            facility = await db.get(Facility, audit.facility_id)
+            if facility is not None:
+                facility.last_inspection_on = audit.completed_at.date()
+        if audit.equipment_item_id is not None:
+            equipment = await db.get(EquipmentItem, audit.equipment_item_id)
+            if equipment is not None:
+                equipment.last_audit_on = audit.completed_at.date()
+        if audit.facility_maintenance_schedule_id is not None:
+            schedule = await db.get(FacilityMaintenanceSchedule, audit.facility_maintenance_schedule_id)
+            if schedule is not None:
+                schedule.last_completed_at = audit.completed_at
+
+    await db.commit()
+    return await facility_safety_audit_read_by_id(db, audit.id)
+
+
+async def list_facility_safety_audits(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+    status_filter: str | None = None,
+) -> list[FacilitySafetyAuditRead]:
+    await get_organization(db, organization_id)
+    statement = select(FacilitySafetyAudit).where(FacilitySafetyAudit.organization_id == organization_id)
+    if facility_id is not None:
+        statement = statement.where(FacilitySafetyAudit.facility_id == facility_id)
+    if status_filter is not None:
+        statement = statement.where(FacilitySafetyAudit.status == status_filter)
+    audits = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    FacilitySafetyAudit.completed_at.desc().nulls_last(),
+                    FacilitySafetyAudit.scheduled_for.desc().nulls_last(),
+                    FacilitySafetyAudit.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+    return [await facility_safety_audit_read(db, audit) for audit in audits]
+
+
+async def facility_safety_audit_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+    facility_id: UUID | None = None,
+) -> FacilitySafetyAuditSummaryRead:
+    await get_organization(db, organization_id)
+    audit_statement = select(FacilitySafetyAudit).where(FacilitySafetyAudit.organization_id == organization_id)
+    finding_statement = select(FacilitySafetyAuditFinding).where(
+        FacilitySafetyAuditFinding.organization_id == organization_id
+    )
+    if facility_id is not None:
+        audit_statement = audit_statement.where(FacilitySafetyAudit.facility_id == facility_id)
+        audit_ids = [
+            audit.id
+            for audit in (
+                await db.scalars(select(FacilitySafetyAudit).where(FacilitySafetyAudit.facility_id == facility_id))
+            ).all()
+        ]
+        finding_statement = finding_statement.where(FacilitySafetyAuditFinding.audit_id.in_(audit_ids or [None]))
+    audits = list((await db.scalars(audit_statement)).all())
+    findings = list((await db.scalars(finding_statement)).all())
+    now = datetime.now(UTC)
+    risk_counts: dict[str, int] = {}
+    for audit in audits:
+        risk_counts[audit.risk_level] = risk_counts.get(audit.risk_level, 0) + 1
+    scored = [audit.score for audit in audits if audit.score is not None]
+    open_findings = [finding for finding in findings if finding.status in {"open", "in_progress"}]
+    overdue_findings = [
+        finding for finding in open_findings if finding.due_at is not None and normalize_datetime(finding.due_at) < now
+    ]
+    corrective_work_orders = len([finding for finding in findings if finding.work_order_id is not None])
+    return FacilitySafetyAuditSummaryRead(
+        organization_id=organization_id,
+        total_audits=len(audits),
+        open_audits=len([audit for audit in audits if audit.status in {"scheduled", "in_progress", "requires_action"}]),
+        requires_action_audits=len([audit for audit in audits if audit.status == "requires_action"]),
+        open_findings=len(open_findings),
+        overdue_findings=len(overdue_findings),
+        corrective_work_orders=corrective_work_orders,
+        average_score=round(sum(scored) / len(scored)) if scored else None,
+        risk_counts=risk_counts,
+        recommendation=safety_audit_recommendation(open_findings, overdue_findings, corrective_work_orders),
+    )
+
+
+async def update_facility_safety_audit_finding(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    finding_id: UUID,
+    payload: FacilitySafetyAuditFindingUpdate,
+    authz: AuthorizationService,
+) -> FacilitySafetyAuditFindingRead:
+    finding = await get_safety_audit_finding(db, finding_id)
+    await ensure_manage_assets(authz, identity, finding.organization_id)
+    finding.status = payload.status
+    if payload.notes is not None:
+        finding.notes = payload.notes
+    if payload.status in {"closed", "waived"}:
+        finding.closed_at = datetime.now(UTC)
+    if payload.create_work_order and finding.work_order_id is None and finding.status != "closed":
+        audit = await db.get(FacilitySafetyAudit, finding.audit_id)
+        if audit is not None:
+            finding.work_order_id = await create_safety_audit_work_order(db, audit, finding)
+    await refresh_safety_audit_rollup(db, finding.audit_id)
+    await db.commit()
+    await db.refresh(finding)
+    return facility_safety_audit_finding_read(finding)
 
 
 async def create_facility_lease_agreement(
@@ -4724,6 +4920,16 @@ async def get_facility_maintenance_schedule(
     return schedule
 
 
+async def get_safety_audit_finding(
+    db: AsyncSession,
+    finding_id: UUID,
+) -> FacilitySafetyAuditFinding:
+    finding = await db.get(FacilitySafetyAuditFinding, finding_id)
+    if finding is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Safety audit finding not found")
+    return finding
+
+
 async def get_facility_lease_agreement(
     db: AsyncSession,
     lease_id: UUID,
@@ -5289,6 +5495,74 @@ def facility_maintenance_schedule_read(schedule: FacilityMaintenanceSchedule) ->
         warranty_expires_on=schedule.warranty_expires_on,
         status=schedule.status,
         notes=schedule.notes,
+    )
+
+
+async def facility_safety_audit_read_by_id(db: AsyncSession, audit_id: UUID) -> FacilitySafetyAuditRead:
+    audit = await db.get(FacilitySafetyAudit, audit_id)
+    if audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Safety audit not found")
+    return await facility_safety_audit_read(db, audit)
+
+
+async def facility_safety_audit_read(db: AsyncSession, audit: FacilitySafetyAudit) -> FacilitySafetyAuditRead:
+    findings = list(
+        (
+            await db.scalars(
+                select(FacilitySafetyAuditFinding)
+                .where(FacilitySafetyAuditFinding.audit_id == audit.id)
+                .order_by(
+                    FacilitySafetyAuditFinding.status,
+                    FacilitySafetyAuditFinding.severity.desc(),
+                    FacilitySafetyAuditFinding.checklist_section,
+                )
+            )
+        ).all()
+    )
+    return FacilitySafetyAuditRead(
+        id=audit.id,
+        organization_id=audit.organization_id,
+        facility_id=audit.facility_id,
+        equipment_item_id=audit.equipment_item_id,
+        facility_maintenance_schedule_id=audit.facility_maintenance_schedule_id,
+        auditor_person_id=audit.auditor_person_id,
+        audit_type=audit.audit_type,
+        standard_ref=audit.standard_ref,
+        status=audit.status,
+        risk_level=audit.risk_level,
+        scheduled_for=audit.scheduled_for,
+        started_at=audit.started_at,
+        completed_at=audit.completed_at,
+        score=audit.score,
+        pass_count=audit.pass_count,
+        warning_count=audit.warning_count,
+        fail_count=audit.fail_count,
+        corrective_action_count=audit.corrective_action_count,
+        location_detail=audit.location_detail,
+        summary=audit.summary,
+        notes=audit.notes,
+        findings=[facility_safety_audit_finding_read(finding) for finding in findings],
+    )
+
+
+def facility_safety_audit_finding_read(finding: FacilitySafetyAuditFinding) -> FacilitySafetyAuditFindingRead:
+    return FacilitySafetyAuditFindingRead(
+        id=finding.id,
+        organization_id=finding.organization_id,
+        audit_id=finding.audit_id,
+        work_order_id=finding.work_order_id,
+        checklist_section=finding.checklist_section,
+        checklist_item=finding.checklist_item,
+        result=finding.result,
+        severity=finding.severity,
+        risk_rating=finding.risk_rating,
+        status=finding.status,
+        corrective_action=finding.corrective_action,
+        assigned_to_person_id=finding.assigned_to_person_id,
+        due_at=finding.due_at,
+        evidence_url=finding.evidence_url,
+        closed_at=finding.closed_at,
+        notes=finding.notes,
     )
 
 
@@ -6504,6 +6778,142 @@ def facility_maintenance_recommendation(
     if budget_remaining is not None and budget_remaining < 0:
         return "Maintenance spend is above budget; review vendor costs and defer non-critical tasks."
     return "Preventive schedule is current; keep generating work orders ahead of peak usage windows."
+
+
+def safety_finding_requires_action(result: str) -> bool:
+    return result in {"warning", "fail"}
+
+
+def safety_audit_counts(findings: list[FacilitySafetyAuditFindingCreate]) -> dict[str, int]:
+    return {
+        "pass": len([finding for finding in findings if finding.result == "pass"]),
+        "warning": len([finding for finding in findings if finding.result == "warning"]),
+        "fail": len([finding for finding in findings if finding.result == "fail"]),
+        "corrective": len([finding for finding in findings if safety_finding_requires_action(finding.result)]),
+        "total": len([finding for finding in findings if finding.result != "not_applicable"]),
+    }
+
+
+def safety_audit_status(requested_status: str, fail_count: int, warning_count: int) -> str:
+    if requested_status in {"completed", "closed"} and (fail_count or warning_count):
+        return "requires_action"
+    return requested_status
+
+
+def safety_audit_score(counts: dict[str, int]) -> int | None:
+    if counts["total"] == 0:
+        return None
+    penalty = counts["warning"] * 12 + counts["fail"] * 28
+    return max(0, min(100, round(100 - penalty / counts["total"])))
+
+
+def safety_audit_risk_level(
+    requested_risk: str,
+    findings: list[FacilitySafetyAuditFindingCreate],
+) -> str:
+    rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    highest = requested_risk
+    for finding in findings:
+        if finding.result == "fail" and rank.get(finding.severity, 0) > rank.get(highest, 0):
+            highest = finding.severity
+        if finding.risk_rating is not None and finding.risk_rating >= 20:
+            highest = "critical"
+        elif finding.risk_rating is not None and finding.risk_rating >= 15 and rank.get(highest, 0) < rank["high"]:
+            highest = "high"
+    return highest
+
+
+async def create_safety_audit_work_order(
+    db: AsyncSession,
+    audit: FacilitySafetyAudit,
+    finding: FacilitySafetyAuditFinding,
+) -> UUID:
+    work_order = MaintenanceWorkOrder(
+        organization_id=audit.organization_id,
+        facility_maintenance_schedule_id=audit.facility_maintenance_schedule_id,
+        facility_id=audit.facility_id,
+        equipment_item_id=audit.equipment_item_id,
+        assigned_to_person_id=finding.assigned_to_person_id,
+        title=f"{finding.checklist_section}: {finding.checklist_item}"[:220],
+        priority=safety_work_order_priority(finding.severity, finding.result),
+        status=WorkOrderStatus.OPEN,
+        due_at=finding.due_at,
+        estimated_cost=None,
+        safety_related=True,
+        compliance_reference=audit.standard_ref or audit.audit_type,
+        notes=safety_work_order_notes(audit, finding),
+    )
+    db.add(work_order)
+    await db.flush()
+    return work_order.id
+
+
+def safety_work_order_priority(severity: str, result: str) -> WorkOrderPriority:
+    if severity == "critical" or result == "fail":
+        return WorkOrderPriority.CRITICAL
+    if severity == "high":
+        return WorkOrderPriority.HIGH
+    if severity == "medium":
+        return WorkOrderPriority.MEDIUM
+    return WorkOrderPriority.LOW
+
+
+def safety_work_order_notes(audit: FacilitySafetyAudit, finding: FacilitySafetyAuditFinding) -> str:
+    parts = [
+        f"Generated from {audit.audit_type.replace('_', ' ')} audit.",
+        f"Finding result: {finding.result}; severity: {finding.severity}.",
+    ]
+    if finding.corrective_action:
+        parts.append(f"Corrective action: {finding.corrective_action}")
+    if finding.evidence_url:
+        parts.append(f"Evidence: {finding.evidence_url}")
+    if finding.notes:
+        parts.append(f"Notes: {finding.notes}")
+    return " ".join(parts)
+
+
+async def refresh_safety_audit_rollup(db: AsyncSession, audit_id: UUID) -> None:
+    audit = await db.get(FacilitySafetyAudit, audit_id)
+    if audit is None:
+        return
+    findings = list(
+        (
+            await db.scalars(
+                select(FacilitySafetyAuditFinding).where(FacilitySafetyAuditFinding.audit_id == audit_id)
+            )
+        ).all()
+    )
+    audit.pass_count = len([finding for finding in findings if finding.result == "pass"])
+    audit.warning_count = len([finding for finding in findings if finding.result == "warning"])
+    audit.fail_count = len([finding for finding in findings if finding.result == "fail"])
+    audit.corrective_action_count = len([finding for finding in findings if safety_finding_requires_action(finding.result)])
+    unresolved = [finding for finding in findings if finding.status in {"open", "in_progress"}]
+    if unresolved:
+        audit.status = "requires_action"
+    elif audit.status == "requires_action":
+        audit.status = "closed"
+    counts = {
+        "pass": audit.pass_count,
+        "warning": audit.warning_count,
+        "fail": audit.fail_count,
+        "corrective": audit.corrective_action_count,
+        "total": len([finding for finding in findings if finding.result != "not_applicable"]),
+    }
+    audit.score = safety_audit_score(counts)
+
+
+def safety_audit_recommendation(
+    open_findings: list[FacilitySafetyAuditFinding],
+    overdue_findings: list[FacilitySafetyAuditFinding],
+    corrective_work_orders: int,
+) -> str:
+    if overdue_findings:
+        return "Escalate overdue corrective actions before approving intensive use of the affected facilities or equipment."
+    if open_findings:
+        return "Track open safety findings through assigned corrective actions and verify closure evidence."
+    if corrective_work_orders:
+        return "All current findings have work orders; verify completion evidence before marking audits closed."
+    return "Safety audit register is clear; keep scheduled inspections active and evidence-backed."
 
 
 def equipment_status_for_quantity(quantity_available: int) -> EquipmentStatus:

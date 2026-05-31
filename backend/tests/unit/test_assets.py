@@ -791,6 +791,143 @@ def test_facility_preventive_maintenance_schedule_dashboard_and_costs(client, id
     assert paused.json()["status"] == "paused"
 
 
+def test_facility_safety_audit_findings_generate_corrective_work_orders(client, identity_headers) -> None:
+    organization, _, member, _ = create_assets_context(client, identity_headers, "Safety Audit Club")
+    facility = client.post(
+        "/api/v1/assets/facilities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Audit Field",
+            "facility_type": "field",
+            "hourly_rate": "90.00",
+            "maintenance_budget": "8000.00",
+            "condition": "good",
+        },
+    ).json()
+    equipment = client.post(
+        "/api/v1/assets/equipment",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "name": "Portable Goal A",
+            "category": "field_equipment",
+            "quantity_total": 1,
+            "quantity_available": 1,
+            "condition": "fair",
+        },
+    ).json()
+    schedule = client.post(
+        "/api/v1/assets/maintenance-schedules",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "equipment_item_id": equipment["id"],
+            "assigned_to_person_id": member["subject_id"],
+            "title": "Monthly facility safety audit",
+            "category": "safety_audit",
+            "frequency": "monthly",
+            "interval_days": 30,
+            "next_due_at": "2026-06-01T09:00:00Z",
+            "safety_related": True,
+            "compliance_reference": "ISO 45001 field inspection",
+        },
+    ).json()
+
+    audit_response = client.post(
+        "/api/v1/assets/safety-audits",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "facility_id": facility["id"],
+            "equipment_item_id": equipment["id"],
+            "facility_maintenance_schedule_id": schedule["id"],
+            "auditor_person_id": member["subject_id"],
+            "audit_type": "facility_safety",
+            "standard_ref": "ISO 45001 / FIFA Quality Programme",
+            "status": "completed",
+            "risk_level": "medium",
+            "scheduled_for": "2026-06-01T09:00:00Z",
+            "completed_at": "2026-06-01T10:15:00Z",
+            "location_detail": "North goal area",
+            "summary": "Good overall with one failed corrective action.",
+            "create_work_orders": True,
+            "findings": [
+                {
+                    "checklist_section": "Field surface",
+                    "checklist_item": "No holes or depressions",
+                    "result": "pass",
+                    "severity": "low",
+                    "notes": "Surface level and playable.",
+                },
+                {
+                    "checklist_section": "Goalposts and nets",
+                    "checklist_item": "Goalpost base free of rust",
+                    "result": "fail",
+                    "severity": "high",
+                    "risk_rating": 18,
+                    "corrective_action": "Sand, prime, and repaint the goalpost base.",
+                    "assigned_to_person_id": member["subject_id"],
+                    "due_at": "2026-06-08T09:00:00Z",
+                    "evidence_url": "local://safety-audits/goal-rust.jpg",
+                },
+            ],
+        },
+    )
+    assert audit_response.status_code == 201
+    audit = audit_response.json()
+    assert audit["status"] == "requires_action"
+    assert audit["risk_level"] == "high"
+    assert audit["pass_count"] == 1
+    assert audit["fail_count"] == 1
+    assert audit["corrective_action_count"] == 1
+    assert audit["score"] < 100
+    failed_finding = next(finding for finding in audit["findings"] if finding["result"] == "fail")
+    assert failed_finding["work_order_id"] is not None
+
+    work_orders = client.get(f"/api/v1/assets/work-orders?organization_id={organization['id']}").json()
+    corrective = next(order for order in work_orders if order["id"] == failed_finding["work_order_id"])
+    assert corrective["priority"] == "critical"
+    assert corrective["safety_related"] is True
+    assert corrective["compliance_reference"] == "ISO 45001 / FIFA Quality Programme"
+
+    listed = client.get(
+        f"/api/v1/assets/safety-audits?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == audit["id"]
+
+    summary = client.get(
+        f"/api/v1/assets/safety-audits/summary?organization_id={organization['id']}&facility_id={facility['id']}"
+    )
+    assert summary.status_code == 200
+    assert summary.json()["requires_action_audits"] == 1
+    assert summary.json()["open_findings"] == 1
+    assert summary.json()["corrective_work_orders"] == 1
+    assert summary.json()["risk_counts"]["high"] == 1
+
+    closed = client.patch(
+        f"/api/v1/assets/safety-audit-findings/{failed_finding['id']}",
+        headers=identity_headers,
+        json={
+            "status": "closed",
+            "notes": "Goalpost base repaired and photo evidence reviewed.",
+        },
+    )
+    assert closed.status_code == 200
+    assert closed.json()["closed_at"] is not None
+
+    refreshed = client.get(f"/api/v1/assets/safety-audits?organization_id={organization['id']}").json()[0]
+    assert refreshed["status"] == "closed"
+
+    facility_after = client.get(f"/api/v1/assets/facilities?organization_id={organization['id']}").json()[0]
+    equipment_after = client.get(f"/api/v1/assets/equipment?organization_id={organization['id']}").json()[0]
+    assert facility_after["last_inspection_on"] == "2026-06-01"
+    assert equipment_after["last_audit_on"] == "2026-06-01"
+
+
 def test_facility_lease_agreement_generates_rent_invoice(client, identity_headers) -> None:
     organization, _, _, _ = create_assets_context(client, identity_headers, "Lease Program Club")
     facility = client.post(

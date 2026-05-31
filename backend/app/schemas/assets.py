@@ -747,6 +747,92 @@ class FacilityMaintenanceDashboardRead(BaseModel):
     recommendation: str
 
 
+class FacilitySafetyAuditFindingCreate(BaseModel):
+    checklist_section: str = Field(min_length=2, max_length=160)
+    checklist_item: str = Field(min_length=2, max_length=240)
+    result: str = Field(default="pass", pattern="^(pass|warning|fail|not_applicable)$")
+    severity: str = Field(default="low", pattern="^(low|medium|high|critical)$")
+    risk_rating: int | None = Field(default=None, ge=1, le=25)
+    corrective_action: str | None = Field(default=None, max_length=4000)
+    assigned_to_person_id: UUID | None = None
+    due_at: datetime | None = None
+    evidence_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class FacilitySafetyAuditCreate(BaseModel):
+    organization_id: UUID
+    facility_id: UUID | None = None
+    equipment_item_id: UUID | None = None
+    facility_maintenance_schedule_id: UUID | None = None
+    auditor_person_id: UUID | None = None
+    audit_type: str = Field(default="facility_safety", min_length=2, max_length=100)
+    standard_ref: str | None = Field(default=None, max_length=240)
+    status: str = Field(default="completed", pattern="^(draft|scheduled|in_progress|completed|requires_action|closed)$")
+    risk_level: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    scheduled_for: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    location_detail: str | None = Field(default=None, max_length=240)
+    summary: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
+    create_work_orders: bool = False
+    findings: list[FacilitySafetyAuditFindingCreate] = Field(default_factory=list)
+
+
+class FacilitySafetyAuditFindingUpdate(BaseModel):
+    status: str = Field(pattern="^(open|in_progress|closed|waived)$")
+    notes: str | None = Field(default=None, max_length=4000)
+    create_work_order: bool = False
+
+
+class FacilitySafetyAuditFindingRead(FacilitySafetyAuditFindingCreate):
+    id: UUID
+    organization_id: UUID
+    audit_id: UUID
+    work_order_id: UUID | None
+    status: str
+    closed_at: datetime | None
+
+
+class FacilitySafetyAuditRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    facility_id: UUID | None
+    equipment_item_id: UUID | None
+    facility_maintenance_schedule_id: UUID | None
+    auditor_person_id: UUID | None
+    audit_type: str
+    standard_ref: str | None
+    status: str
+    risk_level: str
+    scheduled_for: datetime | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    score: int | None
+    pass_count: int
+    warning_count: int
+    fail_count: int
+    corrective_action_count: int
+    location_detail: str | None
+    summary: str | None
+    notes: str | None
+    findings: list[FacilitySafetyAuditFindingRead]
+
+
+class FacilitySafetyAuditSummaryRead(BaseModel):
+    organization_id: UUID
+    total_audits: int
+    open_audits: int
+    requires_action_audits: int
+    open_findings: int
+    overdue_findings: int
+    corrective_work_orders: int
+    average_score: int | None
+    risk_counts: dict[str, int]
+    recommendation: str
+
+
 class FacilityLeaseAgreementCreate(BaseModel):
     organization_id: UUID
     facility_id: UUID

@@ -49,6 +49,8 @@ from app.models.assets import (  # noqa: F401,E402
     FacilityBookingWaitlistEntry,
     FacilityLeaseAgreement,
     FacilityMaintenanceSchedule,
+    FacilitySafetyAudit,
+    FacilitySafetyAuditFinding,
     FacilityUtilityAlert,
     FacilityUtilityMeter,
     FacilityUtilityReading,
