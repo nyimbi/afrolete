@@ -635,6 +635,43 @@ class GrantAwardSummaryRead(BaseModel):
     recommendations: list[str]
 
 
+class GrantPortfolioFunderRead(BaseModel):
+    funder_name: str
+    application_count: int
+    awarded_amount: Decimal
+    funds_received: Decimal
+    expenditures_to_date: Decimal
+    utilization_rate: Decimal
+    target_achievement_rate: Decimal
+    participant_count: int
+    cost_per_participant: Decimal | None = None
+    roi_multiple: Decimal | None = None
+    health: str
+    success_factors: list[str]
+
+
+class GrantPortfolioSummaryRead(BaseModel):
+    organization_id: UUID
+    grant_count: int
+    awarded_amount: Decimal
+    funds_received: Decimal
+    expenditures_to_date: Decimal
+    funds_balance: Decimal
+    utilization_rate: Decimal
+    average_target_achievement: Decimal
+    participant_count: int
+    average_cost_per_participant: Decimal | None = None
+    success_story_count: int
+    media_coverage_count: int
+    report_count: int
+    overdue_report_count: int
+    open_compliance_count: int
+    portfolio_health: str
+    success_factors: list[str]
+    recommendations: list[str]
+    funders: list[GrantPortfolioFunderRead]
+
+
 class GrantReportCreate(BaseModel):
     organization_id: UUID
     grant_application_id: UUID

@@ -630,6 +630,22 @@ def test_grant_application_internal_approval_workflow(client, identity_headers) 
     assert "Funds received 25000.00; spent 15200.00" in generated_report["metrics_summary"]
     assert generated_report["project_title"] == "Scholarship expansion"
 
+    portfolio = client.get(
+        f"/api/v1/commercial/grants/portfolio-summary?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    assert portfolio["grant_count"] == 1
+    assert portfolio["awarded_amount"] == "25000.00"
+    assert portfolio["funds_received"] == "25000.00"
+    assert portfolio["expenditures_to_date"] == "15200.00"
+    assert portfolio["utilization_rate"] == "60.80"
+    assert portfolio["average_target_achievement"] == "100.00"
+    assert portfolio["participant_count"] == 50
+    assert portfolio["average_cost_per_participant"] == "304.00"
+    assert portfolio["open_compliance_count"] == 1
+    assert portfolio["funders"][0]["funder_name"] == "Youth Sport Foundation"
+    assert portfolio["funders"][0]["roi_multiple"] == "1.64"
+
 
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,

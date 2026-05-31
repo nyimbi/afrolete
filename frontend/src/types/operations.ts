@@ -4464,6 +4464,43 @@ export type GrantAwardSummaryRead = {
   recommendations: string[];
 };
 
+export type GrantPortfolioFunderRead = {
+  funder_name: string;
+  application_count: number;
+  awarded_amount: string;
+  funds_received: string;
+  expenditures_to_date: string;
+  utilization_rate: string;
+  target_achievement_rate: string;
+  participant_count: number;
+  cost_per_participant: string | null;
+  roi_multiple: string | null;
+  health: string;
+  success_factors: string[];
+};
+
+export type GrantPortfolioSummaryRead = {
+  organization_id: UUID;
+  grant_count: number;
+  awarded_amount: string;
+  funds_received: string;
+  expenditures_to_date: string;
+  funds_balance: string;
+  utilization_rate: string;
+  average_target_achievement: string;
+  participant_count: number;
+  average_cost_per_participant: string | null;
+  success_story_count: number;
+  media_coverage_count: number;
+  report_count: number;
+  overdue_report_count: number;
+  open_compliance_count: number;
+  portfolio_health: string;
+  success_factors: string[];
+  recommendations: string[];
+  funders: GrantPortfolioFunderRead[];
+};
+
 export type GrantReportRead = {
   id: UUID;
   organization_id: UUID;

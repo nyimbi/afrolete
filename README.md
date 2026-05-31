@@ -179,10 +179,10 @@ Major capability areas include:
   tax, accounting, payouts, sponsor portals, public support showcases,
   donor CRM and stewardship, grant application internal approvals, submission
   packages, award payments, expenditures, compliance obligations, milestones,
-  auto-generated funder reports, financial budgeting, forecasting, management
-  financial statements, club-managed member dues with M-Pesa/mobile-money
-  collection support, and venue digital-signage sponsor rotations with playback
-  telemetry.
+  auto-generated funder reports, grant portfolio utilization/impact/ROI
+  analytics, financial budgeting, forecasting, management financial statements,
+  club-managed member dues with M-Pesa/mobile-money collection support, and
+  venue digital-signage sponsor rotations with playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
   AI insights, export jobs, and government/federation reporting registers tied

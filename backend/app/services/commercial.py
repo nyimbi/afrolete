@@ -107,6 +107,8 @@ from app.schemas.commercial import (
     GrantAwardSummaryRead,
     GrantDashboardRead,
     GrantOpportunityCreate,
+    GrantPortfolioFunderRead,
+    GrantPortfolioSummaryRead,
     GrantReportCreate,
     GrantReportGenerateCreate,
     GrantSubmissionPackageCreate,
@@ -1311,6 +1313,162 @@ async def grant_award_summary(
         next_due_on=next_due,
         health=health,
         recommendations=recommendations,
+    )
+
+
+async def grant_portfolio_summary(db: AsyncSession, organization_id: UUID) -> GrantPortfolioSummaryRead:
+    application_rows = await list_grant_applications(db, organization_id)
+    applications = [application for application, _ in application_rows]
+    opportunity_by_application = {application.id: opportunity for application, opportunity in application_rows}
+    records = list(
+        (
+            await db.scalars(
+                select(GrantAwardRecord).where(GrantAwardRecord.organization_id == organization_id)
+            )
+        ).all()
+    )
+    reports = [report for report, _ in await list_grant_reports(db, organization_id)]
+    today = date.today()
+    records_by_application: dict[UUID, list[GrantAwardRecord]] = {}
+    for record in records:
+        records_by_application.setdefault(record.grant_application_id, []).append(record)
+
+    funder_rows: dict[str, dict[str, Any]] = {}
+    total_awarded = money_sum(application.awarded_amount for application in applications)
+    total_received = Decimal("0")
+    total_spent = Decimal("0")
+    total_target_rate = Decimal("0")
+    participant_count = 0
+    success_story_count = 0
+    media_coverage_count = 0
+    open_compliance_count = 0
+    overdue_report_count = sum(1 for report in reports if report.due_on < today and report.status not in {"submitted", "accepted", "complete", "completed"})
+
+    for application in applications:
+        opportunity = opportunity_by_application.get(application.id)
+        funder_name = opportunity.funder_name if opportunity else "Unassigned funder"
+        funder = funder_rows.setdefault(
+            funder_name,
+            {
+                "application_count": 0,
+                "awarded_amount": Decimal("0"),
+                "funds_received": Decimal("0"),
+                "expenditures": Decimal("0"),
+                "target_rates": [],
+                "participants": 0,
+                "open_compliance": 0,
+                "success_factors": set(),
+            },
+        )
+        app_records = records_by_application.get(application.id, [])
+        received = money_sum(
+            record.amount for record in app_records if record.record_type == "payment" and record.status in {"received", "cleared", "paid"}
+        )
+        spent = money_sum(
+            record.amount for record in app_records if record.record_type == "expenditure" and record.status in {"approved", "paid", "recorded", "submitted"}
+        )
+        milestones = [record for record in app_records if record.record_type == "milestone"]
+        completed_milestones = [record for record in milestones if record.status in {"complete", "completed", "accepted"}]
+        compliance_open = sum(
+            1
+            for record in app_records
+            if record.record_type == "compliance" and record.status not in {"complete", "completed", "accepted"}
+        )
+        target_rate = percent(Decimal(len(completed_milestones)), Decimal(len(milestones))) if milestones else Decimal("0.00")
+        participants = first_integer_from_text(application.impact_metrics or "")
+        stories = text_count(application.impact_metrics or "", ["story", "stories", "testimonial"])
+        media = text_count(application.impact_metrics or "", ["media", "article", "coverage"])
+        total_received += received
+        total_spent += spent
+        total_target_rate += target_rate
+        participant_count += participants
+        success_story_count += stories
+        media_coverage_count += media
+        open_compliance_count += compliance_open
+        funder["application_count"] += 1
+        funder["awarded_amount"] += application.awarded_amount
+        funder["funds_received"] += received
+        funder["expenditures"] += spent
+        funder["target_rates"].append(target_rate)
+        funder["participants"] += participants
+        funder["open_compliance"] += compliance_open
+        if completed_milestones:
+            funder["success_factors"].add("milestone_delivery")
+        if compliance_open == 0 and app_records:
+            funder["success_factors"].add("compliance_discipline")
+        if participants:
+            funder["success_factors"].add("measured_participant_impact")
+
+    funders: list[GrantPortfolioFunderRead] = []
+    for funder_name, values in sorted(funder_rows.items()):
+        awarded = money_sum([values["awarded_amount"]])
+        spent = money_sum([values["expenditures"]])
+        received = money_sum([values["funds_received"]])
+        target_rates = values["target_rates"]
+        avg_target = money_sum(target_rates) / Decimal(len(target_rates)) if target_rates else Decimal("0")
+        participant_total = int(values["participants"])
+        health = "attention_required" if values["open_compliance"] else "on_track"
+        funders.append(
+            GrantPortfolioFunderRead(
+                funder_name=funder_name,
+                application_count=int(values["application_count"]),
+                awarded_amount=awarded,
+                funds_received=received,
+                expenditures_to_date=spent,
+                utilization_rate=percent(spent, awarded),
+                target_achievement_rate=avg_target.quantize(Decimal("0.01")),
+                participant_count=participant_total,
+                cost_per_participant=(spent / Decimal(participant_total)).quantize(Decimal("0.01")) if participant_total else None,
+                roi_multiple=(awarded / spent).quantize(Decimal("0.01")) if spent else None,
+                health=health,
+                success_factors=sorted(values["success_factors"]) or ["portfolio_tracking_started"],
+            )
+        )
+
+    average_target = (
+        total_target_rate / Decimal(len(applications))
+        if applications
+        else Decimal("0")
+    ).quantize(Decimal("0.01"))
+    recommendations: list[str] = []
+    if open_compliance_count:
+        recommendations.append(f"Close {open_compliance_count} open grant compliance obligation(s).")
+    if overdue_report_count:
+        recommendations.append(f"Submit {overdue_report_count} overdue funder report(s).")
+    if participant_count == 0 and applications:
+        recommendations.append("Add measurable participant or beneficiary counts to impact metrics.")
+    if not recommendations:
+        recommendations.append("Grant portfolio performance is ready for board and donor reporting.")
+    success_factors = sorted(
+        {
+            factor
+            for funder in funders
+            for factor in funder.success_factors
+        }
+    )
+    if not success_factors:
+        success_factors = ["grant_pipeline_operational"]
+    portfolio_health = "attention_required" if open_compliance_count or overdue_report_count else "on_track"
+    return GrantPortfolioSummaryRead(
+        organization_id=organization_id,
+        grant_count=len(applications),
+        awarded_amount=total_awarded,
+        funds_received=money_sum([total_received]),
+        expenditures_to_date=money_sum([total_spent]),
+        funds_balance=money_sum([total_received - total_spent]),
+        utilization_rate=percent(total_spent, total_awarded),
+        average_target_achievement=average_target,
+        participant_count=participant_count,
+        average_cost_per_participant=(total_spent / Decimal(participant_count)).quantize(Decimal("0.01")) if participant_count else None,
+        success_story_count=success_story_count,
+        media_coverage_count=media_coverage_count,
+        report_count=len(reports),
+        overdue_report_count=overdue_report_count,
+        open_compliance_count=open_compliance_count,
+        portfolio_health=portfolio_health,
+        success_factors=success_factors,
+        recommendations=recommendations,
+        funders=funders,
     )
 
 
@@ -2931,6 +3089,27 @@ def statement_category_total(lines: list[FinancialStatementLineRead], category: 
 
 def money_sum(values) -> Decimal:
     return sum(values, Decimal("0")).quantize(Decimal("0.01"))
+
+
+def percent(numerator: Decimal, denominator: Decimal) -> Decimal:
+    if denominator == Decimal("0"):
+        return Decimal("0.00")
+    return ((numerator / denominator) * Decimal("100")).quantize(Decimal("0.01"))
+
+
+def first_integer_from_text(value: str) -> int:
+    token = ""
+    for character in value:
+        if character.isdigit():
+            token += character
+        elif token:
+            break
+    return int(token) if token else 0
+
+
+def text_count(value: str, needles: list[str]) -> int:
+    lowered = value.lower()
+    return sum(lowered.count(needle) for needle in needles)
 
 
 def financial_statement_lines_dump(lines: list[FinancialStatementLineRead]) -> str:

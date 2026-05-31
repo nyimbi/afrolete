@@ -57,6 +57,7 @@ from app.schemas.commercial import (
     GrantDashboardRead,
     GrantOpportunityCreate,
     GrantOpportunityRead,
+    GrantPortfolioSummaryRead,
     GrantReportCreate,
     GrantReportGenerateCreate,
     GrantReportRead,
@@ -177,6 +178,7 @@ from app.services.commercial import (
     list_grant_submission_packages,
     grant_application_approval_counts,
     grant_award_summary,
+    grant_portfolio_summary,
     update_grant_submission_package,
     list_invoices,
     list_commercial_payment_sessions,
@@ -806,6 +808,14 @@ async def grant_award_summary_route(
     db: AsyncSession = Depends(get_db),
 ) -> GrantAwardSummaryRead:
     return await grant_award_summary(db, organization_id, grant_application_id)
+
+
+@router.get("/grants/portfolio-summary", response_model=GrantPortfolioSummaryRead)
+async def grant_portfolio_summary_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> GrantPortfolioSummaryRead:
+    return await grant_portfolio_summary(db, organization_id)
 
 
 @router.post("/grants/reports", response_model=GrantReportRead, status_code=status.HTTP_201_CREATED)

@@ -306,6 +306,7 @@ import type {
   GrantAwardSummaryRead,
   GrantDashboardRead,
   GrantOpportunityRead,
+  GrantPortfolioSummaryRead,
   GrantReportRead,
   GrantSubmissionPackageRead,
   MerchandiseOrderRead,
@@ -2343,6 +2344,7 @@ export default function HomePage() {
   const [grantSubmissionPackages, setGrantSubmissionPackages] = useState<GrantSubmissionPackageRead[]>([]);
   const [grantAwardRecords, setGrantAwardRecords] = useState<GrantAwardRecordRead[]>([]);
   const [grantAwardSummary, setGrantAwardSummary] = useState<GrantAwardSummaryRead | null>(null);
+  const [grantPortfolioSummary, setGrantPortfolioSummary] = useState<GrantPortfolioSummaryRead | null>(null);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
@@ -5612,6 +5614,7 @@ export default function HomePage() {
       grantSubmissionPackageData,
       grantAwardRecordData,
       grantAwardSummaryData,
+      grantPortfolioSummaryData,
       grantReportData,
       grantDashboardData,
       merchandiseProductData,
@@ -5660,6 +5663,7 @@ export default function HomePage() {
       selectedGrantApplicationId
         ? apiRequest<GrantAwardSummaryRead>(`/commercial/grants/award-summary?organization_id=${organizationId}&grant_application_id=${selectedGrantApplicationId}`)
         : Promise.resolve(null),
+      apiRequest<GrantPortfolioSummaryRead>(`/commercial/grants/portfolio-summary?organization_id=${organizationId}`),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
       apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
       apiRequest<MerchandiseProductRead[]>(`/commercial/merchandise/products?organization_id=${organizationId}`),
@@ -5706,6 +5710,7 @@ export default function HomePage() {
     setGrantSubmissionPackages(grantSubmissionPackageData);
     setGrantAwardRecords(grantAwardRecordData);
     setGrantAwardSummary(grantAwardSummaryData);
+    setGrantPortfolioSummary(grantPortfolioSummaryData);
     setGrantReports(grantReportData);
     setGrantDashboard(grantDashboardData);
     setMerchandiseProducts(merchandiseProductData);
@@ -6365,6 +6370,7 @@ export default function HomePage() {
       setGrantSubmissionPackages([]);
       setGrantAwardRecords([]);
       setGrantAwardSummary(null);
+      setGrantPortfolioSummary(null);
       setGrantReports([]);
       setGrantDashboard(null);
       setMerchandiseProducts([]);
@@ -27798,6 +27804,29 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {grantPortfolioSummary ? (
+                <article className={`task-card ${grantPortfolioSummary.portfolio_health === "on_track" ? "selected" : "risk-card"}`}>
+                  <div>
+                    <strong>Grant portfolio · {grantPortfolioSummary.portfolio_health.replaceAll("_", " ")}</strong>
+                    <span>
+                      {grantPortfolioSummary.awarded_amount} awarded · {grantPortfolioSummary.utilization_rate}% utilized · {grantPortfolioSummary.participant_count} participants
+                    </span>
+                    <small>
+                      Target {grantPortfolioSummary.average_target_achievement}% · cost/participant {grantPortfolioSummary.average_cost_per_participant ?? "n/a"} · reports {grantPortfolioSummary.report_count}
+                    </small>
+                    <small>{grantPortfolioSummary.recommendations[0]}</small>
+                  </div>
+                </article>
+              ) : null}
+              {grantPortfolioSummary?.funders.slice(0, 3).map((funder) => (
+                <article key={funder.funder_name} className={`task-card ${funder.health === "on_track" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{funder.funder_name}</strong>
+                    <span>{funder.awarded_amount} awarded · ROI {funder.roi_multiple ?? "n/a"}x · target {funder.target_achievement_rate}%</span>
+                    <small>{funder.participant_count} participants · utilization {funder.utilization_rate}% · {funder.success_factors.join(", ")}</small>
+                  </div>
+                </article>
+              ))}
               {grantAwardRecords.slice(0, 4).map((record) => (
                 <article key={record.id} className={`task-card ${record.overdue ? "risk-card" : ""}`}>
                   <div>
