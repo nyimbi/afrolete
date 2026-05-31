@@ -30,6 +30,8 @@ from app.schemas.organization import (
     MemberSubscriptionChargeRunRead,
     MemberSubscriptionChargeWaiverCreate,
     MemberSubscriptionChargeWaiverRead,
+    MemberSubscriptionCreditRefundCreate,
+    MemberSubscriptionCreditRefundRead,
     MemberSubscriptionCreditRead,
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
@@ -234,6 +236,7 @@ from app.services.organizations import (
     list_recovery_drills,
     list_recovery_plans,
     list_member_subscription_charges,
+    list_member_subscription_credit_refunds,
     list_member_subscription_credits,
     list_member_dues_collection_rails,
     list_member_subscription_payment_plans,
@@ -259,6 +262,7 @@ from app.services.organizations import (
     registration_onboarding_presets,
     registration_readiness,
     record_member_subscription_payment,
+    refund_member_subscription_credit,
     run_member_subscription_reminders,
     send_member_subscription_statement,
     update_member_subscription,
@@ -2104,6 +2108,30 @@ async def list_member_subscription_credits_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[MemberSubscriptionCreditRead]:
     return await list_member_subscription_credits(db, organization_id, subscription_id)
+
+
+@router.get("/{organization_id}/member-subscription-credit-refunds", response_model=list[MemberSubscriptionCreditRefundRead])
+async def list_member_subscription_credit_refunds_route(
+    organization_id: UUID,
+    subscription_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionCreditRefundRead]:
+    return await list_member_subscription_credit_refunds(db, organization_id, subscription_id)
+
+
+@router.post(
+    "/member-subscription-credits/{credit_id}/refund",
+    response_model=MemberSubscriptionCreditRefundRead,
+    status_code=201,
+)
+async def refund_member_subscription_credit_route(
+    credit_id: UUID,
+    payload: MemberSubscriptionCreditRefundCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionCreditRefundRead:
+    return await refund_member_subscription_credit(db, identity, credit_id, payload, authz)
 
 
 @router.post(

@@ -1308,6 +1308,39 @@ class MemberSubscriptionCreditRead(BaseModel):
     created_at: datetime
 
 
+class MemberSubscriptionCreditRefundCreate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    provider: str = Field(default="mpesa", min_length=2, max_length=80)
+    method: str = Field(default="manual_refund", min_length=2, max_length=80)
+    external_refund_id: str | None = Field(default=None, max_length=180)
+    refunded_at: datetime | None = None
+    status: str = Field(default="succeeded", pattern="^(succeeded|pending|failed|cancelled)$")
+    reason: str = Field(min_length=3, max_length=1000)
+    raw_reference: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberSubscriptionCreditRefundRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    subscription_id: UUID
+    credit_id: UUID
+    subject_label: str | None = None
+    amount: Decimal
+    currency: str
+    provider: str
+    method: str
+    external_refund_id: str | None
+    refunded_at: datetime
+    status: str
+    processed_by_person_id: UUID | None
+    reason: str
+    raw_reference: str | None
+    notes: str | None
+    credit_remaining_amount: Decimal
+    credit_status: str
+
+
 class MemberSubscriptionPaymentPlanCreate(BaseModel):
     name: str = Field(default="Member dues payment plan", min_length=2, max_length=180)
     plan_type: str = Field(default="installment", pattern="^(installment|hardship|family|scholarship)$")

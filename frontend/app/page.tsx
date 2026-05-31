@@ -374,6 +374,7 @@ import type {
   MemberSubscriptionChargeRunRead,
   MemberSubscriptionChargeWaiverRead,
   MemberSubscriptionCheckoutLinkRead,
+  MemberSubscriptionCreditRefundRead,
   MemberSubscriptionCreditRead,
   MemberSubscriptionPaymentRead,
   MemberSubscriptionPaymentPlanRead,
@@ -1911,6 +1912,7 @@ export default function HomePage() {
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
   const [memberSubscriptionCredits, setMemberSubscriptionCredits] = useState<MemberSubscriptionCreditRead[]>([]);
+  const [memberSubscriptionCreditRefunds, setMemberSubscriptionCreditRefunds] = useState<MemberSubscriptionCreditRefundRead[]>([]);
   const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
   const [memberDuesCollectionRails, setMemberDuesCollectionRails] = useState<MemberDuesCollectionRailRead[]>([]);
   const [memberRenewalCampaigns, setMemberRenewalCampaigns] = useState<MemberSubscriptionRenewalCampaignRead[]>([]);
@@ -1929,6 +1931,7 @@ export default function HomePage() {
   const [memberDuesStatementSend, setMemberDuesStatementSend] = useState<MemberSubscriptionStatementSendRead | null>(null);
   const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
   const [memberDuesPaymentCallback, setMemberDuesPaymentCallback] = useState<MemberDuesPaymentWebhookRead | null>(null);
+  const [memberDuesCreditRefund, setMemberDuesCreditRefund] = useState<MemberSubscriptionCreditRefundRead | null>(null);
   const [memberDuesReminderRun, setMemberDuesReminderRun] = useState<MemberSubscriptionReminderRunRead | null>(null);
   const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
   const [marketProfileSummary, setMarketProfileSummary] = useState<OrganizationMarketProfileSummaryRead | null>(null);
@@ -4527,6 +4530,7 @@ export default function HomePage() {
       subscriptions,
       charges,
       credits,
+      creditRefunds,
       paymentPlans,
       collectionRails,
       renewalCampaigns,
@@ -4542,6 +4546,7 @@ export default function HomePage() {
       apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
       apiRequest<MemberSubscriptionCreditRead[]>(`/organizations/${organizationId}/member-subscription-credits`),
+      apiRequest<MemberSubscriptionCreditRefundRead[]>(`/organizations/${organizationId}/member-subscription-credit-refunds`),
       apiRequest<MemberSubscriptionPaymentPlanRead[]>(
         `/organizations/${organizationId}/member-subscription-payment-plans`
       ),
@@ -4567,6 +4572,7 @@ export default function HomePage() {
     setMemberSubscriptions(subscriptions);
     setMemberSubscriptionCharges(charges);
     setMemberSubscriptionCredits(credits);
+    setMemberSubscriptionCreditRefunds(creditRefunds);
     setMemberDuesPaymentPlans(paymentPlans);
     setMemberDuesCollectionRails(collectionRails);
     setMemberRenewalCampaigns(renewalCampaigns);
@@ -8290,6 +8296,41 @@ export default function HomePage() {
       async (waiver) => {
         await loadMemberDues(selectedOrganizationId);
         addLog(waiver.message, "good");
+      }
+    );
+  };
+
+  const refundMemberDuesCredit = (credit: MemberSubscriptionCreditRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before refunding member dues credit", "bad");
+      return;
+    }
+    if (Number(credit.remaining_amount) <= 0) {
+      addLog("Select an available member dues credit to refund", "bad");
+      return;
+    }
+    runAction(
+      `refund-member-dues-credit-${credit.id}`,
+      () =>
+        apiRequest<MemberSubscriptionCreditRefundRead>(
+          `/organizations/member-subscription-credits/${credit.id}/refund`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              amount: credit.remaining_amount,
+              provider: "mpesa",
+              method: "manual_refund",
+              external_refund_id: `MPESA-REFUND-${Date.now()}`,
+              reason: "Console refund of available club-held member dues credit.",
+              raw_reference: "Refund recorded by club administrator."
+            }
+          }
+        ),
+      async (refund) => {
+        setMemberDuesCreditRefund(refund);
+        await loadMemberDues(selectedOrganizationId);
+        addLog(`Refunded ${refund.amount} ${refund.currency} member dues credit`, "good");
       }
     );
   };
@@ -25648,6 +25689,18 @@ export default function HomePage() {
                     <span>{credit.remaining_amount}/{credit.original_amount} {credit.currency} remaining · {credit.status.replaceAll("_", " ")}</span>
                     <small>{credit.source.replaceAll("_", " ")} · {credit.notes ?? "Club-held dues credit for future member charges."}</small>
                   </div>
+                  {Number(credit.remaining_amount) > 0 ? (
+                    <button type="button" onClick={() => refundMemberDuesCredit(credit)} disabled={busyAction !== null}>Refund</button>
+                  ) : null}
+                </article>
+              ))}
+              {memberSubscriptionCreditRefunds.slice(0, 3).map((refund) => (
+                <article key={refund.id} className="task-card">
+                  <div>
+                    <strong>{refund.subject_label ?? refund.subscription_id} · credit refund</strong>
+                    <span>{refund.amount} {refund.currency} · {refund.provider.replaceAll("_", " ")} · {refund.status.replaceAll("_", " ")}</span>
+                    <small>{refund.reason} · credit remaining {refund.credit_remaining_amount}</small>
+                  </div>
                 </article>
               ))}
               {memberDuesCollectionRails.slice(0, 5).map((rail) => (
@@ -25825,6 +25878,15 @@ export default function HomePage() {
                     <small>
                       {memberDuesPaymentCallback.duplicate ? "duplicate" : "new"} · {memberDuesPaymentCallback.credit_amount ? `${memberDuesPaymentCallback.credit_amount} credit` : "no credit"} · {memberDuesPaymentCallback.platform_hosting_charge ? "hosting" : "not hosting"} · {memberDuesPaymentCallback.message}
                     </small>
+                  </div>
+                </article>
+              ) : null}
+              {memberDuesCreditRefund ? (
+                <article className="task-card selected">
+                  <div>
+                    <strong>Member dues credit refunded</strong>
+                    <span>{memberDuesCreditRefund.amount} {memberDuesCreditRefund.currency} · {memberDuesCreditRefund.provider} · {memberDuesCreditRefund.status}</span>
+                    <small>{memberDuesCreditRefund.reason} · remaining {memberDuesCreditRefund.credit_remaining_amount}</small>
                   </div>
                 </article>
               ) : null}

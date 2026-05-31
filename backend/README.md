@@ -111,6 +111,8 @@ family, or scholarship-style payment plans for outstanding balances; linked
 M-Pesa/manual/hosted payments reduce both the dues ledger and the active
 arrangement balance; overpayments and early payments become member account
 credits held by the club and automatically apply to future dues charges.
+Clubs can refund available member-dues credits back through M-Pesa/manual
+refund rails while preserving the original payment and refund audit records.
 Tenant financial-aid programs can approve need-based,
 hardship, athletic, academic, or sponsor-funded awards and apply them as
 auditable non-cash dues relief against open member charges. Approved waivers

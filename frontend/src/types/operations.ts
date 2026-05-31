@@ -1070,6 +1070,27 @@ export type MemberSubscriptionCreditRead = {
   created_at: string;
 };
 
+export type MemberSubscriptionCreditRefundRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  credit_id: UUID;
+  subject_label: string | null;
+  amount: string;
+  currency: string;
+  provider: string;
+  method: string;
+  external_refund_id: string | null;
+  refunded_at: string;
+  status: string;
+  processed_by_person_id: UUID | null;
+  reason: string;
+  raw_reference: string | null;
+  notes: string | null;
+  credit_remaining_amount: string;
+  credit_status: string;
+};
+
 export type MemberSubscriptionPaymentPlanRead = {
   id: UUID;
   organization_id: UUID;

@@ -898,6 +898,65 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert billing_summary["open_invoices"] == 0
     assert Decimal(billing_summary["invoice_outstanding"]) == Decimal("0.00")
 
+    credit_payment_response = client.post(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/payments",
+        headers=identity_headers,
+        json={
+            "amount": "1450.00",
+            "provider": "mpesa",
+            "method": "manual_receipt",
+            "external_payment_id": "MPESA-CREDIT-REFUND-SEED",
+            "raw_reference": "Member paid renewal balance plus refundable credit.",
+        },
+    )
+    assert credit_payment_response.status_code == 201
+    credit_payment = credit_payment_response.json()
+    assert credit_payment["subscription_balance_amount"] == "0.00"
+
+    refundable_credits = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-credits",
+        headers=identity_headers,
+        params={"subscription_id": subscription["id"]},
+    ).json()
+    refundable_credit = next(item for item in refundable_credits if item["source_payment_id"] == credit_payment["id"])
+    assert refundable_credit["original_amount"] == "100.00"
+    assert refundable_credit["remaining_amount"] == "100.00"
+    assert refundable_credit["status"] == "available"
+
+    credit_refund_response = client.post(
+        f"/api/v1/organizations/member-subscription-credits/{refundable_credit['id']}/refund",
+        headers=identity_headers,
+        json={
+            "amount": "60.00",
+            "provider": "mpesa",
+            "method": "manual_refund",
+            "external_refund_id": "MPESA-DUES-REFUND-001",
+            "reason": "Refund excess renewal payment to member wallet.",
+            "raw_reference": "Treasurer confirmed refund.",
+        },
+    )
+    assert credit_refund_response.status_code == 201
+    credit_refund = credit_refund_response.json()
+    assert credit_refund["amount"] == "60.00"
+    assert credit_refund["credit_id"] == refundable_credit["id"]
+    assert credit_refund["credit_remaining_amount"] == "40.00"
+    assert credit_refund["credit_status"] == "partially_refunded"
+    assert credit_refund["processed_by_person_id"]
+
+    credit_refunds = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-credit-refunds",
+        headers=identity_headers,
+        params={"subscription_id": subscription["id"]},
+    ).json()
+    assert [item["id"] for item in credit_refunds] == [credit_refund["id"]]
+
+    refunded_summary = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
+        headers=identity_headers,
+        params={"as_of": "2026-08-31"},
+    ).json()
+    assert refunded_summary["available_credit_amount"] == "40.00"
+
 
 def test_financial_aid_awards_apply_to_club_member_dues(client, identity_headers) -> None:
     organization = client.post(

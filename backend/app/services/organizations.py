@@ -56,6 +56,7 @@ from app.models.organization import (
     MemberSubscription,
     MemberSubscriptionCharge,
     MemberSubscriptionCredit,
+    MemberSubscriptionCreditRefund,
     MemberSubscriptionPayment,
     MemberSubscriptionPaymentPlan,
     MemberSubscriptionPlan,
@@ -106,6 +107,8 @@ from app.schemas.organization import (
     MemberSubscriptionChargeRunRead,
     MemberSubscriptionChargeWaiverCreate,
     MemberSubscriptionChargeWaiverRead,
+    MemberSubscriptionCreditRefundCreate,
+    MemberSubscriptionCreditRefundRead,
     MemberSubscriptionCreditRead,
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
@@ -6393,6 +6396,31 @@ async def list_member_subscription_credits(
     ]
 
 
+async def list_member_subscription_credit_refunds(
+    db: AsyncSession,
+    organization_id: UUID,
+    subscription_id: UUID | None = None,
+) -> list[MemberSubscriptionCreditRefundRead]:
+    statement = (
+        select(MemberSubscriptionCreditRefund, MemberSubscriptionCredit, MemberSubscription)
+        .join(MemberSubscriptionCredit, MemberSubscriptionCredit.id == MemberSubscriptionCreditRefund.credit_id)
+        .join(MemberSubscription, MemberSubscription.id == MemberSubscriptionCreditRefund.subscription_id)
+        .where(MemberSubscriptionCreditRefund.organization_id == organization_id)
+        .order_by(MemberSubscriptionCreditRefund.refunded_at.desc(), MemberSubscriptionCreditRefund.created_at.desc())
+    )
+    if subscription_id is not None:
+        statement = statement.where(MemberSubscriptionCreditRefund.subscription_id == subscription_id)
+    rows = (await db.execute(statement)).all()
+    return [
+        member_subscription_credit_refund_read(
+            refund,
+            credit,
+            await member_subject_label(db, subscription.subject_type, subscription.subject_id),
+        )
+        for refund, credit, subscription in rows
+    ]
+
+
 def member_subscription_credit_read(
     credit: MemberSubscriptionCredit,
     subject_label: str | None,
@@ -6415,6 +6443,33 @@ def member_subscription_credit_read(
     )
 
 
+def member_subscription_credit_refund_read(
+    refund: MemberSubscriptionCreditRefund,
+    credit: MemberSubscriptionCredit,
+    subject_label: str | None,
+) -> MemberSubscriptionCreditRefundRead:
+    return MemberSubscriptionCreditRefundRead(
+        id=refund.id,
+        organization_id=refund.organization_id,
+        subscription_id=refund.subscription_id,
+        credit_id=refund.credit_id,
+        subject_label=subject_label,
+        amount=refund.amount,
+        currency=refund.currency,
+        provider=refund.provider,
+        method=refund.method,
+        external_refund_id=refund.external_refund_id,
+        refunded_at=refund.refunded_at,
+        status=refund.status,
+        processed_by_person_id=refund.processed_by_person_id,
+        reason=refund.reason,
+        raw_reference=refund.raw_reference,
+        notes=refund.notes,
+        credit_remaining_amount=credit.remaining_amount,
+        credit_status=credit.status,
+    )
+
+
 async def member_subscription_receivables_summary(
     db: AsyncSession,
     organization_id: UUID,
@@ -6432,7 +6487,7 @@ async def member_subscription_receivables_summary(
         await db.scalar(
             select(func.coalesce(func.sum(MemberSubscriptionCredit.remaining_amount), Decimal("0.00")))
             .where(MemberSubscriptionCredit.organization_id == organization_id)
-            .where(MemberSubscriptionCredit.status.in_(["available", "partially_applied"]))
+            .where(MemberSubscriptionCredit.status.in_(open_member_subscription_credit_statuses()))
             .where(MemberSubscriptionCredit.remaining_amount > Decimal("0"))
         )
     ) or Decimal("0.00")
@@ -6971,6 +7026,56 @@ async def record_member_subscription_payment(
     await db.refresh(payment)
     await db.refresh(subscription)
     return payment, subscription
+
+
+async def refund_member_subscription_credit(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    credit_id: UUID,
+    payload: MemberSubscriptionCreditRefundCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionCreditRefundRead:
+    credit = await db.get(MemberSubscriptionCredit, credit_id)
+    if credit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues credit not found")
+    subscription = await db.get(MemberSubscription, credit.subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+    await ensure_manage_organization(db, identity, credit.organization_id, authz)
+    amount = (payload.amount or credit.remaining_amount).quantize(Decimal("0.01"))
+    if amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Refund amount must be positive")
+    refundable_amount = max(credit.remaining_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+    if amount > refundable_amount:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Refund exceeds available member dues credit")
+
+    refund = MemberSubscriptionCreditRefund(
+        organization_id=credit.organization_id,
+        subscription_id=credit.subscription_id,
+        credit_id=credit.id,
+        amount=amount,
+        currency=credit.currency,
+        provider=payload.provider,
+        method=payload.method,
+        external_refund_id=payload.external_refund_id,
+        refunded_at=payload.refunded_at or datetime.now(UTC),
+        status=payload.status,
+        processed_by_person_id=identity.person_id,
+        reason=payload.reason,
+        raw_reference=payload.raw_reference,
+        notes=payload.notes,
+    )
+    db.add(refund)
+    if payload.status == "succeeded":
+        credit.remaining_amount = (refundable_amount - amount).quantize(Decimal("0.01"))
+        credit.status = "refunded" if credit.remaining_amount <= 0 else "partially_refunded"
+        if credit.remaining_amount <= 0:
+            credit.remaining_amount = Decimal("0.00")
+    await db.commit()
+    await db.refresh(refund)
+    await db.refresh(credit)
+    subject_label = await member_subject_label(db, subscription.subject_type, subscription.subject_id)
+    return member_subscription_credit_refund_read(refund, credit, subject_label)
 
 
 async def create_member_subscription_checkout_link(
@@ -7877,6 +7982,10 @@ async def create_member_subscription_credit(
     return credit
 
 
+def open_member_subscription_credit_statuses() -> list[str]:
+    return ["available", "partially_applied", "partially_refunded"]
+
+
 async def complete_member_subscription_payment_plans_if_settled(
     db: AsyncSession,
     subscription: MemberSubscription,
@@ -7963,7 +8072,7 @@ async def apply_member_subscription_credits_to_charge(
         await db.scalars(
             select(MemberSubscriptionCredit)
             .where(MemberSubscriptionCredit.subscription_id == subscription.id)
-            .where(MemberSubscriptionCredit.status.in_(["available", "partially_applied"]))
+            .where(MemberSubscriptionCredit.status.in_(open_member_subscription_credit_statuses()))
             .where(MemberSubscriptionCredit.remaining_amount > Decimal("0"))
             .where(MemberSubscriptionCredit.currency == charge.currency.upper())
             .order_by(MemberSubscriptionCredit.created_at.asc())

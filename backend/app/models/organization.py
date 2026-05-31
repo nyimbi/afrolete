@@ -556,6 +556,25 @@ class MemberSubscriptionCredit(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class MemberSubscriptionCreditRefund(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_credit_refunds"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    subscription_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    credit_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscription_credits.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), default="mpesa", nullable=False, index=True)
+    method: Mapped[str] = mapped_column(String(80), default="manual_refund", nullable=False, index=True)
+    external_refund_id: Mapped[str | None] = mapped_column(String(180), index=True)
+    refunded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="succeeded", nullable=False, index=True)
+    processed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_reference: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class MemberDuesPaymentCallback(IdMixin, TimestampMixin, Base):
     __tablename__ = "member_dues_payment_callbacks"
     __table_args__ = (
