@@ -572,6 +572,98 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert statement_send["status"] == "sent"
     assert statement_send["sent_at"] is not None
 
+    renewal_campaign_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-renewal-campaigns",
+        headers=identity_headers,
+        json={
+            "name": "July membership renewal drive",
+            "plan_id": plan["id"],
+            "target_member_role": "athlete",
+            "renewal_window_start": "2026-07-01",
+            "renewal_window_end": "2026-08-31",
+            "offer_due_on": "2026-08-05",
+            "early_bird_deadline": "2026-07-15",
+            "early_bird_discount_percent": "10.00",
+            "message": "Renew early to keep club training access active.",
+        },
+    )
+    assert renewal_campaign_response.status_code == 201
+    renewal_campaign = renewal_campaign_response.json()
+    assert renewal_campaign["status"] == "active"
+    assert renewal_campaign["generated_offer_count"] == 0
+
+    renewal_run_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-renewal-offers/run",
+        headers=identity_headers,
+        json={
+            "campaign_id": renewal_campaign["id"],
+            "as_of": "2026-07-10",
+            "limit": 10,
+        },
+    )
+    assert renewal_run_response.status_code == 200
+    renewal_run = renewal_run_response.json()
+    assert renewal_run["eligible_count"] == 1
+    assert renewal_run["created_count"] == 1
+    assert renewal_run["total_offered"] == "1350.00"
+    assert renewal_run["total_discounted"] == "150.00"
+
+    renewal_offers = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-renewal-offers",
+        headers=identity_headers,
+        params={"campaign_id": renewal_campaign["id"]},
+    ).json()
+    assert len(renewal_offers) == 1
+    renewal_offer = renewal_offers[0]
+    assert renewal_offer["subscription_id"] == subscription["id"]
+    assert renewal_offer["renewal_period_start"] == "2026-08-01"
+    assert renewal_offer["renewal_period_end"] == "2026-08-31"
+    assert renewal_offer["base_amount"] == "1500.00"
+    assert renewal_offer["discount_amount"] == "150.00"
+    assert renewal_offer["final_amount"] == "1350.00"
+
+    renewal_accept_response = client.post(
+        f"/api/v1/organizations/member-subscription-renewal-offers/{renewal_offer['id']}/accept",
+        headers=identity_headers,
+        json={
+            "accepted_on": "2026-07-12",
+            "apply_early_bird_discount": True,
+            "note": "Club admin accepted early-bird renewal.",
+        },
+    )
+    assert renewal_accept_response.status_code == 200
+    accepted_offer = renewal_accept_response.json()
+    assert accepted_offer["status"] == "accepted"
+    assert accepted_offer["charge_id"] is not None
+    assert accepted_offer["final_amount"] == "1350.00"
+
+    renewed_subscriptions = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+    ).json()
+    assert renewed_subscriptions[0]["balance_amount"] == "1350.00"
+    assert renewed_subscriptions[0]["current_period_start"] == "2026-08-01"
+    assert renewed_subscriptions[0]["current_period_end"] == "2026-08-31"
+    assert renewed_subscriptions[0]["next_due_on"] == "2026-08-05"
+
+    renewed_charges = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
+        headers=identity_headers,
+    ).json()
+    renewal_charges = [charge for charge in renewed_charges if charge["source"] == "membership_renewal"]
+    assert len(renewal_charges) == 1
+    assert renewal_charges[0]["amount"] == "1350.00"
+    assert renewal_charges[0]["balance_amount"] == "1350.00"
+    assert renewal_charges[0]["period_start"] == "2026-08-01"
+    assert renewal_charges[0]["period_end"] == "2026-08-31"
+
+    renewed_campaigns = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-renewal-campaigns",
+        headers=identity_headers,
+    ).json()
+    assert renewed_campaigns[0]["generated_offer_count"] == 1
+    assert renewed_campaigns[0]["accepted_offer_count"] == 1
+
     retire_plan_response = client.patch(
         f"/api/v1/organizations/{organization['id']}/member-subscription-plans/{plan['id']}",
         headers=identity_headers,

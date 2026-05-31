@@ -54,6 +54,8 @@ from app.models.organization import (
     MemberSubscriptionPayment,
     MemberSubscriptionPaymentPlan,
     MemberSubscriptionPlan,
+    MemberSubscriptionRenewalCampaign,
+    MemberSubscriptionRenewalOffer,
     Membership,
     OrganizationFinancialAidAppeal,
     OrganizationFinancialAidApplication,
@@ -112,6 +114,12 @@ from app.schemas.organization import (
     MemberSubscriptionPaymentPlanUpdate,
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanUpdate,
+    MemberSubscriptionRenewalCampaignCreate,
+    MemberSubscriptionRenewalCampaignRead,
+    MemberSubscriptionRenewalOfferAcceptCreate,
+    MemberSubscriptionRenewalOfferRead,
+    MemberSubscriptionRenewalOfferRunCreate,
+    MemberSubscriptionRenewalOfferRunRead,
     OrganizationAwardCategoryCreate,
     OrganizationAwardNominationCreate,
     OrganizationAwardProgramCreate,
@@ -4964,6 +4972,327 @@ async def update_member_subscription_payment_plan(
         payment_plan,
         await member_subject_label(db, subscription.subject_type, subscription.subject_id),
     )
+
+
+def member_subscription_renewal_campaign_read(
+    campaign: MemberSubscriptionRenewalCampaign,
+) -> MemberSubscriptionRenewalCampaignRead:
+    return MemberSubscriptionRenewalCampaignRead(
+        id=campaign.id,
+        organization_id=campaign.organization_id,
+        name=campaign.name,
+        plan_id=campaign.plan_id,
+        target_member_role=campaign.target_member_role,
+        renewal_window_start=campaign.renewal_window_start,
+        renewal_window_end=campaign.renewal_window_end,
+        offer_due_on=campaign.offer_due_on,
+        early_bird_deadline=campaign.early_bird_deadline,
+        early_bird_discount_percent=campaign.early_bird_discount_percent,
+        message=campaign.message,
+        notes=campaign.notes,
+        status=campaign.status,
+        generated_offer_count=campaign.generated_offer_count,
+        accepted_offer_count=campaign.accepted_offer_count,
+    )
+
+
+def member_subscription_renewal_offer_read(
+    offer: MemberSubscriptionRenewalOffer,
+    campaign: MemberSubscriptionRenewalCampaign,
+    plan: MemberSubscriptionPlan,
+    subject_label: str | None,
+) -> MemberSubscriptionRenewalOfferRead:
+    return MemberSubscriptionRenewalOfferRead(
+        id=offer.id,
+        organization_id=offer.organization_id,
+        campaign_id=offer.campaign_id,
+        campaign_name=campaign.name,
+        subscription_id=offer.subscription_id,
+        plan_id=offer.plan_id,
+        plan_name=plan.name,
+        subject_type=offer.subject_type,
+        subject_id=offer.subject_id,
+        subject_label=subject_label,
+        renewal_period_start=offer.renewal_period_start,
+        renewal_period_end=offer.renewal_period_end,
+        base_amount=offer.base_amount,
+        discount_amount=offer.discount_amount,
+        final_amount=offer.final_amount,
+        currency=offer.currency,
+        due_on=offer.due_on,
+        status=offer.status,
+        accepted_on=offer.accepted_on,
+        accepted_by_person_id=offer.accepted_by_person_id,
+        charge_id=offer.charge_id,
+        message=offer.message,
+        notes=offer.notes,
+    )
+
+
+async def create_member_subscription_renewal_campaign(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: MemberSubscriptionRenewalCampaignCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionRenewalCampaignRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    if payload.plan_id is not None:
+        plan = await db.get(MemberSubscriptionPlan, payload.plan_id)
+        if plan is None or plan.organization_id != organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues plan not found")
+    campaign = MemberSubscriptionRenewalCampaign(
+        organization_id=organization_id,
+        name=payload.name,
+        plan_id=payload.plan_id,
+        target_member_role=payload.target_member_role,
+        renewal_window_start=payload.renewal_window_start,
+        renewal_window_end=payload.renewal_window_end,
+        offer_due_on=payload.offer_due_on,
+        early_bird_deadline=payload.early_bird_deadline,
+        early_bird_discount_percent=payload.early_bird_discount_percent,
+        message=payload.message,
+        status="active",
+        notes=payload.notes,
+    )
+    db.add(campaign)
+    await db.commit()
+    await db.refresh(campaign)
+    return member_subscription_renewal_campaign_read(campaign)
+
+
+async def list_member_subscription_renewal_campaigns(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[MemberSubscriptionRenewalCampaignRead]:
+    campaigns = (
+        await db.scalars(
+            select(MemberSubscriptionRenewalCampaign)
+            .where(MemberSubscriptionRenewalCampaign.organization_id == organization_id)
+            .order_by(MemberSubscriptionRenewalCampaign.status, MemberSubscriptionRenewalCampaign.renewal_window_start.desc())
+        )
+    ).all()
+    return [member_subscription_renewal_campaign_read(campaign) for campaign in campaigns]
+
+
+async def run_member_subscription_renewal_offer_generation(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: MemberSubscriptionRenewalOfferRunCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionRenewalOfferRunRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    campaign = await db.get(MemberSubscriptionRenewalCampaign, payload.campaign_id)
+    if campaign is None or campaign.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member renewal campaign not found")
+    as_of = payload.as_of or date.today()
+    rows = await member_subscriptions_for_renewal_campaign(db, campaign, limit=payload.limit)
+    offer_ids: list[UUID] = []
+    created_count = 0
+    existing_count = 0
+    skipped_count = 0
+    total_offered = Decimal("0.00")
+    total_discounted = Decimal("0.00")
+    for subscription, plan, subject_label in rows:
+        if subscription.current_period_end < campaign.renewal_window_start or subscription.current_period_end > campaign.renewal_window_end:
+            skipped_count += 1
+            continue
+        existing_offer = await db.scalar(
+            select(MemberSubscriptionRenewalOffer).where(
+                MemberSubscriptionRenewalOffer.campaign_id == campaign.id,
+                MemberSubscriptionRenewalOffer.subscription_id == subscription.id,
+            )
+        )
+        if existing_offer is not None:
+            existing_count += 1
+            offer_ids.append(existing_offer.id)
+            continue
+        period_start, period_end = next_member_subscription_period(subscription, plan)
+        discount_amount = member_subscription_renewal_discount(plan.amount, campaign, as_of)
+        final_amount = max(Decimal("0.00"), plan.amount - discount_amount).quantize(Decimal("0.01"))
+        if payload.dry_run:
+            created_count += 1
+            total_offered += final_amount
+            total_discounted += discount_amount
+            continue
+        offer = MemberSubscriptionRenewalOffer(
+            organization_id=organization_id,
+            campaign_id=campaign.id,
+            subscription_id=subscription.id,
+            plan_id=plan.id,
+            subject_type=subscription.subject_type,
+            subject_id=subscription.subject_id,
+            renewal_period_start=period_start,
+            renewal_period_end=period_end,
+            base_amount=plan.amount.quantize(Decimal("0.01")),
+            discount_amount=discount_amount,
+            final_amount=final_amount,
+            currency=plan.currency.upper(),
+            due_on=campaign.offer_due_on,
+            status="offered",
+            message=campaign.message
+            or f"Renew {plan.name} for {subject_label or subscription.subject_id} by {campaign.offer_due_on.isoformat()}.",
+        )
+        db.add(offer)
+        await db.flush()
+        offer_ids.append(offer.id)
+        created_count += 1
+        total_offered += final_amount
+        total_discounted += discount_amount
+    if not payload.dry_run:
+        campaign.generated_offer_count += created_count
+        await db.commit()
+    return MemberSubscriptionRenewalOfferRunRead(
+        organization_id=organization_id,
+        campaign_id=campaign.id,
+        as_of=as_of,
+        eligible_count=len(rows),
+        created_count=created_count,
+        existing_count=existing_count,
+        skipped_count=skipped_count,
+        dry_run=payload.dry_run,
+        offer_ids=offer_ids,
+        total_offered=total_offered.quantize(Decimal("0.01")),
+        total_discounted=total_discounted.quantize(Decimal("0.01")),
+    )
+
+
+async def list_member_subscription_renewal_offers(
+    db: AsyncSession,
+    organization_id: UUID,
+    campaign_id: UUID | None = None,
+) -> list[MemberSubscriptionRenewalOfferRead]:
+    statement = (
+        select(MemberSubscriptionRenewalOffer, MemberSubscriptionRenewalCampaign, MemberSubscriptionPlan)
+        .join(MemberSubscriptionRenewalCampaign, MemberSubscriptionRenewalCampaign.id == MemberSubscriptionRenewalOffer.campaign_id)
+        .join(MemberSubscriptionPlan, MemberSubscriptionPlan.id == MemberSubscriptionRenewalOffer.plan_id)
+        .where(MemberSubscriptionRenewalOffer.organization_id == organization_id)
+        .order_by(MemberSubscriptionRenewalOffer.status, MemberSubscriptionRenewalOffer.due_on.asc())
+    )
+    if campaign_id is not None:
+        statement = statement.where(MemberSubscriptionRenewalOffer.campaign_id == campaign_id)
+    rows = (await db.execute(statement)).all()
+    return [
+        member_subscription_renewal_offer_read(
+            offer,
+            campaign,
+            plan,
+            await member_subject_label(db, offer.subject_type, offer.subject_id),
+        )
+        for offer, campaign, plan in rows
+    ]
+
+
+async def accept_member_subscription_renewal_offer(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    offer_id: UUID,
+    payload: MemberSubscriptionRenewalOfferAcceptCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionRenewalOfferRead:
+    offer = await db.get(MemberSubscriptionRenewalOffer, offer_id)
+    if offer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member renewal offer not found")
+    await ensure_manage_organization(db, identity, offer.organization_id, authz)
+    if offer.status == "accepted":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Member renewal offer already accepted")
+    subscription = await db.get(MemberSubscription, offer.subscription_id)
+    plan = await db.get(MemberSubscriptionPlan, offer.plan_id)
+    campaign = await db.get(MemberSubscriptionRenewalCampaign, offer.campaign_id)
+    if subscription is None or plan is None or campaign is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member renewal offer context not found")
+    accepted_on = payload.accepted_on or date.today()
+    final_amount = offer.final_amount
+    if payload.apply_early_bird_discount and campaign.early_bird_deadline is not None and accepted_on <= campaign.early_bird_deadline:
+        discount_amount = member_subscription_renewal_discount(offer.base_amount, campaign, accepted_on)
+        final_amount = max(Decimal("0.00"), offer.base_amount - discount_amount).quantize(Decimal("0.01"))
+        offer.discount_amount = discount_amount
+        offer.final_amount = final_amount
+    existing_charge = await db.scalar(
+        select(MemberSubscriptionCharge).where(
+            MemberSubscriptionCharge.subscription_id == subscription.id,
+            MemberSubscriptionCharge.period_start == offer.renewal_period_start,
+            MemberSubscriptionCharge.period_end == offer.renewal_period_end,
+        )
+    )
+    if existing_charge is None:
+        existing_charge = MemberSubscriptionCharge(
+            organization_id=offer.organization_id,
+            subscription_id=subscription.id,
+            plan_id=plan.id,
+            period_start=offer.renewal_period_start,
+            period_end=offer.renewal_period_end,
+            due_on=offer.due_on,
+            amount=final_amount,
+            amount_paid=Decimal("0.00"),
+            amount_waived=Decimal("0.00"),
+            balance_amount=final_amount,
+            currency=offer.currency,
+            status="open" if final_amount > 0 else "paid",
+            source="membership_renewal",
+            description=f"Membership renewal offer {campaign.name}",
+            created_by_person_id=identity.person_id,
+        )
+        db.add(existing_charge)
+        await db.flush()
+        subscription.balance_amount = (subscription.balance_amount + final_amount).quantize(Decimal("0.01"))
+    offer.status = "accepted"
+    offer.accepted_on = accepted_on
+    offer.accepted_by_person_id = identity.person_id
+    offer.charge_id = existing_charge.id
+    offer.notes = payload.note if payload.note is not None else offer.notes
+    subscription.current_period_start = offer.renewal_period_start
+    subscription.current_period_end = offer.renewal_period_end
+    subscription.next_due_on = offer.due_on
+    if subscription.status in {"paused", "cancelled", "past_due"}:
+        subscription.status = "active"
+    campaign.accepted_offer_count += 1
+    await db.commit()
+    await db.refresh(offer)
+    return member_subscription_renewal_offer_read(
+        offer,
+        campaign,
+        plan,
+        await member_subject_label(db, offer.subject_type, offer.subject_id),
+    )
+
+
+async def member_subscriptions_for_renewal_campaign(
+    db: AsyncSession,
+    campaign: MemberSubscriptionRenewalCampaign,
+    *,
+    limit: int,
+) -> list[tuple[MemberSubscription, MemberSubscriptionPlan, str | None]]:
+    statement = (
+        select(MemberSubscription, MemberSubscriptionPlan)
+        .join(MemberSubscriptionPlan, MemberSubscriptionPlan.id == MemberSubscription.plan_id)
+        .where(MemberSubscription.organization_id == campaign.organization_id)
+        .where(MemberSubscription.status.in_(["active", "past_due", "paused"]))
+        .order_by(MemberSubscription.current_period_end.asc(), MemberSubscription.created_at.asc())
+        .limit(limit)
+    )
+    if campaign.plan_id is not None:
+        statement = statement.where(MemberSubscription.plan_id == campaign.plan_id)
+    if campaign.target_member_role:
+        statement = statement.where(MemberSubscriptionPlan.member_role == campaign.target_member_role)
+    rows = (await db.execute(statement)).all()
+    return [
+        (subscription, plan, await member_subject_label(db, subscription.subject_type, subscription.subject_id))
+        for subscription, plan in rows
+    ]
+
+
+def member_subscription_renewal_discount(
+    amount: Decimal,
+    campaign: MemberSubscriptionRenewalCampaign,
+    as_of: date,
+) -> Decimal:
+    if campaign.early_bird_deadline is None or as_of > campaign.early_bird_deadline:
+        return Decimal("0.00")
+    if campaign.early_bird_discount_percent <= 0:
+        return Decimal("0.00")
+    return (amount * campaign.early_bird_discount_percent / Decimal("100")).quantize(Decimal("0.01"))
 
 
 def organization_financial_aid_program_read(

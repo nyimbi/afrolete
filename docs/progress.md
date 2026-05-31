@@ -1338,6 +1338,7 @@ Latest slices:
 - Member dues account statements can now be sent directly through communications, preserving delivery status and recipient records while reusing the rendered statement artifact body.
 - Member dues accounts now have lifecycle controls for pausing, reactivating, and cancelling club-managed receivables, while retired dues plans stop future recurring charges without affecting AfroLete tenant hosting billing.
 - Member dues payment plans now let clubs approve installment or hardship arrangements for outstanding balances, track arrangement progress, and link M-Pesa/manual/hosted payments back to the active plan.
+- Member dues renewal campaigns now generate early-bird renewal offers for expiring club-managed dues accounts and turn accepted offers into member-dues receivable charges without creating AfroLete hosting invoices.
 - Tenant financial-aid programs now award scholarship or hardship support against club-managed member dues, applying approved aid as traceable non-cash charge relief rather than platform-hosting payment.
 - Regional market profiles now let tenants configure locale, timezone, KES/local currencies, mobile-money and bank rails, cash collection points, tax authorities, government agencies, and federation reporting templates for country-specific operations.
 - Government and federation reporting obligations now have a tenant-scoped register tied to market profiles, with due dates, data elements, generated payloads, submission references, accepted/rejected status, and console filing controls.

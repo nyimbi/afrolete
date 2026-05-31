@@ -36,6 +36,12 @@ from app.schemas.organization import (
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanRead,
     MemberSubscriptionRead,
+    MemberSubscriptionRenewalCampaignCreate,
+    MemberSubscriptionRenewalCampaignRead,
+    MemberSubscriptionRenewalOfferAcceptCreate,
+    MemberSubscriptionRenewalOfferRead,
+    MemberSubscriptionRenewalOfferRunCreate,
+    MemberSubscriptionRenewalOfferRunRead,
     MemberSubscriptionUpdate,
     MemberSubscriptionPlanUpdate,
     MemberSubscriptionStatementArtifactRead,
@@ -170,7 +176,10 @@ from app.services.organizations import (
     create_member_subscription_checkout_link,
     create_member_subscription_payment_plan,
     create_member_subscription_plan,
+    create_member_subscription_renewal_campaign,
+    accept_member_subscription_renewal_offer,
     run_member_subscription_charge_generation,
+    run_member_subscription_renewal_offer_generation,
     export_member_subscription_statement_artifact,
     create_organization_group,
     create_organization_market_profile,
@@ -219,6 +228,8 @@ from app.services.organizations import (
     list_member_subscription_charges,
     list_member_subscription_payment_plans,
     list_member_subscription_plans,
+    list_member_subscription_renewal_campaigns,
+    list_member_subscription_renewal_offers,
     list_member_subscriptions,
     member_subscription_receivables_summary,
     list_organization_market_profiles,
@@ -2150,6 +2161,72 @@ async def update_member_subscription_payment_plan_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> MemberSubscriptionPaymentPlanRead:
     return await update_member_subscription_payment_plan(db, identity, payment_plan_id, payload, authz)
+
+
+@router.post(
+    "/{organization_id}/member-subscription-renewal-campaigns",
+    response_model=MemberSubscriptionRenewalCampaignRead,
+    status_code=201,
+)
+async def create_member_subscription_renewal_campaign_route(
+    organization_id: UUID,
+    payload: MemberSubscriptionRenewalCampaignCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionRenewalCampaignRead:
+    return await create_member_subscription_renewal_campaign(db, identity, organization_id, payload, authz)
+
+
+@router.get(
+    "/{organization_id}/member-subscription-renewal-campaigns",
+    response_model=list[MemberSubscriptionRenewalCampaignRead],
+)
+async def list_member_subscription_renewal_campaigns_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionRenewalCampaignRead]:
+    return await list_member_subscription_renewal_campaigns(db, organization_id)
+
+
+@router.post(
+    "/{organization_id}/member-subscription-renewal-offers/run",
+    response_model=MemberSubscriptionRenewalOfferRunRead,
+)
+async def run_member_subscription_renewal_offers_route(
+    organization_id: UUID,
+    payload: MemberSubscriptionRenewalOfferRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionRenewalOfferRunRead:
+    return await run_member_subscription_renewal_offer_generation(db, identity, organization_id, payload, authz)
+
+
+@router.get(
+    "/{organization_id}/member-subscription-renewal-offers",
+    response_model=list[MemberSubscriptionRenewalOfferRead],
+)
+async def list_member_subscription_renewal_offers_route(
+    organization_id: UUID,
+    campaign_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionRenewalOfferRead]:
+    return await list_member_subscription_renewal_offers(db, organization_id, campaign_id)
+
+
+@router.post(
+    "/member-subscription-renewal-offers/{offer_id}/accept",
+    response_model=MemberSubscriptionRenewalOfferRead,
+)
+async def accept_member_subscription_renewal_offer_route(
+    offer_id: UUID,
+    payload: MemberSubscriptionRenewalOfferAcceptCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionRenewalOfferRead:
+    return await accept_member_subscription_renewal_offer(db, identity, offer_id, payload, authz)
 
 
 @router.post(

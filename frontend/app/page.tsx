@@ -377,6 +377,9 @@ import type {
   MemberSubscriptionRead,
   MemberSubscriptionReceivablesSummaryRead,
   MemberSubscriptionReminderRunRead,
+  MemberSubscriptionRenewalCampaignRead,
+  MemberSubscriptionRenewalOfferRead,
+  MemberSubscriptionRenewalOfferRunRead,
   MemberSubscriptionStatementArtifactRead,
   MemberSubscriptionStatementRead,
   MemberSubscriptionStatementSendRead,
@@ -1899,6 +1902,9 @@ export default function HomePage() {
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
   const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
+  const [memberRenewalCampaigns, setMemberRenewalCampaigns] = useState<MemberSubscriptionRenewalCampaignRead[]>([]);
+  const [memberRenewalOffers, setMemberRenewalOffers] = useState<MemberSubscriptionRenewalOfferRead[]>([]);
+  const [memberRenewalRun, setMemberRenewalRun] = useState<MemberSubscriptionRenewalOfferRunRead | null>(null);
   const [financialAidPrograms, setFinancialAidPrograms] = useState<OrganizationFinancialAidProgramRead[]>([]);
   const [financialAidApplications, setFinancialAidApplications] = useState<OrganizationFinancialAidApplicationRead[]>([]);
   const [financialAidRenewals, setFinancialAidRenewals] = useState<OrganizationFinancialAidRenewalRead[]>([]);
@@ -2734,6 +2740,15 @@ export default function HomePage() {
     starts_on: "2026-06-20",
     next_due_on: "2026-06-20",
     notes: "Club-approved payment plan for outstanding member dues."
+  });
+  const [memberRenewalCampaignForm, setMemberRenewalCampaignForm] = useState({
+    name: "Season renewal drive",
+    renewal_window_start: "2026-06-01",
+    renewal_window_end: "2026-07-31",
+    offer_due_on: "2026-07-05",
+    early_bird_deadline: "2026-06-20",
+    early_bird_discount_percent: "10.00",
+    message: "Renew early to keep training access active and receive the early-bird dues discount."
   });
   const [financialAidProgramForm, setFinancialAidProgramForm] = useState({
     name: "Future Champions Financial Aid",
@@ -4464,6 +4479,8 @@ export default function HomePage() {
       subscriptions,
       charges,
       paymentPlans,
+      renewalCampaigns,
+      renewalOffers,
       aidPrograms,
       aidApplications,
       aidRenewals,
@@ -4476,6 +4493,12 @@ export default function HomePage() {
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
       apiRequest<MemberSubscriptionPaymentPlanRead[]>(
         `/organizations/${organizationId}/member-subscription-payment-plans`
+      ),
+      apiRequest<MemberSubscriptionRenewalCampaignRead[]>(
+        `/organizations/${organizationId}/member-subscription-renewal-campaigns`
+      ),
+      apiRequest<MemberSubscriptionRenewalOfferRead[]>(
+        `/organizations/${organizationId}/member-subscription-renewal-offers`
       ),
       apiRequest<OrganizationFinancialAidProgramRead[]>(`/organizations/${organizationId}/financial-aid-programs`),
       apiRequest<OrganizationFinancialAidApplicationRead[]>(`/organizations/${organizationId}/financial-aid-applications`),
@@ -4490,6 +4513,8 @@ export default function HomePage() {
     setMemberSubscriptions(subscriptions);
     setMemberSubscriptionCharges(charges);
     setMemberDuesPaymentPlans(paymentPlans);
+    setMemberRenewalCampaigns(renewalCampaigns);
+    setMemberRenewalOffers(renewalOffers);
     setFinancialAidPrograms(aidPrograms);
     setFinancialAidApplications(aidApplications);
     setFinancialAidRenewals(aidRenewals);
@@ -6205,6 +6230,9 @@ export default function HomePage() {
       setMemberSubscriptions([]);
       setMemberSubscriptionCharges([]);
       setMemberDuesPaymentPlans([]);
+      setMemberRenewalCampaigns([]);
+      setMemberRenewalOffers([]);
+      setMemberRenewalRun(null);
       setFinancialAidPrograms([]);
       setFinancialAidApplications([]);
       setFinancialAidRenewals([]);
@@ -7561,6 +7589,99 @@ export default function HomePage() {
           current.map((item) => (item.id === updatedPlan.id ? updatedPlan : item))
         );
         addLog(`${updatedPlan.name} payment plan ${status}`, "good");
+      }
+    );
+  };
+
+  const createMemberRenewalCampaign = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a renewal campaign", "bad");
+      return;
+    }
+    runAction(
+      "create-member-renewal-campaign",
+      () =>
+        apiRequest<MemberSubscriptionRenewalCampaignRead>(
+          `/organizations/${selectedOrganizationId}/member-subscription-renewal-campaigns`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              ...memberRenewalCampaignForm,
+              plan_id: memberSubscriptionPlans[0]?.id ?? null,
+              target_member_role: memberDuesPlanForm.member_role
+            }
+          }
+        ),
+      async (campaign) => {
+        setMemberRenewalCampaigns((current) => [campaign, ...current.filter((item) => item.id !== campaign.id)]);
+        await loadMemberDues(selectedOrganizationId);
+        addLog(`${campaign.name} renewal campaign ready`, "good");
+      }
+    );
+  };
+
+  const runMemberRenewalOffers = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before generating renewal offers", "bad");
+      return;
+    }
+    const campaign = memberRenewalCampaigns[0];
+    if (!campaign) {
+      addLog("Create a renewal campaign before generating offers", "bad");
+      return;
+    }
+    runAction(
+      "run-member-renewal-offers",
+      () =>
+        apiRequest<MemberSubscriptionRenewalOfferRunRead>(
+          `/organizations/${selectedOrganizationId}/member-subscription-renewal-offers/run`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              campaign_id: campaign.id,
+              as_of: memberRenewalCampaignForm.early_bird_deadline,
+              limit: 250,
+              dry_run: false
+            }
+          }
+        ),
+      async (run) => {
+        setMemberRenewalRun(run);
+        await loadMemberDues(selectedOrganizationId);
+        addLog(`${run.created_count} renewal offer(s) generated`, run.created_count > 0 ? "good" : "bad");
+      }
+    );
+  };
+
+  const acceptFirstMemberRenewalOffer = () => {
+    const offer = memberRenewalOffers.find((item) => item.status === "offered") ?? memberRenewalOffers[0];
+    if (!offer) {
+      addLog("Generate a member renewal offer before accepting", "bad");
+      return;
+    }
+    runAction(
+      "accept-member-renewal-offer",
+      () =>
+        apiRequest<MemberSubscriptionRenewalOfferRead>(
+          `/organizations/member-subscription-renewal-offers/${offer.id}/accept`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              accepted_on: memberRenewalCampaignForm.early_bird_deadline,
+              apply_early_bird_discount: true,
+              note: "Accepted from operations console."
+            }
+          }
+        ),
+      async (updated) => {
+        setMemberRenewalOffers((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
+        addLog(`Renewal accepted: ${updated.final_amount} ${updated.currency}`, "good");
       }
     );
   };
@@ -24967,6 +25088,9 @@ export default function HomePage() {
               <button type="button" onClick={runMemberDuesCharges} disabled={busyAction !== null}>Bill cycle</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
               <button type="button" onClick={createMemberDuesPaymentPlan} disabled={busyAction !== null}>Payment plan</button>
+              <button type="button" onClick={createMemberRenewalCampaign} disabled={busyAction !== null}>Renewal campaign</button>
+              <button type="button" onClick={runMemberRenewalOffers} disabled={busyAction !== null}>Renewal offers</button>
+              <button type="button" onClick={acceptFirstMemberRenewalOffer} disabled={busyAction !== null}>Accept renewal</button>
               <button type="button" onClick={createFinancialAidProgram} disabled={busyAction !== null}>Aid program</button>
               <button type="button" onClick={createFinancialAidApplication} disabled={busyAction !== null}>Aid app</button>
               <button type="button" onClick={approveFirstFinancialAidApplication} disabled={busyAction !== null}>Approve aid</button>
@@ -25015,6 +25139,22 @@ export default function HomePage() {
               <label>
                 First due
                 <input type="date" value={memberDuesPaymentPlanForm.next_due_on} onChange={(event) => setMemberDuesPaymentPlanForm({ ...memberDuesPaymentPlanForm, next_due_on: event.target.value, starts_on: event.target.value })} />
+              </label>
+              <label>
+                Renewal campaign
+                <input value={memberRenewalCampaignForm.name} onChange={(event) => setMemberRenewalCampaignForm({ ...memberRenewalCampaignForm, name: event.target.value })} />
+              </label>
+              <label>
+                Early deadline
+                <input type="date" value={memberRenewalCampaignForm.early_bird_deadline} onChange={(event) => setMemberRenewalCampaignForm({ ...memberRenewalCampaignForm, early_bird_deadline: event.target.value })} />
+              </label>
+              <label>
+                Early discount %
+                <input value={memberRenewalCampaignForm.early_bird_discount_percent} onChange={(event) => setMemberRenewalCampaignForm({ ...memberRenewalCampaignForm, early_bird_discount_percent: event.target.value })} />
+              </label>
+              <label>
+                Offer due
+                <input type="date" value={memberRenewalCampaignForm.offer_due_on} onChange={(event) => setMemberRenewalCampaignForm({ ...memberRenewalCampaignForm, offer_due_on: event.target.value })} />
               </label>
               <label>
                 Aid program
@@ -25121,6 +25261,35 @@ export default function HomePage() {
                     ) : (
                       <button type="button" onClick={() => updateMemberDuesPaymentPlanStatus(paymentPlan, "cancelled")} disabled={busyAction !== null}>Cancel</button>
                     )}
+                  </div>
+                </article>
+              ))}
+              {memberRenewalRun ? (
+                <article className={`task-card ${memberRenewalRun.created_count > 0 ? "selected" : ""}`}>
+                  <div>
+                    <strong>Membership renewal offers</strong>
+                    <span>{memberRenewalRun.created_count} created · {memberRenewalRun.existing_count} existing · {memberRenewalRun.total_offered} offered</span>
+                    <small>{memberRenewalRun.total_discounted} early-bird discount · {memberRenewalRun.skipped_count} skipped</small>
+                  </div>
+                </article>
+              ) : null}
+              {memberRenewalCampaigns.slice(0, 3).map((campaign) => (
+                <article key={campaign.id} className="task-card">
+                  <div>
+                    <strong>{campaign.name}</strong>
+                    <span>{campaign.generated_offer_count} offers · {campaign.accepted_offer_count} accepted · {campaign.status}</span>
+                    <small>
+                      Window {campaign.renewal_window_start} to {campaign.renewal_window_end} · early {campaign.early_bird_discount_percent}% by {campaign.early_bird_deadline ?? "none"}
+                    </small>
+                  </div>
+                </article>
+              ))}
+              {memberRenewalOffers.slice(0, 5).map((offer) => (
+                <article key={offer.id} className={`task-card ${offer.status === "accepted" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{offer.subject_label ?? offer.subject_id} · {offer.plan_name}</strong>
+                    <span>{offer.final_amount} {offer.currency} renewal · {offer.discount_amount} discount · {offer.status}</span>
+                    <small>{offer.renewal_period_start} to {offer.renewal_period_end} · due {offer.due_on}</small>
                   </div>
                 </article>
               ))}

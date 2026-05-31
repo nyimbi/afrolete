@@ -534,6 +534,53 @@ class MemberSubscriptionPaymentPlan(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class MemberSubscriptionRenewalCampaign(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_renewal_campaigns"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    plan_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("member_subscription_plans.id"), index=True)
+    target_member_role: Mapped[str | None] = mapped_column(String(80), index=True)
+    renewal_window_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    renewal_window_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    offer_due_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    early_bird_deadline: Mapped[date | None] = mapped_column(Date, index=True)
+    early_bird_discount_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0"), nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    generated_offer_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    accepted_offer_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class MemberSubscriptionRenewalOffer(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_renewal_offers"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "subscription_id", name="uq_member_subscription_renewal_offers_campaign_subscription"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    campaign_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscription_renewal_campaigns.id"), index=True)
+    subscription_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscription_plans.id"), index=True)
+    subject_type: Mapped[MemberSubjectType] = mapped_column(enum_type(MemberSubjectType), nullable=False, index=True)
+    subject_id: Mapped[UUID] = mapped_column(GUID(), index=True)
+    renewal_period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    renewal_period_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    base_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    final_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    due_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="offered", nullable=False, index=True)
+    accepted_on: Mapped[date | None] = mapped_column(Date, index=True)
+    accepted_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    charge_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("member_subscription_charges.id"), index=True)
+    message: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class OrganizationFinancialAidProgram(IdMixin, TimestampMixin, Base):
     __tablename__ = "organization_financial_aid_programs"
     __table_args__ = (UniqueConstraint("organization_id", "name"),)

@@ -1077,6 +1077,64 @@ export type MemberSubscriptionPaymentPlanRead = {
   notes: string | null;
 };
 
+export type MemberSubscriptionRenewalCampaignRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  plan_id: UUID | null;
+  target_member_role: string | null;
+  renewal_window_start: string;
+  renewal_window_end: string;
+  offer_due_on: string;
+  early_bird_deadline: string | null;
+  early_bird_discount_percent: string;
+  message: string | null;
+  notes: string | null;
+  status: string;
+  generated_offer_count: number;
+  accepted_offer_count: number;
+};
+
+export type MemberSubscriptionRenewalOfferRead = {
+  id: UUID;
+  organization_id: UUID;
+  campaign_id: UUID;
+  campaign_name: string;
+  subscription_id: UUID;
+  plan_id: UUID;
+  plan_name: string;
+  subject_type: "person" | "organization" | "team";
+  subject_id: UUID;
+  subject_label: string | null;
+  renewal_period_start: string;
+  renewal_period_end: string;
+  base_amount: string;
+  discount_amount: string;
+  final_amount: string;
+  currency: string;
+  due_on: string;
+  status: string;
+  accepted_on: string | null;
+  accepted_by_person_id: UUID | null;
+  charge_id: UUID | null;
+  message: string | null;
+  notes: string | null;
+};
+
+export type MemberSubscriptionRenewalOfferRunRead = {
+  organization_id: UUID;
+  campaign_id: UUID;
+  as_of: string;
+  eligible_count: number;
+  created_count: number;
+  existing_count: number;
+  skipped_count: number;
+  dry_run: boolean;
+  offer_ids: UUID[];
+  total_offered: string;
+  total_discounted: string;
+};
+
 export type OrganizationFinancialAidProgramRead = {
   id: UUID;
   organization_id: UUID;

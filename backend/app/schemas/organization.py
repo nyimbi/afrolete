@@ -1280,6 +1280,86 @@ class MemberSubscriptionPaymentPlanRead(BaseModel):
     notes: str | None
 
 
+class MemberSubscriptionRenewalCampaignCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    plan_id: UUID | None = None
+    target_member_role: str | None = Field(default=None, max_length=80)
+    renewal_window_start: date
+    renewal_window_end: date
+    offer_due_on: date
+    early_bird_deadline: date | None = None
+    early_bird_discount_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100, max_digits=5, decimal_places=2)
+    message: str | None = Field(default=None, max_length=8000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_dates(self) -> "MemberSubscriptionRenewalCampaignCreate":
+        if self.renewal_window_end < self.renewal_window_start:
+            raise ValueError("renewal_window_end must be on or after renewal_window_start")
+        return self
+
+
+class MemberSubscriptionRenewalCampaignRead(MemberSubscriptionRenewalCampaignCreate):
+    id: UUID
+    organization_id: UUID
+    status: str
+    generated_offer_count: int
+    accepted_offer_count: int
+
+
+class MemberSubscriptionRenewalOfferRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    campaign_id: UUID
+    campaign_name: str
+    subscription_id: UUID
+    plan_id: UUID
+    plan_name: str
+    subject_type: MemberSubjectType
+    subject_id: UUID
+    subject_label: str | None
+    renewal_period_start: date
+    renewal_period_end: date
+    base_amount: Decimal
+    discount_amount: Decimal
+    final_amount: Decimal
+    currency: str
+    due_on: date
+    status: str
+    accepted_on: date | None
+    accepted_by_person_id: UUID | None
+    charge_id: UUID | None
+    message: str | None
+    notes: str | None
+
+
+class MemberSubscriptionRenewalOfferRunCreate(BaseModel):
+    campaign_id: UUID
+    as_of: date | None = None
+    limit: int = Field(default=500, ge=1, le=5000)
+    dry_run: bool = False
+
+
+class MemberSubscriptionRenewalOfferRunRead(BaseModel):
+    organization_id: UUID
+    campaign_id: UUID
+    as_of: date
+    eligible_count: int
+    created_count: int
+    existing_count: int
+    skipped_count: int
+    dry_run: bool
+    offer_ids: list[UUID]
+    total_offered: Decimal
+    total_discounted: Decimal
+
+
+class MemberSubscriptionRenewalOfferAcceptCreate(BaseModel):
+    accepted_on: date | None = None
+    apply_early_bird_discount: bool = True
+    note: str | None = Field(default=None, max_length=4000)
+
+
 class OrganizationFinancialAidProgramCreate(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     program_type: str = Field(default="need_based", pattern="^(need_based|merit|athletic|academic|hardship|sponsor)$")
