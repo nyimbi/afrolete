@@ -373,6 +373,7 @@ import type {
   MemberSubscriptionPaymentRead,
   MemberSubscriptionPlanRead,
   MemberSubscriptionRead,
+  MemberSubscriptionReceivablesSummaryRead,
   MemberSubscriptionReminderRunRead,
   MetricCategory,
   MetricDefinitionRead,
@@ -1887,6 +1888,8 @@ export default function HomePage() {
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
+  const [memberDuesReceivablesSummary, setMemberDuesReceivablesSummary] =
+    useState<MemberSubscriptionReceivablesSummaryRead | null>(null);
   const [memberDuesChargeRun, setMemberDuesChargeRun] = useState<MemberSubscriptionChargeRunRead | null>(null);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
   const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
@@ -4381,14 +4384,18 @@ export default function HomePage() {
   }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
-    const [plans, subscriptions, charges] = await Promise.all([
+    const [plans, subscriptions, charges, summary] = await Promise.all([
       apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
       apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
-      apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`)
+      apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
+      apiRequest<MemberSubscriptionReceivablesSummaryRead>(
+        `/organizations/${organizationId}/member-subscription-charges/summary`
+      )
     ]);
     setMemberSubscriptionPlans(plans);
     setMemberSubscriptions(subscriptions);
     setMemberSubscriptionCharges(charges);
+    setMemberDuesReceivablesSummary(summary);
     setSelectedMemberSubscriptionId((current) =>
       subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
     );
@@ -6094,6 +6101,7 @@ export default function HomePage() {
       setMemberSubscriptionPlans([]);
       setMemberSubscriptions([]);
       setMemberSubscriptionCharges([]);
+      setMemberDuesReceivablesSummary(null);
       setMemberDuesChargeRun(null);
       setMemberSubscriptionPayment(null);
       setMemberDuesCheckoutLink(null);
@@ -24421,6 +24429,20 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {memberDuesReceivablesSummary ? (
+                <article className={`task-card ${Number(memberDuesReceivablesSummary.overdue_balance) > 0 ? "risk-card" : "selected"}`}>
+                  <div>
+                    <strong>Receivables aging</strong>
+                    <span>
+                      {memberDuesReceivablesSummary.outstanding_balance} open · {memberDuesReceivablesSummary.overdue_balance} overdue · {memberDuesReceivablesSummary.collection_rate_percent}% collected
+                    </span>
+                    <small>
+                      {memberDuesReceivablesSummary.open_charge_count} open · {memberDuesReceivablesSummary.partial_charge_count} partial · oldest {memberDuesReceivablesSummary.oldest_open_due_on ?? "none"}
+                    </small>
+                    <small>{memberDuesReceivablesSummary.next_actions[0] ?? "Dues ledger is current."}</small>
+                  </div>
+                </article>
+              ) : null}
               {memberSubscriptionPlans.slice(0, 3).map((plan) => (
                 <article key={plan.id} className="task-card">
                   <div>

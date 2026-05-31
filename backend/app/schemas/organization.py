@@ -1221,6 +1221,26 @@ class MemberSubscriptionChargeRead(BaseModel):
     created_at: datetime
 
 
+class MemberSubscriptionReceivablesSummaryRead(BaseModel):
+    organization_id: UUID
+    as_of: date
+    charge_count: int
+    open_charge_count: int
+    partial_charge_count: int
+    paid_charge_count: int
+    total_charged: Decimal
+    total_collected: Decimal
+    outstanding_balance: Decimal
+    current_balance: Decimal
+    overdue_balance: Decimal
+    aging_buckets: dict[str, Decimal]
+    next_due_on: date | None
+    oldest_open_due_on: date | None
+    status_counts: dict[str, int]
+    collection_rate_percent: Decimal
+    next_actions: list[str]
+
+
 class MemberSubscriptionChargeRunCreate(BaseModel):
     organization_id: UUID
     charge_on: date | None = None

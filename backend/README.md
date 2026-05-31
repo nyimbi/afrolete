@@ -91,7 +91,8 @@ recurring club-owned receivable charges for due subscription cycles, advances
 the subscription period, increments the member balance, and keeps those
 receivables separate from AfroLete hosting invoices. Member dues payments
 allocate oldest-due first against those charge rows, tracking per-period paid
-amount, open balance, paid-at timestamp, and last payment id; tune with
+amount, open balance, paid-at timestamp, last payment id, and receivables aging
+summaries for collections decisions; tune with
 `--member-dues-charge-on` and `--dry-run-member-dues-charges`. The member dues
 reminder lane sends repeat-suppressed reminders for due or overdue
 club-managed subscription balances, marks accounts past due after the plan

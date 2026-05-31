@@ -1075,6 +1075,26 @@ export type MemberSubscriptionChargeRead = {
   created_at: string;
 };
 
+export type MemberSubscriptionReceivablesSummaryRead = {
+  organization_id: UUID;
+  as_of: string;
+  charge_count: number;
+  open_charge_count: number;
+  partial_charge_count: number;
+  paid_charge_count: number;
+  total_charged: string;
+  total_collected: string;
+  outstanding_balance: string;
+  current_balance: string;
+  overdue_balance: string;
+  aging_buckets: Record<string, string>;
+  next_due_on: string | null;
+  oldest_open_due_on: string | null;
+  status_counts: Record<string, number>;
+  collection_rate_percent: string;
+  next_actions: string[];
+};
+
 export type MemberSubscriptionChargeRunItemRead = {
   subscription_id: UUID;
   charge_id: UUID | null;

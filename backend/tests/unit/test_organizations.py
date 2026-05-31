@@ -178,6 +178,19 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert initial_charges[0]["balance_amount"] == "1500.00"
     assert initial_charges[0]["source"] == "initial_subscription"
 
+    initial_summary_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
+        headers=identity_headers,
+        params={"as_of": "2026-06-01"},
+    )
+    assert initial_summary_response.status_code == 200
+    initial_summary = initial_summary_response.json()
+    assert initial_summary["charge_count"] == 1
+    assert initial_summary["outstanding_balance"] == "1500.00"
+    assert initial_summary["current_balance"] == "1500.00"
+    assert initial_summary["overdue_balance"] == "0.00"
+    assert initial_summary["next_due_on"] == "2026-06-05"
+
     payment_response = client.post(
         f"/api/v1/organizations/member-subscriptions/{subscription['id']}/payments",
         headers=identity_headers,
@@ -203,6 +216,17 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert partial_charges[0]["amount_paid"] == "1000.00"
     assert partial_charges[0]["balance_amount"] == "500.00"
     assert partial_charges[0]["last_payment_id"] == payment["id"]
+
+    partial_summary = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
+        headers=identity_headers,
+        params={"as_of": "2026-06-20"},
+    ).json()
+    assert partial_summary["outstanding_balance"] == "500.00"
+    assert partial_summary["overdue_balance"] == "500.00"
+    assert partial_summary["aging_buckets"]["1_30"] == "500.00"
+    assert partial_summary["oldest_open_due_on"] == "2026-06-05"
+    assert partial_summary["collection_rate_percent"] == "66.67"
 
     checkout_response = client.post(
         f"/api/v1/organizations/member-subscriptions/{subscription['id']}/checkout-link",
@@ -311,6 +335,15 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert paid_charge["balance_amount"] == "0.00"
     assert paid_charge["paid_at"] is not None
 
+    settled_summary = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
+        headers=identity_headers,
+        params={"as_of": "2026-06-30"},
+    ).json()
+    assert settled_summary["outstanding_balance"] == "0.00"
+    assert settled_summary["paid_charge_count"] == 1
+    assert settled_summary["next_actions"][0] == "No member dues receivables are currently outstanding."
+
     charge_run_response = client.post(
         f"/api/v1/organizations/{organization['id']}/member-subscription-charges/run",
         headers=identity_headers,
@@ -344,6 +377,16 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert all_charges[0]["source"] == "recurring_cycle"
     assert all_charges[0]["status"] == "open"
     assert all_charges[0]["balance_amount"] == "1500.00"
+
+    aging_summary = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
+        headers=identity_headers,
+        params={"as_of": "2026-07-01"},
+    ).json()
+    assert aging_summary["charge_count"] == 2
+    assert aging_summary["outstanding_balance"] == "1500.00"
+    assert aging_summary["current_balance"] == "1500.00"
+    assert aging_summary["overdue_balance"] == "0.00"
 
     billing_summary_response = client.get(
         f"/api/v1/billing/summary?organization_id={organization['id']}",

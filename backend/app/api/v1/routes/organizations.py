@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 from decimal import Decimal
 
@@ -22,6 +23,7 @@ from app.schemas.organization import (
     MemberSubscriptionChargeRead,
     MemberSubscriptionChargeRunCreate,
     MemberSubscriptionChargeRunRead,
+    MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionPaymentCreate,
@@ -182,6 +184,7 @@ from app.services.organizations import (
     list_member_subscription_charges,
     list_member_subscription_plans,
     list_member_subscriptions,
+    member_subscription_receivables_summary,
     list_organization_market_profiles,
     list_committees,
     list_organizations_for_identity,
@@ -1926,6 +1929,18 @@ async def list_member_subscriptions_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[MemberSubscriptionRead]:
     return [to_member_subscription_read(row) for row in await list_member_subscriptions(db, organization_id)]
+
+
+@router.get(
+    "/{organization_id}/member-subscription-charges/summary",
+    response_model=MemberSubscriptionReceivablesSummaryRead,
+)
+async def member_subscription_receivables_summary_route(
+    organization_id: UUID,
+    as_of: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> MemberSubscriptionReceivablesSummaryRead:
+    return await member_subscription_receivables_summary(db, organization_id, as_of)
 
 
 @router.get("/{organization_id}/member-subscription-charges", response_model=list[MemberSubscriptionChargeRead])

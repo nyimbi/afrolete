@@ -86,6 +86,7 @@ from app.schemas.organization import (
     MemberSubscriptionChargeRunCreate,
     MemberSubscriptionChargeRunItemRead,
     MemberSubscriptionChargeRunRead,
+    MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionReminderItemRead,
@@ -4768,6 +4769,117 @@ async def list_member_subscription_charges(
             )
         )
     return result
+
+
+async def member_subscription_receivables_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+    as_of: date | None = None,
+) -> MemberSubscriptionReceivablesSummaryRead:
+    effective_as_of = as_of or date.today()
+    charges = list(
+        (
+            await db.scalars(
+                select(MemberSubscriptionCharge).where(MemberSubscriptionCharge.organization_id == organization_id)
+            )
+        ).all()
+    )
+    status_counts: dict[str, int] = {}
+    aging_buckets = {
+        "current": Decimal("0.00"),
+        "1_30": Decimal("0.00"),
+        "31_60": Decimal("0.00"),
+        "61_90": Decimal("0.00"),
+        "over_90": Decimal("0.00"),
+        "undated": Decimal("0.00"),
+    }
+    total_charged = Decimal("0.00")
+    total_collected = Decimal("0.00")
+    outstanding_balance = Decimal("0.00")
+    open_due_dates: list[date] = []
+    future_due_dates: list[date] = []
+    open_charge_count = 0
+    partial_charge_count = 0
+    paid_charge_count = 0
+
+    for charge in charges:
+        status_counts[charge.status] = status_counts.get(charge.status, 0) + 1
+        total_charged += charge.amount
+        total_collected += charge.amount_paid
+        balance = max(charge.balance_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+        if charge.status == "open":
+            open_charge_count += 1
+        if charge.status == "partial":
+            partial_charge_count += 1
+        if charge.status == "paid":
+            paid_charge_count += 1
+        if balance <= 0:
+            continue
+        outstanding_balance += balance
+        if charge.due_on is None:
+            aging_buckets["undated"] += balance
+            continue
+        if charge.due_on >= effective_as_of:
+            aging_buckets["current"] += balance
+            future_due_dates.append(charge.due_on)
+            continue
+        open_due_dates.append(charge.due_on)
+        days_overdue = (effective_as_of - charge.due_on).days
+        if days_overdue <= 30:
+            aging_buckets["1_30"] += balance
+        elif days_overdue <= 60:
+            aging_buckets["31_60"] += balance
+        elif days_overdue <= 90:
+            aging_buckets["61_90"] += balance
+        else:
+            aging_buckets["over_90"] += balance
+
+    total_charged = total_charged.quantize(Decimal("0.01"))
+    total_collected = total_collected.quantize(Decimal("0.01"))
+    outstanding_balance = outstanding_balance.quantize(Decimal("0.01"))
+    for key, value in list(aging_buckets.items()):
+        aging_buckets[key] = value.quantize(Decimal("0.01"))
+    overdue_balance = (
+        aging_buckets["1_30"] + aging_buckets["31_60"] + aging_buckets["61_90"] + aging_buckets["over_90"]
+    ).quantize(Decimal("0.01"))
+    collection_rate = (
+        (total_collected / total_charged * Decimal("100")).quantize(Decimal("0.01"))
+        if total_charged > 0
+        else Decimal("0.00")
+    )
+    next_actions: list[str] = []
+    if outstanding_balance <= 0:
+        next_actions.append("No member dues receivables are currently outstanding.")
+    if overdue_balance > 0:
+        next_actions.append("Run dues reminders for overdue member balances.")
+    if aging_buckets["over_90"] > 0:
+        next_actions.append("Review balances older than 90 days for waiver, escalation, or payment plans.")
+    if aging_buckets["undated"] > 0:
+        next_actions.append("Set due dates on undated member dues charges.")
+    if not charges:
+        next_actions.append("Create a member dues plan and assign it to members.")
+    if outstanding_balance > 0 and not next_actions:
+        next_actions.append("Collect current dues through M-Pesa, payment links, or club office receipts.")
+
+    return MemberSubscriptionReceivablesSummaryRead(
+        organization_id=organization_id,
+        as_of=effective_as_of,
+        charge_count=len(charges),
+        open_charge_count=open_charge_count,
+        partial_charge_count=partial_charge_count,
+        paid_charge_count=paid_charge_count,
+        total_charged=total_charged,
+        total_collected=total_collected,
+        outstanding_balance=outstanding_balance,
+        current_balance=aging_buckets["current"],
+        overdue_balance=overdue_balance,
+        aging_buckets=aging_buckets,
+        next_due_on=min(future_due_dates) if future_due_dates else None,
+        oldest_open_due_on=min(open_due_dates) if open_due_dates else None,
+        status_counts=status_counts,
+        collection_rate_percent=collection_rate,
+        next_actions=next_actions,
+    )
 
 
 async def record_member_subscription_payment(
