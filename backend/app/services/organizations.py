@@ -4,7 +4,7 @@ import json
 import re
 from base64 import b64decode
 from binascii import Error as BinasciiError
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -57,6 +57,8 @@ from app.models.organization import (
     OrganizationAwardProgram,
     OrganizationAwardRecipient,
     OrganizationAwardVote,
+    OrganizationComplianceDocument,
+    OrganizationComplianceDocumentVersion,
     OrganizationDataMigrationProject,
     OrganizationDataMigrationRun,
     OrganizationGroup,
@@ -82,6 +84,9 @@ from app.schemas.organization import (
     OrganizationAwardProgramCreate,
     OrganizationAwardRecipientCreate,
     OrganizationAwardVoteCreate,
+    OrganizationComplianceDocumentCreate,
+    OrganizationComplianceDocumentVersionCreate,
+    OrganizationComplianceDocumentSummaryRead,
     OrganizationDataMigrationProjectCreate,
     OrganizationDataMigrationRunCreate,
     OrganizationGroupCreate,
@@ -4392,6 +4397,182 @@ async def list_recovery_drills(
                 .order_by(OrganizationRecoveryDrill.created_at.desc())
             )
         ).all()
+    )
+
+
+def document_days_until_expiry(document: OrganizationComplianceDocument, today: date | None = None) -> int | None:
+    if document.expires_on is None:
+        return None
+    return (document.expires_on - (today or date.today())).days
+
+
+async def create_compliance_document(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationComplianceDocumentCreate,
+    authz: AuthorizationService,
+) -> OrganizationComplianceDocument:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    if payload.owner_person_id is not None and await db.get(Person, payload.owner_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document owner not found")
+    document = OrganizationComplianceDocument(
+        organization_id=organization_id,
+        **payload.model_dump(),
+    )
+    if payload.expires_on is not None and payload.expires_on < date.today():
+        document.status = "expired"
+    db.add(document)
+    await db.flush()
+    if payload.storage_url or payload.checksum:
+        db.add(
+            OrganizationComplianceDocumentVersion(
+                organization_id=organization_id,
+                document_id=document.id,
+                version_number=1,
+                storage_url=payload.storage_url,
+                checksum=payload.checksum,
+                change_summary="Initial document registration.",
+                uploaded_by_person_id=identity.person_id,
+                verified_by_person_id=identity.person_id if document.status == "verified" else None,
+                verified_at=datetime.now(UTC) if document.status == "verified" else None,
+                status="current",
+            )
+        )
+    await db.commit()
+    await db.refresh(document)
+    return document
+
+
+async def list_compliance_documents(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[OrganizationComplianceDocument, int]]:
+    documents = list(
+        (
+            await db.scalars(
+                select(OrganizationComplianceDocument)
+                .where(OrganizationComplianceDocument.organization_id == organization_id)
+                .order_by(
+                    OrganizationComplianceDocument.status,
+                    OrganizationComplianceDocument.expires_on,
+                    OrganizationComplianceDocument.title,
+                )
+            )
+        ).all()
+    )
+    return [
+        (
+            document,
+            await scalar_count_for(db, OrganizationComplianceDocumentVersion.document_id, document.id),
+        )
+        for document in documents
+    ]
+
+
+async def get_compliance_document_for_manage(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    document_id: UUID,
+    authz: AuthorizationService,
+) -> OrganizationComplianceDocument:
+    document = await db.get(OrganizationComplianceDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compliance document not found")
+    await ensure_manage_organization(db, identity, document.organization_id, authz)
+    return document
+
+
+async def create_compliance_document_version(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    document_id: UUID,
+    payload: OrganizationComplianceDocumentVersionCreate,
+    authz: AuthorizationService,
+) -> tuple[OrganizationComplianceDocumentVersion, OrganizationComplianceDocument]:
+    document = await get_compliance_document_for_manage(db, identity, document_id, authz)
+    current_versions = list(
+        (
+            await db.scalars(
+                select(OrganizationComplianceDocumentVersion).where(
+                    OrganizationComplianceDocumentVersion.document_id == document.id
+                )
+            )
+        ).all()
+    )
+    next_version = max((version.version_number for version in current_versions), default=0) + 1
+    for version in current_versions:
+        if version.status == "current":
+            version.status = "superseded"
+    version = OrganizationComplianceDocumentVersion(
+        organization_id=document.organization_id,
+        document_id=document.id,
+        version_number=next_version,
+        uploaded_by_person_id=identity.person_id,
+        verified_by_person_id=identity.person_id if payload.status == "current" and document.status == "verified" else None,
+        verified_at=datetime.now(UTC) if payload.status == "current" and document.status == "verified" else None,
+        **payload.model_dump(),
+    )
+    db.add(version)
+    document.current_version = next_version
+    if payload.storage_url:
+        document.storage_url = payload.storage_url
+    if payload.checksum:
+        document.checksum = payload.checksum
+    if payload.status == "current" and document.status == "draft":
+        document.status = "pending_review"
+    await db.commit()
+    await db.refresh(version)
+    await db.refresh(document)
+    return version, document
+
+
+async def list_compliance_document_versions(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    document_id: UUID,
+    authz: AuthorizationService,
+) -> list[OrganizationComplianceDocumentVersion]:
+    document = await get_compliance_document_for_manage(db, identity, document_id, authz)
+    return list(
+        (
+            await db.scalars(
+                select(OrganizationComplianceDocumentVersion)
+                .where(OrganizationComplianceDocumentVersion.document_id == document.id)
+                .order_by(OrganizationComplianceDocumentVersion.version_number.desc())
+            )
+        ).all()
+    )
+
+
+async def compliance_document_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> OrganizationComplianceDocumentSummaryRead:
+    today = date.today()
+    documents = [document for document, _ in await list_compliance_documents(db, organization_id)]
+    category_counts: dict[str, int] = {}
+    renewal_status_counts: dict[str, int] = {}
+    for document in documents:
+        category_counts[document.category] = category_counts.get(document.category, 0) + 1
+        renewal_status_counts[document.renewal_status] = renewal_status_counts.get(document.renewal_status, 0) + 1
+    return OrganizationComplianceDocumentSummaryRead(
+        organization_id=organization_id,
+        total_documents=len(documents),
+        verified_documents=sum(1 for document in documents if document.status == "verified"),
+        expired_documents=sum(
+            1
+            for document in documents
+            if document.status == "expired" or (document.expires_on is not None and document.expires_on < today)
+        ),
+        expiring_soon_documents=sum(
+            1
+            for document in documents
+            if document.expires_on is not None and 0 <= (document.expires_on - today).days <= 90
+        ),
+        auto_renewal_documents=sum(1 for document in documents if document.auto_renewal_enabled),
+        category_counts=category_counts,
+        renewal_status_counts=renewal_status_counts,
     )
 
 

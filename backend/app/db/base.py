@@ -187,6 +187,8 @@ from app.models.organization import (  # noqa: F401,E402
     OrganizationAwardProgram,
     OrganizationAwardRecipient,
     OrganizationAwardVote,
+    OrganizationComplianceDocument,
+    OrganizationComplianceDocumentVersion,
     OrganizationDataMigrationProject,
     OrganizationDataMigrationRun,
     OrganizationGroup,

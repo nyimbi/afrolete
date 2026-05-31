@@ -33,6 +33,11 @@ from app.schemas.organization import (
     OrganizationAwardRecipientRead,
     OrganizationAwardVoteCreate,
     OrganizationAwardVoteRead,
+    OrganizationComplianceDocumentCreate,
+    OrganizationComplianceDocumentRead,
+    OrganizationComplianceDocumentSummaryRead,
+    OrganizationComplianceDocumentVersionCreate,
+    OrganizationComplianceDocumentVersionRead,
     OrganizationDataMigrationProjectCreate,
     OrganizationDataMigrationProjectRead,
     OrganizationDataMigrationRunCreate,
@@ -108,6 +113,8 @@ from app.services.organizations import (
     create_organization_award_nomination,
     create_organization_award_program,
     create_organization_award_recipient,
+    create_compliance_document,
+    create_compliance_document_version,
     create_data_migration_project,
     create_data_migration_run,
     create_recovery_drill,
@@ -136,8 +143,12 @@ from app.services.organizations import (
     list_organization_award_nominations,
     list_organization_award_programs,
     list_organization_award_recipients,
+    compliance_document_summary,
+    document_days_until_expiry,
     list_data_migration_projects,
     list_data_migration_runs,
+    list_compliance_documents,
+    list_compliance_document_versions,
     list_organization_group_members,
     list_organization_groups,
     list_organization_programs,
@@ -1440,6 +1451,127 @@ async def list_organization_award_recipients_route(
     return [
         to_organization_award_recipient_read(row)
         for row in await list_organization_award_recipients(db, identity, program_id, authz)
+    ]
+
+
+def to_compliance_document_read(row) -> OrganizationComplianceDocumentRead:
+    document, version_count = row
+    return OrganizationComplianceDocumentRead(
+        id=document.id,
+        organization_id=document.organization_id,
+        title=document.title,
+        category=document.category,
+        document_type=document.document_type,
+        subject_type=document.subject_type,
+        subject_id=document.subject_id,
+        owner_person_id=document.owner_person_id,
+        issuer=document.issuer,
+        reference_number=document.reference_number,
+        status=document.status,
+        renewal_status=document.renewal_status,
+        effective_on=document.effective_on,
+        expires_on=document.expires_on,
+        next_review_on=document.next_review_on,
+        retention_until=document.retention_until,
+        auto_renewal_enabled=document.auto_renewal_enabled,
+        storage_url=document.storage_url,
+        checksum=document.checksum,
+        current_version=document.current_version,
+        confidentiality=document.confidentiality,
+        tags=document.tags,
+        notes=document.notes,
+        version_count=version_count,
+        days_until_expiry=document_days_until_expiry(document),
+    )
+
+
+def to_compliance_document_version_read(version) -> OrganizationComplianceDocumentVersionRead:
+    return OrganizationComplianceDocumentVersionRead(
+        id=version.id,
+        organization_id=version.organization_id,
+        document_id=version.document_id,
+        version_number=version.version_number,
+        storage_url=version.storage_url,
+        checksum=version.checksum,
+        filename=version.filename,
+        content_type=version.content_type,
+        size_bytes=version.size_bytes,
+        change_summary=version.change_summary,
+        uploaded_by_person_id=version.uploaded_by_person_id,
+        verified_by_person_id=version.verified_by_person_id,
+        verified_at=version.verified_at,
+        status=version.status,
+    )
+
+
+@router.post(
+    "/{organization_id}/compliance-documents",
+    response_model=OrganizationComplianceDocumentRead,
+    status_code=201,
+)
+async def create_compliance_document_route(
+    organization_id: UUID,
+    payload: OrganizationComplianceDocumentCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationComplianceDocumentRead:
+    document = await create_compliance_document(db, identity, organization_id, payload, authz)
+    rows = await list_compliance_documents(db, organization_id)
+    return to_compliance_document_read(next(row for row in rows if row[0].id == document.id))
+
+
+@router.get("/{organization_id}/compliance-documents", response_model=list[OrganizationComplianceDocumentRead])
+async def list_compliance_documents_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationComplianceDocumentRead]:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    return [to_compliance_document_read(row) for row in await list_compliance_documents(db, organization_id)]
+
+
+@router.get("/{organization_id}/compliance-documents/summary", response_model=OrganizationComplianceDocumentSummaryRead)
+async def compliance_document_summary_route(
+    organization_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationComplianceDocumentSummaryRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    return await compliance_document_summary(db, organization_id)
+
+
+@router.post(
+    "/compliance-documents/{document_id}/versions",
+    response_model=OrganizationComplianceDocumentVersionRead,
+    status_code=201,
+)
+async def create_compliance_document_version_route(
+    document_id: UUID,
+    payload: OrganizationComplianceDocumentVersionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationComplianceDocumentVersionRead:
+    version, _ = await create_compliance_document_version(db, identity, document_id, payload, authz)
+    return to_compliance_document_version_read(version)
+
+
+@router.get(
+    "/compliance-documents/{document_id}/versions",
+    response_model=list[OrganizationComplianceDocumentVersionRead],
+)
+async def list_compliance_document_versions_route(
+    document_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationComplianceDocumentVersionRead]:
+    return [
+        to_compliance_document_version_read(version)
+        for version in await list_compliance_document_versions(db, identity, document_id, authz)
     ]
 
 

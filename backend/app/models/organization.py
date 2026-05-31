@@ -333,6 +333,53 @@ class OrganizationRecoveryDrill(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class OrganizationComplianceDocument(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_compliance_documents"
+    __table_args__ = (UniqueConstraint("organization_id", "title", "document_type"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(80), default="legal_regulatory", nullable=False, index=True)
+    document_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    subject_type: Mapped[str | None] = mapped_column(String(80), index=True)
+    subject_id: Mapped[UUID | None] = mapped_column(GUID(), index=True)
+    owner_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    issuer: Mapped[str | None] = mapped_column(String(180), index=True)
+    reference_number: Mapped[str | None] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    renewal_status: Mapped[str] = mapped_column(String(40), default="not_required", nullable=False, index=True)
+    effective_on: Mapped[date | None] = mapped_column(Date, index=True)
+    expires_on: Mapped[date | None] = mapped_column(Date, index=True)
+    next_review_on: Mapped[date | None] = mapped_column(Date, index=True)
+    retention_until: Mapped[date | None] = mapped_column(Date, index=True)
+    auto_renewal_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    storage_url: Mapped[str | None] = mapped_column(String(500))
+    checksum: Mapped[str | None] = mapped_column(String(128), index=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    confidentiality: Mapped[str] = mapped_column(String(40), default="internal", nullable=False, index=True)
+    tags: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationComplianceDocumentVersion(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_compliance_document_versions"
+    __table_args__ = (UniqueConstraint("document_id", "version_number"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    document_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_compliance_documents.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    storage_url: Mapped[str | None] = mapped_column(String(500))
+    checksum: Mapped[str | None] = mapped_column(String(128), index=True)
+    filename: Mapped[str | None] = mapped_column(String(240))
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    change_summary: Mapped[str | None] = mapped_column(Text)
+    uploaded_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    verified_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="current", nullable=False, index=True)
+
+
 class Membership(IdMixin, TimestampMixin, Base):
     __tablename__ = "memberships"
     __table_args__ = (

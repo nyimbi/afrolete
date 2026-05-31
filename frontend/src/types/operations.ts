@@ -1124,6 +1124,62 @@ export type OrganizationRecoveryDrillRead = {
   notes: string | null;
 };
 
+export type OrganizationComplianceDocumentRead = {
+  id: UUID;
+  organization_id: UUID;
+  title: string;
+  category: string;
+  document_type: string;
+  subject_type: string | null;
+  subject_id: UUID | null;
+  owner_person_id: UUID | null;
+  issuer: string | null;
+  reference_number: string | null;
+  status: string;
+  renewal_status: string;
+  effective_on: string | null;
+  expires_on: string | null;
+  next_review_on: string | null;
+  retention_until: string | null;
+  auto_renewal_enabled: boolean;
+  storage_url: string | null;
+  checksum: string | null;
+  current_version: number;
+  confidentiality: string;
+  tags: string | null;
+  notes: string | null;
+  version_count: number;
+  days_until_expiry: number | null;
+};
+
+export type OrganizationComplianceDocumentVersionRead = {
+  id: UUID;
+  organization_id: UUID;
+  document_id: UUID;
+  version_number: number;
+  storage_url: string | null;
+  checksum: string | null;
+  filename: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  change_summary: string | null;
+  uploaded_by_person_id: UUID | null;
+  verified_by_person_id: UUID | null;
+  verified_at: string | null;
+  status: string;
+};
+
+export type OrganizationComplianceDocumentSummaryRead = {
+  organization_id: UUID;
+  total_documents: number;
+  verified_documents: number;
+  expired_documents: number;
+  expiring_soon_documents: number;
+  auto_renewal_documents: number;
+  category_counts: Record<string, number>;
+  renewal_status_counts: Record<string, number>;
+};
+
 export type VolunteerProfileRead = {
   id: UUID;
   organization_id: UUID;

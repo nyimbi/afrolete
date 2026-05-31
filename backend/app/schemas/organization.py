@@ -1009,6 +1009,71 @@ class OrganizationRecoveryDrillRead(OrganizationRecoveryDrillCreate):
     recovery_plan_id: UUID
 
 
+class OrganizationComplianceDocumentCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=240)
+    category: str = Field(
+        default="legal_regulatory",
+        pattern="^(legal_regulatory|health_safety|personnel|player_student|property_facilities|financial|other)$",
+    )
+    document_type: str = Field(min_length=2, max_length=120)
+    subject_type: str | None = Field(default=None, max_length=80)
+    subject_id: UUID | None = None
+    owner_person_id: UUID | None = None
+    issuer: str | None = Field(default=None, max_length=180)
+    reference_number: str | None = Field(default=None, max_length=180)
+    status: str = Field(default="draft", pattern="^(draft|pending_review|verified|expired|archived|rejected)$")
+    renewal_status: str = Field(default="not_required", pattern="^(not_required|not_started|in_progress|submitted|renewed|blocked)$")
+    effective_on: date | None = None
+    expires_on: date | None = None
+    next_review_on: date | None = None
+    retention_until: date | None = None
+    auto_renewal_enabled: bool = False
+    storage_url: str | None = Field(default=None, max_length=500)
+    checksum: str | None = Field(default=None, max_length=128)
+    confidentiality: str = Field(default="internal", pattern="^(public|internal|restricted|confidential)$")
+    tags: str | None = Field(default=None, max_length=2000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationComplianceDocumentRead(OrganizationComplianceDocumentCreate):
+    id: UUID
+    organization_id: UUID
+    current_version: int
+    version_count: int
+    days_until_expiry: int | None
+
+
+class OrganizationComplianceDocumentVersionCreate(BaseModel):
+    storage_url: str | None = Field(default=None, max_length=500)
+    checksum: str | None = Field(default=None, max_length=128)
+    filename: str | None = Field(default=None, max_length=240)
+    content_type: str | None = Field(default=None, max_length=120)
+    size_bytes: int | None = Field(default=None, ge=0)
+    change_summary: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="current", pattern="^(draft|current|superseded|rejected)$")
+
+
+class OrganizationComplianceDocumentVersionRead(OrganizationComplianceDocumentVersionCreate):
+    id: UUID
+    organization_id: UUID
+    document_id: UUID
+    version_number: int
+    uploaded_by_person_id: UUID | None
+    verified_by_person_id: UUID | None
+    verified_at: datetime | None
+
+
+class OrganizationComplianceDocumentSummaryRead(BaseModel):
+    organization_id: UUID
+    total_documents: int
+    verified_documents: int
+    expired_documents: int
+    expiring_soon_documents: int
+    auto_renewal_documents: int
+    category_counts: dict[str, int]
+    renewal_status_counts: dict[str, int]
+
+
 class MemberAdd(BaseModel):
     subject_type: MemberSubjectType = MemberSubjectType.PERSON
     subject_id: UUID | None = None

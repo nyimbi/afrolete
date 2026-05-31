@@ -351,6 +351,9 @@ import type {
   OrganizationAwardProgramRead,
   OrganizationAwardRecipientRead,
   OrganizationAwardVoteRead,
+  OrganizationComplianceDocumentRead,
+  OrganizationComplianceDocumentSummaryRead,
+  OrganizationComplianceDocumentVersionRead,
   OrganizationDataMigrationProjectRead,
   OrganizationDataMigrationRunRead,
   OrganizationGroupMembershipRead,
@@ -1851,6 +1854,9 @@ export default function HomePage() {
   const [dataMigrationRuns, setDataMigrationRuns] = useState<OrganizationDataMigrationRunRead[]>([]);
   const [recoveryPlans, setRecoveryPlans] = useState<OrganizationRecoveryPlanRead[]>([]);
   const [recoveryDrills, setRecoveryDrills] = useState<OrganizationRecoveryDrillRead[]>([]);
+  const [complianceDocuments, setComplianceDocuments] = useState<OrganizationComplianceDocumentRead[]>([]);
+  const [complianceDocumentVersions, setComplianceDocumentVersions] = useState<OrganizationComplianceDocumentVersionRead[]>([]);
+  const [complianceDocumentSummary, setComplianceDocumentSummary] = useState<OrganizationComplianceDocumentSummaryRead | null>(null);
   const [events, setEvents] = useState<EventRead[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [attendancePolicy, setAttendancePolicy] = useState<EventAttendancePolicyRead | null>(null);
@@ -2482,6 +2488,7 @@ export default function HomePage() {
   const [selectedMemberSubscriptionId, setSelectedMemberSubscriptionId] = useState("");
   const [selectedDataMigrationProjectId, setSelectedDataMigrationProjectId] = useState("");
   const [selectedRecoveryPlanId, setSelectedRecoveryPlanId] = useState("");
+  const [selectedComplianceDocumentId, setSelectedComplianceDocumentId] = useState("");
   const [emergencyAlert, setEmergencyAlert] = useState<EmergencyActivationAlertRead | null>(null);
   const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
   const [infrastructureStatus, setInfrastructureStatus] = useState<InfrastructureStatus | null>(null);
@@ -2657,6 +2664,34 @@ export default function HomePage() {
     result_summary: "Tenant restored into isolated rehearsal environment.",
     action_items: "Automate quarterly evidence collection.",
     evidence_url: "https://example.test/evidence/recovery-drill"
+  });
+  const [complianceDocumentForm, setComplianceDocumentForm] = useState({
+    title: "Public liability insurance",
+    category: "legal_regulatory",
+    document_type: "insurance_certificate",
+    issuer: "ABC Insurance",
+    reference_number: "PLI-2026-001",
+    status: "verified",
+    renewal_status: "in_progress",
+    effective_on: "2026-01-01",
+    expires_on: "2026-06-30",
+    next_review_on: "2026-06-01",
+    retention_until: "2033-01-01",
+    auto_renewal_enabled: true,
+    storage_url: "local://compliance/public-liability-v1.pdf",
+    checksum: "sha256:insurance-v1",
+    confidentiality: "restricted",
+    tags: "insurance,facility,event",
+    notes: "Required for matchday operations and facility hire."
+  });
+  const [complianceDocumentVersionForm, setComplianceDocumentVersionForm] = useState({
+    storage_url: "local://compliance/public-liability-v2.pdf",
+    checksum: "sha256:insurance-v2",
+    filename: "public-liability-v2.pdf",
+    content_type: "application/pdf",
+    size_bytes: 2048,
+    change_summary: "Renewal quote and updated coverage schedule added.",
+    status: "current"
   });
   const [athleteForm, setAthleteForm] = useState({
     display_name: "Amani Otieno",
@@ -4128,6 +4163,26 @@ export default function HomePage() {
       { identity }
     );
     setRecoveryDrills(data);
+  }, [identity]);
+
+  const loadComplianceDocuments = useCallback(async (organizationId: string) => {
+    const [documents, summary] = await Promise.all([
+      apiRequest<OrganizationComplianceDocumentRead[]>(`/organizations/${organizationId}/compliance-documents`, { identity }),
+      apiRequest<OrganizationComplianceDocumentSummaryRead>(`/organizations/${organizationId}/compliance-documents/summary`, { identity })
+    ]);
+    setComplianceDocuments(documents);
+    setComplianceDocumentSummary(summary);
+    setSelectedComplianceDocumentId((current) =>
+      documents.some((document) => document.id === current) ? current : documents[0]?.id ?? ""
+    );
+  }, [identity]);
+
+  const loadComplianceDocumentVersions = useCallback(async (documentId: string) => {
+    const data = await apiRequest<OrganizationComplianceDocumentVersionRead[]>(
+      `/organizations/compliance-documents/${documentId}/versions`,
+      { identity }
+    );
+    setComplianceDocumentVersions(data);
   }, [identity]);
 
   const loadRegistrationInquiries = useCallback(
@@ -5660,6 +5715,10 @@ export default function HomePage() {
       setRecoveryDrills([]);
       setSelectedDataMigrationProjectId("");
       setSelectedRecoveryPlanId("");
+      setComplianceDocuments([]);
+      setComplianceDocumentVersions([]);
+      setComplianceDocumentSummary(null);
+      setSelectedComplianceDocumentId("");
       setEvents([]);
       setWeatherAssessments([]);
       setWeatherAlert(null);
@@ -6077,6 +6136,7 @@ export default function HomePage() {
       await loadAwardPrograms(selectedOrganizationId);
       await loadMemberDues(selectedOrganizationId);
       await loadMigrationAndRecovery(selectedOrganizationId);
+      await loadComplianceDocuments(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
       await loadSafeguardingIncidents(selectedOrganizationId);
@@ -6114,6 +6174,7 @@ export default function HomePage() {
     loadAwardPrograms,
     loadMemberDues,
     loadMigrationAndRecovery,
+    loadComplianceDocuments,
     loadRegistrationInquiries,
     loadEvents,
     loadSafeguardingIncidents,
@@ -6209,6 +6270,18 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedRecoveryPlanId, loadRecoveryDrills, runAction]);
+
+  useEffect(() => {
+    if (!selectedComplianceDocumentId) {
+      setComplianceDocumentVersions([]);
+      return;
+    }
+    runAction(
+      "load-compliance-document-versions",
+      () => loadComplianceDocumentVersions(selectedComplianceDocumentId),
+      () => undefined
+    );
+  }, [selectedComplianceDocumentId, loadComplianceDocumentVersions, runAction]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -6967,6 +7040,58 @@ export default function HomePage() {
           void loadMigrationAndRecovery(selectedOrganizationId);
         }
         addLog(`${drill.drill_type.replaceAll("_", " ")} ${drill.status}`, "good");
+      }
+    );
+  };
+
+  const createComplianceDocument = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before registering a compliance document", "bad");
+      return;
+    }
+    runAction(
+      "create-compliance-document",
+      () =>
+        apiRequest<OrganizationComplianceDocumentRead>(
+          `/organizations/${selectedOrganizationId}/compliance-documents`,
+          {
+            method: "POST",
+            identity,
+            body: complianceDocumentForm
+          }
+        ),
+      (document) => {
+        setComplianceDocuments((current) => [document, ...current.filter((item) => item.id !== document.id)]);
+        setSelectedComplianceDocumentId(document.id);
+        void loadComplianceDocuments(selectedOrganizationId);
+        addLog(`${document.title} compliance document registered`, "good");
+      }
+    );
+  };
+
+  const createComplianceDocumentVersion = () => {
+    const documentId = selectedComplianceDocumentId || complianceDocuments[0]?.id;
+    if (!documentId) {
+      addLog("Create or select a compliance document first", "bad");
+      return;
+    }
+    runAction(
+      "create-compliance-document-version",
+      () =>
+        apiRequest<OrganizationComplianceDocumentVersionRead>(
+          `/organizations/compliance-documents/${documentId}/versions`,
+          {
+            method: "POST",
+            identity,
+            body: complianceDocumentVersionForm
+          }
+        ),
+      (version) => {
+        setComplianceDocumentVersions((current) => [version, ...current.filter((item) => item.id !== version.id)]);
+        if (selectedOrganizationId) {
+          void loadComplianceDocuments(selectedOrganizationId);
+        }
+        addLog(`Compliance document v${version.version_number} recorded`, "good");
       }
     );
   };
@@ -21684,6 +21809,157 @@ export default function HomePage() {
                     <strong>{shortcut.phrase}</strong>
                     <span>{shortcut.action_sequence.join(" -> ") || shortcut.intent.replaceAll("_", " ")}</span>
                     <small>{shortcut.trained_sample_count} sample(s) · sensitivity {Math.round(shortcut.sensitivity * 100)}%</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Compliance documents</p>
+                <h2>Renewals and versions</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createComplianceDocument} disabled={busyAction !== null || !selectedOrganizationId}>Register</button>
+                <button type="button" onClick={createComplianceDocumentVersion} disabled={busyAction !== null || !selectedOrganizationId || complianceDocuments.length === 0}>Version</button>
+              </div>
+            </div>
+            <div className="score-summary">
+              <strong>{complianceDocumentSummary?.expiring_soon_documents ?? 0}</strong>
+              <span>expiring soon</span>
+              <small>
+                {complianceDocumentSummary?.total_documents ?? 0} total · {complianceDocumentSummary?.verified_documents ?? 0} verified · {complianceDocumentSummary?.auto_renewal_documents ?? 0} auto-renewal
+              </small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Title
+                <input value={complianceDocumentForm.title} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, title: event.target.value })} />
+              </label>
+              <label>
+                Category
+                <select value={complianceDocumentForm.category} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, category: event.target.value })}>
+                  <option value="legal_regulatory">Legal and regulatory</option>
+                  <option value="health_safety">Health and safety</option>
+                  <option value="personnel">Personnel</option>
+                  <option value="player_student">Player or student</option>
+                  <option value="property_facilities">Property and facilities</option>
+                  <option value="financial">Financial</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Type
+                <input value={complianceDocumentForm.document_type} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, document_type: event.target.value })} />
+              </label>
+              <label>
+                Status
+                <select value={complianceDocumentForm.status} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, status: event.target.value })}>
+                  <option value="draft">Draft</option>
+                  <option value="pending_review">Pending review</option>
+                  <option value="verified">Verified</option>
+                  <option value="expired">Expired</option>
+                  <option value="archived">Archived</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </label>
+              <label>
+                Renewal
+                <select value={complianceDocumentForm.renewal_status} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, renewal_status: event.target.value })}>
+                  <option value="not_required">Not required</option>
+                  <option value="not_started">Not started</option>
+                  <option value="in_progress">In progress</option>
+                  <option value="submitted">Submitted</option>
+                  <option value="renewed">Renewed</option>
+                  <option value="blocked">Blocked</option>
+                </select>
+              </label>
+              <label>
+                Confidentiality
+                <select value={complianceDocumentForm.confidentiality} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, confidentiality: event.target.value })}>
+                  <option value="public">Public</option>
+                  <option value="internal">Internal</option>
+                  <option value="restricted">Restricted</option>
+                  <option value="confidential">Confidential</option>
+                </select>
+              </label>
+              <label>
+                Issuer
+                <input value={complianceDocumentForm.issuer} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, issuer: event.target.value })} />
+              </label>
+              <label>
+                Reference
+                <input value={complianceDocumentForm.reference_number} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, reference_number: event.target.value })} />
+              </label>
+              <label>
+                Effective
+                <input type="date" value={complianceDocumentForm.effective_on} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, effective_on: event.target.value })} />
+              </label>
+              <label>
+                Expires
+                <input type="date" value={complianceDocumentForm.expires_on} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, expires_on: event.target.value })} />
+              </label>
+              <label>
+                Next review
+                <input type="date" value={complianceDocumentForm.next_review_on} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, next_review_on: event.target.value })} />
+              </label>
+              <label>
+                Storage URL
+                <input value={complianceDocumentForm.storage_url} onChange={(event) => setComplianceDocumentForm({ ...complianceDocumentForm, storage_url: event.target.value })} />
+              </label>
+              <label>
+                Version file
+                <input value={complianceDocumentVersionForm.filename} onChange={(event) => setComplianceDocumentVersionForm({ ...complianceDocumentVersionForm, filename: event.target.value })} />
+              </label>
+              <label>
+                Version status
+                <select value={complianceDocumentVersionForm.status} onChange={(event) => setComplianceDocumentVersionForm({ ...complianceDocumentVersionForm, status: event.target.value })}>
+                  <option value="draft">Draft</option>
+                  <option value="current">Current</option>
+                  <option value="superseded">Superseded</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </label>
+              <label>
+                Version storage
+                <input value={complianceDocumentVersionForm.storage_url} onChange={(event) => setComplianceDocumentVersionForm({ ...complianceDocumentVersionForm, storage_url: event.target.value })} />
+              </label>
+              <label>
+                Version checksum
+                <input value={complianceDocumentVersionForm.checksum} onChange={(event) => setComplianceDocumentVersionForm({ ...complianceDocumentVersionForm, checksum: event.target.value })} />
+              </label>
+            </div>
+            <div className="mini-grid">
+              {Object.entries(complianceDocumentSummary?.category_counts ?? {}).slice(0, 4).map(([category, count]) => (
+                <article key={category} className="mini-card">
+                  <span className="muted">{category.replaceAll("_", " ")}</span>
+                  <strong>{count}</strong>
+                  <p>{complianceDocumentSummary?.renewal_status_counts.in_progress ?? 0} renewal(s) in progress.</p>
+                </article>
+              ))}
+            </div>
+            <div className="task-list">
+              {complianceDocuments.slice(0, 4).map((complianceDocument) => (
+                <article key={complianceDocument.id} className={`task-card ${complianceDocument.id === selectedComplianceDocumentId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{complianceDocument.title}</strong>
+                    <span>{complianceDocument.category.replaceAll("_", " ")} · {complianceDocument.status.replaceAll("_", " ")} · {complianceDocument.renewal_status.replaceAll("_", " ")}</span>
+                    <small>
+                      v{complianceDocument.current_version} · {complianceDocument.version_count} version(s) · {complianceDocument.days_until_expiry === null ? "no expiry" : `${complianceDocument.days_until_expiry} day(s) to expiry`}
+                    </small>
+                    {complianceDocument.issuer ? <small>{complianceDocument.issuer} · {complianceDocument.reference_number ?? "unreferenced"}</small> : null}
+                  </div>
+                  <button type="button" onClick={() => setSelectedComplianceDocumentId(complianceDocument.id)}>Select</button>
+                </article>
+              ))}
+              {complianceDocumentVersions.slice(0, 3).map((version) => (
+                <article key={version.id} className="task-card">
+                  <div>
+                    <strong>Version {version.version_number} · {version.status}</strong>
+                    <span>{version.filename ?? version.storage_url} · {version.content_type ?? "document"}</span>
+                    <small>{version.checksum ?? "checksum pending"} · {version.change_summary ?? "No change summary recorded"}</small>
                   </div>
                 </article>
               ))}

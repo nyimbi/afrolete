@@ -435,6 +435,98 @@ def test_organization_data_migration_and_recovery_crud(client, identity_headers)
     assert drills_response.json()[0]["rto_minutes_observed"] == 180
 
 
+def test_organization_compliance_document_register_versions_and_summary(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Document Ready Club",
+            "organization_type": "club",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+
+    document_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/compliance-documents",
+        headers=identity_headers,
+        json={
+            "title": "Public liability insurance",
+            "category": "legal_regulatory",
+            "document_type": "insurance_certificate",
+            "issuer": "ABC Insurance",
+            "reference_number": "PLI-2026-001",
+            "status": "verified",
+            "renewal_status": "in_progress",
+            "effective_on": "2026-01-01",
+            "expires_on": "2026-06-30",
+            "next_review_on": "2026-06-01",
+            "retention_until": "2033-01-01",
+            "auto_renewal_enabled": True,
+            "storage_url": "local://compliance/public-liability-v1.pdf",
+            "checksum": "sha256:insurance-v1",
+            "confidentiality": "restricted",
+            "tags": "insurance,facility,event",
+            "notes": "Required for matchday operations and facility hire.",
+        },
+    )
+    assert document_response.status_code == 201
+    document = document_response.json()
+    assert document["version_count"] == 1
+    assert document["current_version"] == 1
+    assert document["auto_renewal_enabled"] is True
+    assert document["days_until_expiry"] is not None
+
+    version_response = client.post(
+        f"/api/v1/organizations/compliance-documents/{document['id']}/versions",
+        headers=identity_headers,
+        json={
+            "storage_url": "local://compliance/public-liability-v2.pdf",
+            "checksum": "sha256:insurance-v2",
+            "filename": "public-liability-v2.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 2048,
+            "change_summary": "Renewal quote and updated coverage schedule added.",
+            "status": "current",
+        },
+    )
+    assert version_response.status_code == 201
+    version = version_response.json()
+    assert version["version_number"] == 2
+    assert version["status"] == "current"
+
+    versions_response = client.get(
+        f"/api/v1/organizations/compliance-documents/{document['id']}/versions",
+        headers=identity_headers,
+    )
+    assert versions_response.status_code == 200
+    versions = versions_response.json()
+    assert [item["version_number"] for item in versions] == [2, 1]
+    assert versions[1]["status"] == "superseded"
+
+    documents_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/compliance-documents",
+        headers=identity_headers,
+    )
+    assert documents_response.status_code == 200
+    listed = documents_response.json()[0]
+    assert listed["current_version"] == 2
+    assert listed["checksum"] == "sha256:insurance-v2"
+    assert listed["version_count"] == 2
+
+    summary_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/compliance-documents/summary",
+        headers=identity_headers,
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["total_documents"] == 1
+    assert summary["verified_documents"] == 1
+    assert summary["auto_renewal_documents"] == 1
+    assert summary["category_counts"]["legal_regulatory"] == 1
+    assert summary["renewal_status_counts"]["in_progress"] == 1
+
+
 def test_organization_awards_nomination_voting_and_certificate_crud(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",

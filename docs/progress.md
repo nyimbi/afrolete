@@ -1227,6 +1227,7 @@ athlete-development platform:
 | 542 - Organization awards, voting, and certificates | Complete | Focused organization awards test; backend lint; frontend typecheck; Alembic heads/upgrade; diff check | Clubs, schools, academies, and associations can now run organization-wide awards programs with seasons, ceremony details, categories, eligibility criteria, nominations for people/teams/organizations, weighted voting, recipient selection, certificate numbers, citations, and console controls for Program, Category, Nominate, Vote, and Award workflows. |
 | 543 - Club-paid hosting billing semantics | Complete | Focused billing/member-dues tests; backend lint; frontend typecheck; SDK manifest check; diff check | AfroLete hosting billing is now consistently described as tenant-paid by clubs, schools, associations, and organizations across API schema descriptions, checkout copy, console labels, developer catalogs, SDK examples, and project documentation, while member subscriptions remain club-managed dues/receivables collected through M-Pesa/manual/provider rails. |
 | 544 - Data migration and recovery operations | Complete | Focused migration/DR CRUD test; backend lint; frontend typecheck; Alembic heads/upgrade | Tenant organizations can now open data-migration projects for legacy systems, record validation/import/reconciliation/rollback runs with row counts, checksums, artifacts, imported/error counters, and status rollups, and manage recovery plans plus restore/failover drills with RPO/RTO objectives, observed rehearsal metrics, evidence links, and operations-console controls. |
+| 545 - Compliance document register | Complete | Focused compliance document lifecycle test; backend lint; frontend typecheck; Alembic heads/upgrade; diff check | Clubs, schools, academies, and associations can now maintain a tenant-scoped compliance document register covering legal/regulatory, health/safety, personnel, player/student, property/facility, financial, and other records with expiry/renewal status, confidentiality, storage references, checksums, version history, current-version replacement, audit summary counts, and operations-console controls. |
 
 ## Capability Coverage
 
@@ -1277,6 +1278,7 @@ Latest slices:
 - Organization awards now cover seasonal award programs, categories, nominations, weighted votes, recipients, and certificate numbers for people, teams, or organizations.
 - AfroLete hosting billing is now explicitly club/tenant-paid in API descriptions, checkout pages, console labels, developer catalogs, SDK examples, and README/progress docs; club/member dues remain a separate receivables workflow with M-Pesa/manual/provider payment tracking.
 - Data migration and disaster recovery operations now have organization-scoped projects, runs, recovery plans, restore/failover drills, RPO/RTO evidence, imported/error counters, and console workflows.
+- Tenant compliance document management now covers regulated document categories, expiry/renewal tracking, confidentiality, storage/checksum metadata, version replacement, audit-ready summary counts, and console workflows for registration and new versions.
 
 ## Next Actions
 
