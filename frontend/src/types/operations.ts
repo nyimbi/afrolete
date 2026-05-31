@@ -1170,6 +1170,19 @@ export type MemberSubscriptionStatementRead = {
   lines: MemberSubscriptionStatementLineRead[];
 };
 
+export type MemberSubscriptionStatementArtifactRead = {
+  subscription_id: UUID;
+  organization_id: UUID;
+  statement_reference: string;
+  generated_at: string;
+  artifact_format: string;
+  content_type: string;
+  download_filename: string;
+  content: string;
+  checksum: string;
+  size_bytes: number;
+};
+
 export type MemberSubscriptionHostedCheckoutRead = {
   subscription_id: UUID;
   organization_id: UUID;

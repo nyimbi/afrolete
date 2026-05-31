@@ -96,7 +96,8 @@ summaries for collections decisions. Approved waivers reduce open member-dues
 balances without recording fake cash and retain waiver reason, timestamp, and
 approving person on the charge. Member dues statements assemble charges,
 successful payments, and waivers into shareable running-balance account
-evidence; tune with
+evidence, and can be exported as text or CSV artifacts with checksum and
+download filename metadata; tune with
 `--member-dues-charge-on` and `--dry-run-member-dues-charges`. The member dues
 reminder lane sends repeat-suppressed reminders for due or overdue
 club-managed subscription balances, marks accounts past due after the plan

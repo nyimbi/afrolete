@@ -93,6 +93,7 @@ from app.schemas.organization import (
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionStatementLineRead,
+    MemberSubscriptionStatementArtifactRead,
     MemberSubscriptionStatementRead,
     MemberSubscriptionReminderItemRead,
     MemberSubscriptionReminderRunCreate,
@@ -5105,6 +5106,106 @@ async def get_member_subscription_statement(
         line_count=len(lines),
         lines=lines,
     )
+
+
+async def export_member_subscription_statement_artifact(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    authz: AuthorizationService,
+    *,
+    artifact_format: str = "txt",
+    period_start: date | None = None,
+    period_end: date | None = None,
+) -> MemberSubscriptionStatementArtifactRead:
+    statement = await get_member_subscription_statement(
+        db,
+        identity,
+        subscription_id,
+        authz,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    normalized_format = artifact_format.lower()
+    if normalized_format not in {"txt", "csv"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported statement artifact format")
+    content = (
+        render_member_subscription_statement_csv(statement)
+        if normalized_format == "csv"
+        else render_member_subscription_statement_text(statement)
+    )
+    content_bytes = content.encode()
+    subject_slug = slugify(statement.subject_label or statement.statement_reference)
+    content_type = "text/csv; charset=utf-8" if normalized_format == "csv" else "text/plain; charset=utf-8"
+    return MemberSubscriptionStatementArtifactRead(
+        subscription_id=statement.subscription_id,
+        organization_id=statement.organization_id,
+        statement_reference=statement.statement_reference,
+        generated_at=statement.generated_at,
+        artifact_format=normalized_format,
+        content_type=content_type,
+        download_filename=f"{statement.statement_reference.lower()}-{subject_slug}.{normalized_format}",
+        content=content,
+        checksum=sha256(content_bytes).hexdigest(),
+        size_bytes=len(content_bytes),
+    )
+
+
+def render_member_subscription_statement_text(statement: MemberSubscriptionStatementRead) -> str:
+    lines = [
+        "AfroLete Member Dues Statement",
+        f"Reference: {statement.statement_reference}",
+        f"Member: {statement.subject_label or statement.subscription_id}",
+        f"Plan: {statement.plan_name}",
+        f"Generated: {statement.generated_at.isoformat()}",
+        f"Period: {statement.period_start or 'all'} to {statement.period_end or 'all'}",
+        "",
+        f"Total charged: {statement.total_charged} {statement.currency}",
+        f"Total paid: {statement.total_paid} {statement.currency}",
+        f"Total waived: {statement.total_waived} {statement.currency}",
+        f"Closing balance: {statement.closing_balance} {statement.currency}",
+        "",
+        "Date | Type | Description | Debit | Credit | Balance",
+    ]
+    for line in statement.lines:
+        lines.append(
+            " | ".join(
+                [
+                    line.entry_date.isoformat(),
+                    line.entry_type,
+                    line.description.replace("\n", " "),
+                    f"{line.debit_amount} {line.currency}",
+                    f"{line.credit_amount} {line.currency}",
+                    f"{line.balance_amount} {line.currency}",
+                ]
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def render_member_subscription_statement_csv(statement: MemberSubscriptionStatementRead) -> str:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["statement_reference", statement.statement_reference])
+    writer.writerow(["member", statement.subject_label or str(statement.subscription_id)])
+    writer.writerow(["plan", statement.plan_name])
+    writer.writerow(["generated_at", statement.generated_at.isoformat()])
+    writer.writerow(["currency", statement.currency])
+    writer.writerow([])
+    writer.writerow(["entry_date", "entry_type", "description", "debit_amount", "credit_amount", "balance_amount", "currency"])
+    for line in statement.lines:
+        writer.writerow(
+            [
+                line.entry_date.isoformat(),
+                line.entry_type,
+                line.description,
+                line.debit_amount,
+                line.credit_amount,
+                line.balance_amount,
+                line.currency,
+            ]
+        )
+    return output.getvalue()
 
 
 async def record_member_subscription_payment(

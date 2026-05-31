@@ -376,6 +376,7 @@ import type {
   MemberSubscriptionRead,
   MemberSubscriptionReceivablesSummaryRead,
   MemberSubscriptionReminderRunRead,
+  MemberSubscriptionStatementArtifactRead,
   MemberSubscriptionStatementRead,
   MetricCategory,
   MetricDefinitionRead,
@@ -7404,6 +7405,26 @@ export default function HomePage() {
       (statement) => {
         setMemberDuesStatement(statement);
         addLog(`Statement ${statement.statement_reference} ready`, "good");
+      }
+    );
+  };
+
+  const downloadMemberDuesStatement = (artifactFormat: "txt" | "csv" = "txt") => {
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!subscriptionId) {
+      addLog("Select a member dues account before downloading a statement", "bad");
+      return;
+    }
+    runAction(
+      `download-member-dues-statement-${artifactFormat}`,
+      () =>
+        apiRequest<MemberSubscriptionStatementArtifactRead>(
+          `/organizations/member-subscriptions/${subscriptionId}/statement-artifact?artifact_format=${artifactFormat}`,
+          { identity }
+        ),
+      (artifact) => {
+        downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
+        addLog(`Downloaded ${artifact.statement_reference} ${artifact.artifact_format.toUpperCase()} statement`, "good");
       }
     );
   };
@@ -24462,6 +24483,7 @@ export default function HomePage() {
               <button type="button" onClick={runMemberDuesCharges} disabled={busyAction !== null}>Bill cycle</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
               <button type="button" onClick={loadMemberDuesStatement} disabled={busyAction !== null}>Statement</button>
+              <button type="button" onClick={() => downloadMemberDuesStatement("txt")} disabled={busyAction !== null}>Download</button>
               <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
               <button type="button" onClick={runMemberDuesReminders} disabled={busyAction !== null}>Remind due</button>
             </div>

@@ -33,6 +33,7 @@ from app.schemas.organization import (
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanRead,
     MemberSubscriptionRead,
+    MemberSubscriptionStatementArtifactRead,
     MemberSubscriptionStatementRead,
     MemberSubscriptionReminderRunCreate,
     MemberSubscriptionReminderRunRead,
@@ -146,6 +147,7 @@ from app.services.organizations import (
     create_member_subscription_checkout_link,
     create_member_subscription_plan,
     run_member_subscription_charge_generation,
+    export_member_subscription_statement_artifact,
     create_organization_group,
     create_organization_market_profile,
     create_organization_program,
@@ -2058,6 +2060,30 @@ async def get_member_subscription_statement_route(
         identity,
         subscription_id,
         authz,
+        period_start=period_start,
+        period_end=period_end,
+    )
+
+
+@router.get(
+    "/member-subscriptions/{subscription_id}/statement-artifact",
+    response_model=MemberSubscriptionStatementArtifactRead,
+)
+async def export_member_subscription_statement_artifact_route(
+    subscription_id: UUID,
+    artifact_format: str = Query(default="txt", pattern="^(txt|csv)$"),
+    period_start: date | None = Query(default=None),
+    period_end: date | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionStatementArtifactRead:
+    return await export_member_subscription_statement_artifact(
+        db,
+        identity,
+        subscription_id,
+        authz,
+        artifact_format=artifact_format,
         period_start=period_start,
         period_end=period_end,
     )

@@ -434,6 +434,31 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert [line["entry_type"] for line in statement["lines"]].count("waiver") == 1
     assert statement["lines"][-1]["balance_amount"] == "0.00"
 
+    statement_artifact_response = client.get(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/statement-artifact",
+        headers=identity_headers,
+        params={"artifact_format": "txt"},
+    )
+    assert statement_artifact_response.status_code == 200
+    statement_artifact = statement_artifact_response.json()
+    assert statement_artifact["statement_reference"] == statement["statement_reference"]
+    assert statement_artifact["content_type"] == "text/plain; charset=utf-8"
+    assert statement_artifact["download_filename"].endswith(".txt")
+    assert statement_artifact["checksum"]
+    assert statement_artifact["size_bytes"] == len(statement_artifact["content"].encode())
+    assert "AfroLete Member Dues Statement" in statement_artifact["content"]
+    assert "Closing balance: 0.00 KES" in statement_artifact["content"]
+
+    statement_csv_response = client.get(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/statement-artifact",
+        headers=identity_headers,
+        params={"artifact_format": "csv"},
+    )
+    assert statement_csv_response.status_code == 200
+    statement_csv = statement_csv_response.json()
+    assert statement_csv["content_type"] == "text/csv; charset=utf-8"
+    assert "entry_date,entry_type,description,debit_amount,credit_amount,balance_amount,currency" in statement_csv["content"]
+
     billing_summary_response = client.get(
         f"/api/v1/billing/summary?organization_id={organization['id']}",
         headers=identity_headers,

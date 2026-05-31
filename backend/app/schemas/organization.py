@@ -1271,6 +1271,19 @@ class MemberSubscriptionStatementRead(BaseModel):
     lines: list[MemberSubscriptionStatementLineRead]
 
 
+class MemberSubscriptionStatementArtifactRead(BaseModel):
+    subscription_id: UUID
+    organization_id: UUID
+    statement_reference: str
+    generated_at: datetime
+    artifact_format: str
+    content_type: str
+    download_filename: str
+    content: str
+    checksum: str
+    size_bytes: int
+
+
 class MemberSubscriptionReceivablesSummaryRead(BaseModel):
     organization_id: UUID
     as_of: date
