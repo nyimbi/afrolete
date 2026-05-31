@@ -3584,12 +3584,15 @@ async def add_member(
             person = Person(
                 display_name=payload.display_name or payload.email or "Member",
                 primary_email=payload.email,
+                date_of_birth=payload.date_of_birth,
                 country_code=payload.country_code.upper() if payload.country_code else None,
             )
             db.add(person)
             await db.flush()
         elif payload.country_code and person.country_code is None:
             person.country_code = payload.country_code.upper()
+        if payload.date_of_birth is not None and person.date_of_birth is None:
+            person.date_of_birth = payload.date_of_birth
         subject_id = person.id
     else:
         if subject_id is None:

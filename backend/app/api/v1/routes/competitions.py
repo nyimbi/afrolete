@@ -24,6 +24,12 @@ from app.schemas.competition import (
     CompetitionParticipantCreate,
     CompetitionParticipantRead,
     CompetitionRead,
+    CompetitionRegionalRuleCreate,
+    CompetitionRegionalRuleEvaluationCreate,
+    CompetitionRegionalRuleEvaluationRead,
+    CompetitionRegionalRuleProfileCreate,
+    CompetitionRegionalRuleProfileRead,
+    CompetitionRegionalRuleRead,
     CompetitionScheduleOptimizationRead,
     CompetitionScheduleOptimizeCreate,
     CompetitionStandingRead,
@@ -53,6 +59,9 @@ from app.services.competitions import (
     create_competition,
     create_competition_fixture,
     create_competition_ticketing,
+    create_regional_rule_profile,
+    add_regional_rule,
+    evaluate_regional_rules,
     generate_competition_fixtures,
     issue_competition_eligibility_certificate,
     list_athlete_transfer_records,
@@ -61,6 +70,7 @@ from app.services.competitions import (
     list_competition_participants,
     list_competition_ticketing,
     list_competitions,
+    list_regional_rule_profiles,
     list_fixture_match_events,
     list_my_official_assignments,
     optimize_competition_schedule,
@@ -269,6 +279,64 @@ async def list_competition_eligibility_certificates_route(
         CompetitionEligibilityCertificateRead(**row)
         for row in await list_competition_eligibility_certificates(db, identity, competition_id, authz)
     ]
+
+
+@router.post(
+    "/regional-rule-profiles",
+    response_model=CompetitionRegionalRuleProfileRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_regional_rule_profile_route(
+    payload: CompetitionRegionalRuleProfileCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionRegionalRuleProfileRead:
+    return await create_regional_rule_profile(db, identity, payload, authz)
+
+
+@router.get("/regional-rule-profiles", response_model=list[CompetitionRegionalRuleProfileRead])
+async def list_regional_rule_profiles_route(
+    organization_id: UUID = Query(),
+    competition_id: UUID | None = Query(default=None),
+    country_code: str | None = Query(default=None, min_length=2, max_length=2),
+    db: AsyncSession = Depends(get_db),
+) -> list[CompetitionRegionalRuleProfileRead]:
+    return await list_regional_rule_profiles(
+        db,
+        organization_id,
+        competition_id=competition_id,
+        country_code=country_code,
+    )
+
+
+@router.post(
+    "/regional-rule-profiles/{profile_id}/rules",
+    response_model=CompetitionRegionalRuleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_regional_rule_route(
+    profile_id: UUID,
+    payload: CompetitionRegionalRuleCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionRegionalRuleRead:
+    return await add_regional_rule(db, identity, profile_id, payload, authz)
+
+
+@router.post(
+    "/{competition_id}/regional-rules/evaluate",
+    response_model=CompetitionRegionalRuleEvaluationRead,
+)
+async def evaluate_regional_rules_route(
+    competition_id: UUID,
+    payload: CompetitionRegionalRuleEvaluationCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CompetitionRegionalRuleEvaluationRead:
+    return await evaluate_regional_rules(db, identity, competition_id, payload, authz)
 
 
 @router.post(

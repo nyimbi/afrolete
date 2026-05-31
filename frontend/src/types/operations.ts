@@ -9724,6 +9724,58 @@ export type CompetitionEligibilityCertificateRead = {
   checks: CompetitionEligibilityCheckRead[];
 };
 
+export type CompetitionRegionalRuleRead = {
+  id: UUID;
+  organization_id: UUID;
+  profile_id: UUID;
+  category: string;
+  rule_key: string;
+  rule_value: string;
+  applies_to: string;
+  severity: "info" | "warning" | "blocker" | string;
+  status: string;
+  notes: string | null;
+};
+
+export type CompetitionRegionalRuleProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  competition_id: UUID | null;
+  name: string;
+  country_code: string;
+  region_code: string | null;
+  governing_body: string | null;
+  sport: string;
+  age_group: string | null;
+  competition_format: string | null;
+  effective_from: string | null;
+  effective_until: string | null;
+  status: string;
+  min_age: number | null;
+  max_age: number | null;
+  roster_limit: number | null;
+  match_duration_minutes: number | null;
+  substitution_limit: number | null;
+  heat_policy: string | null;
+  eligibility_policy: string | null;
+  compliance_requirements: string | null;
+  source_url: string | null;
+  notes: string | null;
+  rule_count: number;
+  blocker_rule_count: number;
+  rules: CompetitionRegionalRuleRead[];
+};
+
+export type CompetitionRegionalRuleEvaluationRead = {
+  competition_id: UUID;
+  profile: CompetitionRegionalRuleProfileRead;
+  status: string;
+  blocker_count: number;
+  warning_count: number;
+  checks: CompetitionEligibilityCheckRead[];
+  summary: string;
+};
+
 export type CompetitionFixtureRead = {
   id: UUID;
   organization_id: UUID;

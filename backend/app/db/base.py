@@ -146,6 +146,8 @@ from app.models.competition import (  # noqa: F401,E402
     CompetitionEligibilityCertificate,
     CompetitionFixture,
     CompetitionParticipant,
+    CompetitionRegionalRule,
+    CompetitionRegionalRuleProfile,
     FixtureMatchEvent,
     FixtureOfficialAssignment,
 )

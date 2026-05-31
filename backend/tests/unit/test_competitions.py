@@ -11,13 +11,14 @@ def create_competition_team(client, identity_headers, organization_id, name):
     ).json()
 
 
-def add_competition_player(client, identity_headers, organization_id, team_id, name, email):
+def add_competition_player(client, identity_headers, organization_id, team_id, name, email, date_of_birth=None):
     member = client.post(
         f"/api/v1/organizations/{organization_id}/members",
         headers=identity_headers,
         json={
             "email": email,
             "display_name": name,
+            "date_of_birth": date_of_birth,
             "role": "athlete",
         },
     ).json()
@@ -508,6 +509,149 @@ def test_competition_eligibility_certificate_blocks_unregistered_team(client, id
     assert certificate["blocker_count"] == 1
     registration = next(check for check in certificate["checks"] if check["key"] == "team_registration")
     assert registration["status"] == "blocker"
+
+
+def test_regional_rule_profiles_evaluate_and_feed_eligibility(client, identity_headers) -> None:
+    organization, team, _, _ = create_competition_context(client, identity_headers)
+    _, roster = add_competition_player(
+        client,
+        identity_headers,
+        organization["id"],
+        team["id"],
+        "Regional Player",
+        "regional-player@example.com",
+        date_of_birth="2010-06-15",
+    )
+    competition = client.post(
+        "/api/v1/competitions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Nairobi U17 Regional League",
+            "sport": "football",
+            "competition_type": "league",
+            "format": "round_robin",
+            "season_label": "2026",
+            "starts_on": "2026-06-01",
+            "ends_on": "2026-08-31",
+        },
+    ).json()
+    client.post(
+        f"/api/v1/competitions/{competition['id']}/participants",
+        headers=identity_headers,
+        json={"team_id": team["id"], "seed": 1, "group_label": "A"},
+    )
+
+    profile_response = client.post(
+        "/api/v1/competitions/regional-rule-profiles",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "competition_id": competition["id"],
+            "name": "Kenya U17 Football Rules",
+            "country_code": "ke",
+            "region_code": "Nairobi",
+            "governing_body": "Football Kenya Federation",
+            "sport": "football",
+            "age_group": "U17",
+            "competition_format": "round_robin",
+            "effective_from": "2026-01-01",
+            "effective_until": "2026-12-31",
+            "min_age": 13,
+            "max_age": 17,
+            "roster_limit": 1,
+            "match_duration_minutes": 90,
+            "substitution_limit": 5,
+            "heat_policy": "Mandatory water breaks when WBGT exceeds 32C.",
+            "compliance_requirements": "FKF youth registration, first-aid cover, and concussion protocol evidence.",
+            "source_url": "https://example.org/fkf/u17-rules",
+            "rules": [
+                {
+                    "category": "weather",
+                    "rule_key": "heat_breaks_over_32c",
+                    "rule_value": "Additional water breaks are mandatory above 32C.",
+                    "applies_to": "fixture",
+                    "severity": "warning",
+                    "notes": "Confirm heat policy before kickoff.",
+                }
+            ],
+        },
+    )
+    assert profile_response.status_code == 201
+    profile = profile_response.json()
+    assert profile["country_code"] == "KE"
+    assert profile["rule_count"] == 1
+
+    evaluation = client.post(
+        f"/api/v1/competitions/{competition['id']}/regional-rules/evaluate",
+        headers=identity_headers,
+        json={
+            "profile_id": profile["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "team_id": team["id"],
+            "as_of": "2026-06-01",
+        },
+    )
+    assert evaluation.status_code == 200
+    evaluation_body = evaluation.json()
+    assert evaluation_body["status"] == "pass"
+    assert evaluation_body["warning_count"] >= 2
+    assert any(check["key"] == "regional_age_classification" for check in evaluation_body["checks"])
+
+    blocker_rule = client.post(
+        f"/api/v1/competitions/regional-rule-profiles/{profile['id']}/rules",
+        headers=identity_headers,
+        json={
+            "category": "eligibility",
+            "rule_key": "federation_id_required",
+            "rule_value": "Each player must have an FKF federation registration ID before matchday.",
+            "applies_to": "athlete",
+            "severity": "blocker",
+            "notes": "Registrar must verify the federation portal.",
+        },
+    )
+    assert blocker_rule.status_code == 201
+    assert blocker_rule.json()["severity"] == "blocker"
+
+    blocked_evaluation = client.post(
+        f"/api/v1/competitions/{competition['id']}/regional-rules/evaluate",
+        headers=identity_headers,
+        json={
+            "profile_id": profile["id"],
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "team_id": team["id"],
+            "as_of": "2026-06-01",
+        },
+    ).json()
+    assert blocked_evaluation["status"] == "blocked"
+    assert blocked_evaluation["blocker_count"] == 1
+
+    certificate = client.post(
+        f"/api/v1/competitions/{competition['id']}/eligibility-certificates",
+        headers=identity_headers,
+        json={
+            "athlete_profile_id": roster["athlete_profile_id"],
+            "team_id": team["id"],
+            "regional_rule_profile_id": profile["id"],
+            "require_active_roster": True,
+            "require_team_registration": True,
+            "require_transfer_clearance": False,
+            "require_medical_clearance": False,
+            "require_compliance_credential": False,
+            "academic_status": "eligible",
+            "citizenship_status": "verified",
+            "disciplinary_status": "clear",
+        },
+    )
+    assert certificate.status_code == 201
+    certificate_body = certificate.json()
+    assert certificate_body["status"] == "ineligible"
+    assert any(check["key"] == "regional_rule_federation_id_required" for check in certificate_body["checks"])
+
+    profiles = client.get(
+        f"/api/v1/competitions/regional-rule-profiles?organization_id={organization['id']}&competition_id={competition['id']}"
+    ).json()
+    assert profiles[0]["blocker_rule_count"] == 1
 
 
 def test_competition_knockout_advancement_ticketing_broadcast_and_schedule(

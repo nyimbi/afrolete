@@ -141,6 +141,61 @@ class CompetitionEligibilityCertificate(IdMixin, TimestampMixin, Base):
     checks_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class CompetitionRegionalRuleProfile(IdMixin, TimestampMixin, Base):
+    __tablename__ = "competition_regional_rule_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "country_code",
+            "region_code",
+            "sport",
+            "age_group",
+            "competition_format",
+            name="uq_competition_regional_rule_profiles_scope",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    competition_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("competitions.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False, index=True)
+    region_code: Mapped[str | None] = mapped_column(String(80), index=True)
+    governing_body: Mapped[str | None] = mapped_column(String(180), index=True)
+    sport: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    age_group: Mapped[str | None] = mapped_column(String(80), index=True)
+    competition_format: Mapped[str | None] = mapped_column(String(80), index=True)
+    effective_from: Mapped[date | None] = mapped_column(Date, index=True)
+    effective_until: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    min_age: Mapped[int | None] = mapped_column(Integer)
+    max_age: Mapped[int | None] = mapped_column(Integer)
+    roster_limit: Mapped[int | None] = mapped_column(Integer)
+    match_duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    substitution_limit: Mapped[int | None] = mapped_column(Integer)
+    heat_policy: Mapped[str | None] = mapped_column(Text)
+    eligibility_policy: Mapped[str | None] = mapped_column(Text)
+    compliance_requirements: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class CompetitionRegionalRule(IdMixin, TimestampMixin, Base):
+    __tablename__ = "competition_regional_rules"
+    __table_args__ = (UniqueConstraint("profile_id", "category", "rule_key"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), nullable=False, index=True)
+    profile_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("competition_regional_rule_profiles.id"), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    rule_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    rule_value: Mapped[str] = mapped_column(Text, nullable=False)
+    applies_to: Mapped[str] = mapped_column(String(80), default="competition", nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(40), default="warning", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class CompetitionFixture(IdMixin, TimestampMixin, Base):
     __tablename__ = "competition_fixtures"
 

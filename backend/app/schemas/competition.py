@@ -114,6 +114,7 @@ class CompetitionEligibilityCheckCreate(BaseModel):
     athlete_profile_id: UUID
     team_id: UUID
     transfer_record_id: UUID | None = None
+    regional_rule_profile_id: UUID | None = None
     min_age: int | None = Field(default=None, ge=3, le=100)
     max_age: int | None = Field(default=None, ge=3, le=100)
     require_active_roster: bool = True
@@ -160,6 +161,102 @@ class CompetitionEligibilityCertificateRead(BaseModel):
     warning_count: int
     eligibility_summary: str
     checks: list[CompetitionEligibilityCheckRead]
+
+
+class CompetitionRegionalRuleCreate(BaseModel):
+    category: str = Field(default="eligibility", min_length=2, max_length=80)
+    rule_key: str = Field(min_length=2, max_length=120)
+    rule_value: str = Field(min_length=1, max_length=4000)
+    applies_to: str = Field(default="competition", min_length=2, max_length=80)
+    severity: str = Field(default="warning", pattern="^(info|warning|blocker)$")
+    status: str = Field(default="active", pattern="^(active|draft|retired)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class CompetitionRegionalRuleProfileCreate(BaseModel):
+    organization_id: UUID
+    competition_id: UUID | None = None
+    name: str = Field(min_length=2, max_length=180)
+    country_code: str = Field(min_length=2, max_length=2)
+    region_code: str | None = Field(default=None, max_length=80)
+    governing_body: str | None = Field(default=None, max_length=180)
+    sport: str = Field(min_length=2, max_length=80)
+    age_group: str | None = Field(default=None, max_length=80)
+    competition_format: str | None = Field(default=None, max_length=80)
+    effective_from: date | None = None
+    effective_until: date | None = None
+    status: str = Field(default="active", pattern="^(active|draft|retired)$")
+    min_age: int | None = Field(default=None, ge=3, le=100)
+    max_age: int | None = Field(default=None, ge=3, le=100)
+    roster_limit: int | None = Field(default=None, ge=1, le=200)
+    match_duration_minutes: int | None = Field(default=None, ge=5, le=240)
+    substitution_limit: int | None = Field(default=None, ge=0, le=50)
+    heat_policy: str | None = Field(default=None, max_length=4000)
+    eligibility_policy: str | None = Field(default=None, max_length=4000)
+    compliance_requirements: str | None = Field(default=None, max_length=4000)
+    source_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+    rules: list[CompetitionRegionalRuleCreate] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_profile(self) -> "CompetitionRegionalRuleProfileCreate":
+        if self.min_age is not None and self.max_age is not None and self.max_age < self.min_age:
+            raise ValueError("max_age must be greater than or equal to min_age")
+        if self.effective_from is not None and self.effective_until is not None and self.effective_until < self.effective_from:
+            raise ValueError("effective_until must be on or after effective_from")
+        return self
+
+
+class CompetitionRegionalRuleRead(CompetitionRegionalRuleCreate):
+    id: UUID
+    organization_id: UUID
+    profile_id: UUID
+
+
+class CompetitionRegionalRuleProfileRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    competition_id: UUID | None
+    name: str
+    country_code: str
+    region_code: str | None
+    governing_body: str | None
+    sport: str
+    age_group: str | None
+    competition_format: str | None
+    effective_from: date | None
+    effective_until: date | None
+    status: str
+    min_age: int | None
+    max_age: int | None
+    roster_limit: int | None
+    match_duration_minutes: int | None
+    substitution_limit: int | None
+    heat_policy: str | None
+    eligibility_policy: str | None
+    compliance_requirements: str | None
+    source_url: str | None
+    notes: str | None
+    rule_count: int
+    blocker_rule_count: int
+    rules: list[CompetitionRegionalRuleRead] = Field(default_factory=list)
+
+
+class CompetitionRegionalRuleEvaluationCreate(BaseModel):
+    profile_id: UUID | None = None
+    athlete_profile_id: UUID | None = None
+    team_id: UUID | None = None
+    as_of: date | None = None
+
+
+class CompetitionRegionalRuleEvaluationRead(BaseModel):
+    competition_id: UUID
+    profile: CompetitionRegionalRuleProfileRead
+    status: str
+    blocker_count: int
+    warning_count: int
+    checks: list[CompetitionEligibilityCheckRead]
+    summary: str
 
 
 class CompetitionFixtureCreate(BaseModel):

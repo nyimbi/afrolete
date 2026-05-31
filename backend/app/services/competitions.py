@@ -14,6 +14,8 @@ from app.models.competition import (
     CompetitionEligibilityCertificate,
     CompetitionFixture,
     CompetitionParticipant,
+    CompetitionRegionalRule,
+    CompetitionRegionalRuleProfile,
     FixtureMatchEvent,
     FixtureOfficialAssignment,
 )
@@ -42,6 +44,12 @@ from app.schemas.competition import (
     CompetitionFixtureCreate,
     CompetitionFixtureGenerateCreate,
     CompetitionParticipantCreate,
+    CompetitionRegionalRuleCreate,
+    CompetitionRegionalRuleEvaluationCreate,
+    CompetitionRegionalRuleEvaluationRead,
+    CompetitionRegionalRuleProfileCreate,
+    CompetitionRegionalRuleProfileRead,
+    CompetitionRegionalRuleRead,
     CompetitionScheduleOptimizeCreate,
     CompetitionTicketingCreate,
     FixtureMatchEventCreate,
@@ -305,6 +313,132 @@ async def list_competition_eligibility_certificates(
         competition_eligibility_row(certificate, athlete_name, team_name)
         for certificate, athlete_name, team_name in rows
     ]
+
+
+async def create_regional_rule_profile(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: CompetitionRegionalRuleProfileCreate,
+    authz: AuthorizationService,
+) -> CompetitionRegionalRuleProfileRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_competition(authz, identity, payload.organization_id)
+    if payload.competition_id is not None:
+        competition = await get_competition(db, payload.competition_id)
+        if competition.organization_id != payload.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Competition not found")
+    profile_data = payload.model_dump(exclude={"rules"})
+    profile_data["country_code"] = payload.country_code.upper()
+    profile = CompetitionRegionalRuleProfile(**profile_data)
+    db.add(profile)
+    await db.flush()
+    for rule_payload in payload.rules:
+        db.add(
+            CompetitionRegionalRule(
+                organization_id=payload.organization_id,
+                profile_id=profile.id,
+                **rule_payload.model_dump(),
+            )
+        )
+    await db.commit()
+    return await regional_rule_profile_read_by_id(db, profile.id)
+
+
+async def add_regional_rule(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    profile_id: UUID,
+    payload: CompetitionRegionalRuleCreate,
+    authz: AuthorizationService,
+) -> CompetitionRegionalRuleRead:
+    profile = await get_regional_rule_profile(db, profile_id)
+    await ensure_manage_competition(authz, identity, profile.organization_id)
+    rule = await db.scalar(
+        select(CompetitionRegionalRule).where(
+            CompetitionRegionalRule.profile_id == profile_id,
+            CompetitionRegionalRule.category == payload.category,
+            CompetitionRegionalRule.rule_key == payload.rule_key,
+        )
+    )
+    if rule is None:
+        rule = CompetitionRegionalRule(
+            organization_id=profile.organization_id,
+            profile_id=profile_id,
+            **payload.model_dump(),
+        )
+        db.add(rule)
+    else:
+        for field, value in payload.model_dump().items():
+            setattr(rule, field, value)
+    await db.commit()
+    await db.refresh(rule)
+    return regional_rule_read(rule)
+
+
+async def list_regional_rule_profiles(
+    db: AsyncSession,
+    organization_id: UUID,
+    competition_id: UUID | None = None,
+    country_code: str | None = None,
+) -> list[CompetitionRegionalRuleProfileRead]:
+    await get_organization(db, organization_id)
+    statement = select(CompetitionRegionalRuleProfile).where(
+        CompetitionRegionalRuleProfile.organization_id == organization_id
+    )
+    if competition_id is not None:
+        statement = statement.where(
+            (CompetitionRegionalRuleProfile.competition_id == competition_id)
+            | (CompetitionRegionalRuleProfile.competition_id.is_(None))
+        )
+    if country_code is not None:
+        statement = statement.where(CompetitionRegionalRuleProfile.country_code == country_code.upper())
+    profiles = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    CompetitionRegionalRuleProfile.status,
+                    CompetitionRegionalRuleProfile.country_code,
+                    CompetitionRegionalRuleProfile.region_code,
+                    CompetitionRegionalRuleProfile.sport,
+                    CompetitionRegionalRuleProfile.age_group,
+                )
+            )
+        ).all()
+    )
+    return [await regional_rule_profile_read(db, profile) for profile in profiles]
+
+
+async def evaluate_regional_rules(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    competition_id: UUID,
+    payload: CompetitionRegionalRuleEvaluationCreate,
+    authz: AuthorizationService,
+) -> CompetitionRegionalRuleEvaluationRead:
+    competition = await get_competition(db, competition_id)
+    await ensure_manage_competition(authz, identity, competition.organization_id)
+    profile = await select_regional_rule_profile(db, competition, payload.profile_id)
+    athlete: AthleteProfile | None = None
+    person: Person | None = None
+    team: Team | None = None
+    if payload.athlete_profile_id is not None:
+        athlete, person = await get_athlete_for_organization(db, payload.athlete_profile_id, competition.organization_id)
+    if payload.team_id is not None:
+        team = await get_team_for_organization(db, payload.team_id, competition.organization_id)
+    checks = await build_regional_rule_checks(db, competition, profile, athlete, person, team, payload.as_of)
+    blocker_count = sum(1 for check in checks if check["status"] == "blocker")
+    warning_count = sum(1 for check in checks if check["status"] == "warning")
+    status_value = "pass" if blocker_count == 0 else "blocked"
+    summary = regional_rule_evaluation_summary(profile, blocker_count, warning_count)
+    return CompetitionRegionalRuleEvaluationRead(
+        competition_id=competition_id,
+        profile=await regional_rule_profile_read(db, profile),
+        status=status_value,
+        blocker_count=blocker_count,
+        warning_count=warning_count,
+        checks=checks,
+        summary=summary,
+    )
 
 
 async def create_competition_fixture(
@@ -1450,6 +1584,9 @@ async def build_competition_eligibility_checks(
         checks.append(await medical_clearance_check(db, competition.organization_id, athlete, person, as_of))
     if payload.require_compliance_credential:
         checks.append(await compliance_credential_check(db, competition.organization_id, person, as_of))
+    if payload.regional_rule_profile_id is not None:
+        profile = await select_regional_rule_profile(db, competition, payload.regional_rule_profile_id)
+        checks.extend(await build_regional_rule_checks(db, competition, profile, athlete, person, team, as_of))
     if payload.max_players_per_team is not None:
         roster_count = await db.scalar(
             select(func.count(TeamRosterEntry.id)).where(
@@ -1678,6 +1815,119 @@ def status_policy_check(
     ]
 
 
+async def build_regional_rule_checks(
+    db: AsyncSession,
+    competition: Competition,
+    profile: CompetitionRegionalRuleProfile,
+    athlete: AthleteProfile | None,
+    person: Person | None,
+    team: Team | None,
+    as_of: date | None,
+) -> list[dict[str, str]]:
+    evaluation_date = as_of or competition.starts_on or date.today()
+    checks: list[dict[str, str]] = [
+        eligibility_check(
+            "regional_profile",
+            "Regional rule profile",
+            "pass" if profile.status == "active" else "warning",
+            "warning",
+            f"{profile.name} is {profile.status} for {profile.country_code}{('-' + profile.region_code) if profile.region_code else ''}.",
+            "Use an active profile before competition clearance."
+            if profile.status != "active"
+            else "No action required.",
+        )
+    ]
+    if profile.effective_from is not None or profile.effective_until is not None:
+        effective = True
+        if profile.effective_from is not None and evaluation_date < profile.effective_from:
+            effective = False
+        if profile.effective_until is not None and evaluation_date > profile.effective_until:
+            effective = False
+        checks.append(
+            eligibility_check(
+                "regional_effective_window",
+                "Rule effective window",
+                "pass" if effective else "blocker",
+                "critical",
+                f"Rules are evaluated on {evaluation_date.isoformat()}.",
+                "Select a regional rule profile that is effective for the competition date."
+                if not effective
+                else "No action required.",
+            )
+        )
+    if athlete is not None and person is not None and (profile.min_age is not None or profile.max_age is not None):
+        age = athlete_age_on(person.date_of_birth, evaluation_date)
+        age_ok = age is not None
+        if age is not None and profile.min_age is not None and age < profile.min_age:
+            age_ok = False
+        if age is not None and profile.max_age is not None and age > profile.max_age:
+            age_ok = False
+        label = f"{profile.age_group or 'Regional'} age classification"
+        checks.append(
+            eligibility_check(
+                "regional_age_classification",
+                label,
+                "pass" if age_ok else "blocker",
+                "critical",
+                f"{person.display_name} is {age} on {evaluation_date.isoformat()}."
+                if age is not None
+                else "Athlete date of birth is missing for regional age classification.",
+                "Move the athlete to a matching age band or correct their date of birth."
+                if not age_ok
+                else "No action required.",
+            )
+        )
+    if team is not None and profile.roster_limit is not None:
+        roster_count = int(
+            await db.scalar(
+                select(func.count(TeamRosterEntry.id)).where(
+                    TeamRosterEntry.team_id == team.id,
+                    TeamRosterEntry.status.in_(active_roster_statuses()),
+                )
+            )
+            or 0
+        )
+        checks.append(
+            eligibility_check(
+                "regional_roster_limit",
+                "Regional roster limit",
+                "pass" if roster_count <= profile.roster_limit else "blocker",
+                "critical",
+                f"{team.name} has {roster_count} active athletes; regional limit is {profile.roster_limit}.",
+                "Reduce active roster size or request a governing-body waiver."
+                if roster_count > profile.roster_limit
+                else "No action required.",
+            )
+        )
+    if profile.compliance_requirements:
+        checks.append(
+            eligibility_check(
+                "regional_compliance_requirements",
+                "Regional compliance requirements",
+                "warning",
+                "warning",
+                profile.compliance_requirements,
+                "Verify each listed requirement before final competition approval.",
+            )
+        )
+    rules = await regional_rules_for_profile(db, profile.id)
+    for rule in rules:
+        if rule.status != "active":
+            continue
+        status_value = "blocker" if rule.severity == "blocker" else "warning" if rule.severity == "warning" else "pass"
+        checks.append(
+            eligibility_check(
+                f"regional_rule_{rule.rule_key}",
+                f"{rule.category}: {rule.rule_key}",
+                status_value,
+                "critical" if rule.severity == "blocker" else rule.severity,
+                rule.rule_value,
+                rule.notes or "Confirm this regional rule with the governing body before competition approval.",
+            )
+        )
+    return checks
+
+
 def eligibility_check(
     key: str,
     label: str,
@@ -1751,6 +2001,21 @@ def eligibility_summary(
     return f"{athlete_name} is eligible for {team_name} in {competition_name}."
 
 
+def regional_rule_evaluation_summary(
+    profile: CompetitionRegionalRuleProfile,
+    blocker_count: int,
+    warning_count: int,
+) -> str:
+    if blocker_count:
+        return (
+            f"{profile.name} produced {blocker_count} blocker(s) and {warning_count} warning(s); "
+            "registrar action is required before approval."
+        )
+    if warning_count:
+        return f"{profile.name} passed with {warning_count} warning(s); registrar review is recommended."
+    return f"{profile.name} passed without blockers or warnings."
+
+
 def competition_eligibility_certificate_number(
     competition_id: UUID,
     athlete_profile_id: UUID,
@@ -1813,6 +2078,73 @@ def competition_eligibility_row(
     }
 
 
+async def regional_rule_profile_read_by_id(db: AsyncSession, profile_id: UUID) -> CompetitionRegionalRuleProfileRead:
+    profile = await get_regional_rule_profile(db, profile_id)
+    return await regional_rule_profile_read(db, profile)
+
+
+async def regional_rule_profile_read(
+    db: AsyncSession,
+    profile: CompetitionRegionalRuleProfile,
+) -> CompetitionRegionalRuleProfileRead:
+    rules = await regional_rules_for_profile(db, profile.id)
+    return CompetitionRegionalRuleProfileRead(
+        id=profile.id,
+        organization_id=profile.organization_id,
+        competition_id=profile.competition_id,
+        name=profile.name,
+        country_code=profile.country_code,
+        region_code=profile.region_code,
+        governing_body=profile.governing_body,
+        sport=profile.sport,
+        age_group=profile.age_group,
+        competition_format=profile.competition_format,
+        effective_from=profile.effective_from,
+        effective_until=profile.effective_until,
+        status=profile.status,
+        min_age=profile.min_age,
+        max_age=profile.max_age,
+        roster_limit=profile.roster_limit,
+        match_duration_minutes=profile.match_duration_minutes,
+        substitution_limit=profile.substitution_limit,
+        heat_policy=profile.heat_policy,
+        eligibility_policy=profile.eligibility_policy,
+        compliance_requirements=profile.compliance_requirements,
+        source_url=profile.source_url,
+        notes=profile.notes,
+        rule_count=len(rules),
+        blocker_rule_count=len([rule for rule in rules if rule.severity == "blocker" and rule.status == "active"]),
+        rules=[regional_rule_read(rule) for rule in rules],
+    )
+
+
+def regional_rule_read(rule: CompetitionRegionalRule) -> CompetitionRegionalRuleRead:
+    return CompetitionRegionalRuleRead(
+        id=rule.id,
+        organization_id=rule.organization_id,
+        profile_id=rule.profile_id,
+        category=rule.category,
+        rule_key=rule.rule_key,
+        rule_value=rule.rule_value,
+        applies_to=rule.applies_to,
+        severity=rule.severity,
+        status=rule.status,
+        notes=rule.notes,
+    )
+
+
+async def regional_rules_for_profile(db: AsyncSession, profile_id: UUID) -> list[CompetitionRegionalRule]:
+    return list(
+        (
+            await db.scalars(
+                select(CompetitionRegionalRule)
+                .where(CompetitionRegionalRule.profile_id == profile_id)
+                .order_by(CompetitionRegionalRule.category, CompetitionRegionalRule.rule_key)
+            )
+        ).all()
+    )
+
+
 def decode_certificate_checks(value: str | None) -> list[dict[str, str]]:
     if not value:
         return []
@@ -1851,6 +2183,45 @@ async def get_competition(db: AsyncSession, competition_id: UUID) -> Competition
     if competition is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Competition not found")
     return competition
+
+
+async def get_regional_rule_profile(
+    db: AsyncSession,
+    profile_id: UUID,
+) -> CompetitionRegionalRuleProfile:
+    profile = await db.get(CompetitionRegionalRuleProfile, profile_id)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regional rule profile not found")
+    return profile
+
+
+async def select_regional_rule_profile(
+    db: AsyncSession,
+    competition: Competition,
+    profile_id: UUID | None = None,
+) -> CompetitionRegionalRuleProfile:
+    if profile_id is not None:
+        profile = await get_regional_rule_profile(db, profile_id)
+        if profile.organization_id != competition.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regional rule profile not found")
+        return profile
+    profile = await db.scalar(
+        select(CompetitionRegionalRuleProfile)
+        .where(
+            CompetitionRegionalRuleProfile.organization_id == competition.organization_id,
+            CompetitionRegionalRuleProfile.sport == competition.sport,
+            CompetitionRegionalRuleProfile.status == "active",
+            (CompetitionRegionalRuleProfile.competition_id == competition.id)
+            | (CompetitionRegionalRuleProfile.competition_id.is_(None)),
+        )
+        .order_by(
+            CompetitionRegionalRuleProfile.competition_id.desc().nulls_last(),
+            CompetitionRegionalRuleProfile.effective_from.desc().nulls_last(),
+        )
+    )
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No regional rule profile found")
+    return profile
 
 
 async def get_fixture(db: AsyncSession, fixture_id: UUID) -> CompetitionFixture:

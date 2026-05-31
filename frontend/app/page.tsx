@@ -158,6 +158,9 @@ import type {
   CompetitionFormat,
   CompetitionParticipantRead,
   CompetitionRead,
+  CompetitionRegionalRuleRead,
+  CompetitionRegionalRuleEvaluationRead,
+  CompetitionRegionalRuleProfileRead,
   CompetitionScheduleOptimizationRead,
   CompetitionStandingRead,
   CompetitionTicketingRead,
@@ -2197,6 +2200,9 @@ export default function HomePage() {
     useState<CompetitionEligibilityCertificateRead[]>([]);
   const [eligibilityCertificate, setEligibilityCertificate] =
     useState<CompetitionEligibilityCertificateRead | null>(null);
+  const [regionalRuleProfiles, setRegionalRuleProfiles] = useState<CompetitionRegionalRuleProfileRead[]>([]);
+  const [regionalRuleEvaluation, setRegionalRuleEvaluation] =
+    useState<CompetitionRegionalRuleEvaluationRead | null>(null);
   const [matchEvents, setMatchEvents] = useState<FixtureMatchEventRead[]>([]);
   const [officialAssignments, setOfficialAssignments] = useState<FixtureOfficialAssignmentRead[]>([]);
   const [communicationTemplates, setCommunicationTemplates] = useState<CommunicationTemplateRead[]>([]);
@@ -3281,6 +3287,26 @@ export default function HomePage() {
     tiebreakers: "Points, goal difference, goals for",
     rules_summary: "Standard league scoring with confirmed official results."
   });
+  const [regionalRuleForm, setRegionalRuleForm] = useState({
+    name: "Kenya U17 Football Rules",
+    country_code: "KE",
+    region_code: "Nairobi",
+    governing_body: "Football Kenya Federation",
+    age_group: "U17",
+    competition_format: "round_robin",
+    effective_from: "2026-01-01",
+    effective_until: "2026-12-31",
+    min_age: 13,
+    max_age: 17,
+    roster_limit: 22,
+    match_duration_minutes: 90,
+    substitution_limit: 5,
+    heat_policy: "Mandatory water breaks when WBGT exceeds 32C.",
+    compliance_requirements: "Federation registration ID, medical clearance, safeguarding confirmation.",
+    rule_key: "federation_id_required",
+    rule_value: "Each player must have a federation registration ID before matchday.",
+    rule_severity: "warning" as "info" | "warning" | "blocker"
+  });
   const [fixtureForm, setFixtureForm] = useState({
     round_label: "Round 1",
     stage_label: "League",
@@ -3953,6 +3979,14 @@ export default function HomePage() {
   const selectedCompetition = useMemo(
     () => competitions.find((competition) => competition.id === selectedCompetitionId) ?? null,
     [competitions, selectedCompetitionId]
+  );
+  const selectedRegionalRuleProfile = useMemo(
+    () =>
+      regionalRuleProfiles.find((profile) => profile.competition_id === selectedCompetitionId) ??
+      regionalRuleProfiles.find((profile) => profile.status === "active") ??
+      regionalRuleProfiles[0] ??
+      null,
+    [regionalRuleProfiles, selectedCompetitionId]
   );
   const selectedFixture = useMemo(
     () => competitionFixtures.find((fixture) => fixture.id === selectedFixtureId) ?? null,
@@ -5006,8 +5040,14 @@ export default function HomePage() {
   }, []);
 
   const loadCompetitions = useCallback(async (organizationId: string) => {
-    const data = await apiRequest<CompetitionRead[]>(`/competitions?organization_id=${organizationId}`);
+    const [data, profiles] = await Promise.all([
+      apiRequest<CompetitionRead[]>(`/competitions?organization_id=${organizationId}`),
+      apiRequest<CompetitionRegionalRuleProfileRead[]>(
+        `/competitions/regional-rule-profiles?organization_id=${organizationId}`
+      )
+    ]);
     setCompetitions(data);
+    setRegionalRuleProfiles(profiles);
     setSelectedCompetitionId((current) =>
       data.some((competition) => competition.id === current) ? current : data[0]?.id ?? ""
     );
@@ -5944,6 +5984,8 @@ export default function HomePage() {
       setAthleteTransfers([]);
       setEligibilityCertificates([]);
       setEligibilityCertificate(null);
+      setRegionalRuleProfiles([]);
+      setRegionalRuleEvaluation(null);
       setMatchEvents([]);
       setOfficialAssignments([]);
       setRegistrationInquiries([]);
@@ -6554,6 +6596,7 @@ export default function HomePage() {
       setCompetitionConflicts([]);
       setEligibilityCertificates([]);
       setEligibilityCertificate(null);
+      setRegionalRuleEvaluation(null);
       setMatchEvents([]);
       setOfficialAssignments([]);
       return;
@@ -6935,7 +6978,7 @@ export default function HomePage() {
           ...current.filter((item) => item.id !== subscription.id)
         ]);
         setSelectedMemberSubscriptionId(subscription.id);
-        addLog(`${subscription.subject_label ?? "Member"} dues tracking opened`, "good");
+        addLog(`${subscription.subject_label ?? "Member"} dues account opened`, "good");
       }
     );
   };
@@ -6943,7 +6986,7 @@ export default function HomePage() {
   const recordMemberDuesPayment = () => {
     const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
     if (!subscriptionId) {
-      addLog("Select a member dues subscription before recording payment", "bad");
+      addLog("Select a member dues account before recording payment", "bad");
       return;
     }
     runAction(
@@ -15478,6 +15521,135 @@ export default function HomePage() {
     );
   };
 
+  const createRegionalRuleProfile = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating regional rules", "bad");
+      return;
+    }
+    runAction(
+      "create-regional-rule-profile",
+      () =>
+        apiRequest<CompetitionRegionalRuleProfileRead>("/competitions/regional-rule-profiles", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            competition_id: selectedCompetitionId || null,
+            name: regionalRuleForm.name,
+            country_code: regionalRuleForm.country_code.toUpperCase(),
+            region_code: regionalRuleForm.region_code || null,
+            governing_body: regionalRuleForm.governing_body || null,
+            sport: selectedCompetition?.sport ?? competitionForm.sport,
+            age_group: regionalRuleForm.age_group || null,
+            competition_format: selectedCompetition?.format ?? regionalRuleForm.competition_format,
+            effective_from: regionalRuleForm.effective_from || null,
+            effective_until: regionalRuleForm.effective_until || null,
+            min_age: regionalRuleForm.min_age,
+            max_age: regionalRuleForm.max_age,
+            roster_limit: regionalRuleForm.roster_limit,
+            match_duration_minutes: regionalRuleForm.match_duration_minutes,
+            substitution_limit: regionalRuleForm.substitution_limit,
+            heat_policy: regionalRuleForm.heat_policy || null,
+            compliance_requirements: regionalRuleForm.compliance_requirements || null,
+            rules: regionalRuleForm.rule_key && regionalRuleForm.rule_value
+              ? [
+                  {
+                    category: "eligibility",
+                    rule_key: regionalRuleForm.rule_key,
+                    rule_value: regionalRuleForm.rule_value,
+                    applies_to: "athlete",
+                    severity: regionalRuleForm.rule_severity,
+                    status: "active"
+                  }
+                ]
+              : []
+          }
+        }),
+      (profile) => {
+        setRegionalRuleProfiles((current) => [
+          profile,
+          ...current.filter((item) => item.id !== profile.id)
+        ]);
+        addLog(`${profile.name} regional rules are active`, "good");
+      }
+    );
+  };
+
+  const addRegionalRule = () => {
+    if (!selectedRegionalRuleProfile) {
+      addLog("Create or select a regional rule profile first", "bad");
+      return;
+    }
+    runAction(
+      "add-regional-rule",
+      () =>
+        apiRequest<CompetitionRegionalRuleRead>(
+          `/competitions/regional-rule-profiles/${selectedRegionalRuleProfile.id}/rules`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              category: "eligibility",
+              rule_key: regionalRuleForm.rule_key,
+              rule_value: regionalRuleForm.rule_value,
+              applies_to: "athlete",
+              severity: regionalRuleForm.rule_severity,
+              status: "active",
+              notes: "Added from the operations console."
+            }
+          }
+        ),
+      (rule) => {
+        setRegionalRuleProfiles((current) =>
+          current.map((profile) => {
+            if (profile.id !== rule.profile_id) {
+              return profile;
+            }
+            const rules = [rule, ...profile.rules.filter((item) => item.id !== rule.id)];
+            return {
+              ...profile,
+              rules,
+              rule_count: rules.length,
+              blocker_rule_count: rules.filter((item) => item.status === "active" && item.severity === "blocker").length
+            };
+          })
+        );
+        addLog(`${rule.rule_key} regional rule saved`, rule.severity === "blocker" ? "bad" : "good");
+      }
+    );
+  };
+
+  const evaluateRegionalRules = () => {
+    if (!selectedCompetitionId || !selectedRegionalRuleProfile) {
+      addLog("Select a competition and regional rules first", "bad");
+      return;
+    }
+    runAction(
+      "evaluate-regional-rules",
+      () =>
+        apiRequest<CompetitionRegionalRuleEvaluationRead>(
+          `/competitions/${selectedCompetitionId}/regional-rules/evaluate`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              profile_id: selectedRegionalRuleProfile.id,
+              athlete_profile_id: selectedAthlete?.athleteProfileId ?? null,
+              team_id: selectedTeamId || null,
+              as_of: selectedCompetition?.starts_on ?? new Date().toISOString().slice(0, 10)
+            }
+          }
+        ),
+      (evaluation) => {
+        setRegionalRuleEvaluation(evaluation);
+        addLog(
+          `${evaluation.profile.country_code} ${evaluation.profile.sport} rules ${evaluation.status}`,
+          evaluation.blocker_count ? "bad" : "good"
+        );
+      }
+    );
+  };
+
   const registerCompetitionTeam = () => {
     if (!selectedCompetitionId || !selectedTeamId) {
       addLog("Select a competition and team first", "bad");
@@ -15573,6 +15745,7 @@ export default function HomePage() {
               require_transfer_clearance: true,
               require_medical_clearance: false,
               require_compliance_credential: false,
+              regional_rule_profile_id: selectedRegionalRuleProfile?.id ?? null,
               academic_status: "eligible",
               citizenship_status: "verified",
               disciplinary_status: "clear",
@@ -27769,6 +27942,132 @@ export default function HomePage() {
                   <div>
                     <strong>{participant.team_name}</strong>
                     <span>Seed {participant.seed ?? "—"} · Group {participant.group_label ?? "—"}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Regional rules</p>
+                <h2>Country and governing-body checks</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createRegionalRuleProfile} disabled={busyAction !== null}>Profile</button>
+                <button type="button" onClick={addRegionalRule} disabled={busyAction !== null}>Rule</button>
+                <button type="button" onClick={evaluateRegionalRules} disabled={busyAction !== null}>Evaluate</button>
+              </div>
+            </div>
+            <div className="consent-grid">
+              <div>
+                <span className="muted">Profiles</span>
+                <strong>{regionalRuleProfiles.length}</strong>
+              </div>
+              <div>
+                <span className="muted">Active</span>
+                <strong>{regionalRuleProfiles.filter((profile) => profile.status === "active").length}</strong>
+              </div>
+              <div>
+                <span className="muted">Rules</span>
+                <strong>{selectedRegionalRuleProfile?.rule_count ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Blockers</span>
+                <strong>{regionalRuleEvaluation?.blocker_count ?? selectedRegionalRuleProfile?.blocker_rule_count ?? 0}</strong>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Profile
+                <input value={regionalRuleForm.name} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, name: event.target.value })} />
+              </label>
+              <label>
+                Country
+                <input maxLength={2} value={regionalRuleForm.country_code} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, country_code: event.target.value.toUpperCase() })} />
+              </label>
+              <label>
+                Region
+                <input value={regionalRuleForm.region_code} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, region_code: event.target.value })} />
+              </label>
+              <label>
+                Governing body
+                <input value={regionalRuleForm.governing_body} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, governing_body: event.target.value })} />
+              </label>
+              <label>
+                Age group
+                <input value={regionalRuleForm.age_group} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, age_group: event.target.value })} />
+              </label>
+              <label>
+                Age range
+                <input value={`${regionalRuleForm.min_age}-${regionalRuleForm.max_age}`} onChange={(event) => {
+                  const [minAge, maxAge] = event.target.value.split("-").map((value) => Number(value.trim()));
+                  setRegionalRuleForm({
+                    ...regionalRuleForm,
+                    min_age: Number.isFinite(minAge) ? minAge : regionalRuleForm.min_age,
+                    max_age: Number.isFinite(maxAge) ? maxAge : regionalRuleForm.max_age
+                  });
+                }} />
+              </label>
+              <label>
+                Roster limit
+                <input type="number" min="1" value={regionalRuleForm.roster_limit} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, roster_limit: Number(event.target.value) })} />
+              </label>
+              <label>
+                Duration
+                <input type="number" min="5" value={regionalRuleForm.match_duration_minutes} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, match_duration_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                Subs
+                <input type="number" min="0" value={regionalRuleForm.substitution_limit} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, substitution_limit: Number(event.target.value) })} />
+              </label>
+              <label>
+                Severity
+                <select value={regionalRuleForm.rule_severity} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, rule_severity: event.target.value as "info" | "warning" | "blocker" })}>
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="blocker">Blocker</option>
+                </select>
+              </label>
+              <label>
+                Rule key
+                <input value={regionalRuleForm.rule_key} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, rule_key: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Rule
+                <input value={regionalRuleForm.rule_value} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, rule_value: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Compliance
+                <input value={regionalRuleForm.compliance_requirements} onChange={(event) => setRegionalRuleForm({ ...regionalRuleForm, compliance_requirements: event.target.value })} />
+              </label>
+            </div>
+            <div className="task-list">
+              {selectedRegionalRuleProfile ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{selectedRegionalRuleProfile.name}</strong>
+                    <span>{selectedRegionalRuleProfile.country_code} · {selectedRegionalRuleProfile.region_code ?? "all regions"} · {selectedRegionalRuleProfile.age_group ?? "all ages"}</span>
+                    <small>{selectedRegionalRuleProfile.governing_body ?? "No governing body"} · {selectedRegionalRuleProfile.rule_count} rule(s)</small>
+                  </div>
+                </article>
+              ) : null}
+              {regionalRuleEvaluation ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{regionalRuleEvaluation.status} · regional evaluation</strong>
+                    <span>{regionalRuleEvaluation.summary}</span>
+                    <small>{regionalRuleEvaluation.blocker_count} blocker(s) · {regionalRuleEvaluation.warning_count} warning(s)</small>
+                  </div>
+                </article>
+              ) : null}
+              {(regionalRuleEvaluation?.checks ?? selectedRegionalRuleProfile?.rules ?? []).slice(0, 4).map((item) => (
+                <article key={"key" in item ? item.key : item.id} className="task-card">
+                  <div>
+                    <strong>{"label" in item ? item.label : item.rule_key}</strong>
+                    <span>{"detail" in item ? item.detail : item.rule_value}</span>
+                    <small>{"severity" in item ? item.severity : "rule"} · {"status" in item ? item.status : "active"}</small>
                   </div>
                 </article>
               ))}
