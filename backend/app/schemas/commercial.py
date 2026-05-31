@@ -384,6 +384,37 @@ class DonationRead(DonationCreate):
     donor_lifetime_giving: Decimal | None = None
 
 
+class DonationTaxReceiptCreate(BaseModel):
+    issued_on: date | None = None
+    tax_year: int | None = Field(default=None, ge=1900, le=2200)
+    jurisdiction: str = Field(default="local", min_length=2, max_length=120)
+    organization_tax_id: str | None = Field(default=None, max_length=120)
+    deductible_amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class DonationTaxReceiptRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    donation_id: UUID
+    donor_profile_id: UUID | None
+    receipt_number: str
+    issued_on: date
+    tax_year: int
+    jurisdiction: str
+    donor_name: str
+    donor_email: str | None
+    organization_name: str
+    organization_tax_id: str | None
+    deductible_amount: Decimal
+    currency: str
+    status: str
+    content_markdown: str
+    content_checksum: str
+    download_filename: str
+    notes: str | None
+
+
 class DonorProfileCreate(BaseModel):
     organization_id: UUID
     name: str = Field(min_length=2, max_length=180)

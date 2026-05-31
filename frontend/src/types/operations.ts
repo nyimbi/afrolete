@@ -4731,6 +4731,28 @@ export type DonationRead = {
   donor_lifetime_giving: string | null;
 };
 
+export type DonationTaxReceiptRead = {
+  id: UUID;
+  organization_id: UUID;
+  donation_id: UUID;
+  donor_profile_id: UUID | null;
+  receipt_number: string;
+  issued_on: string;
+  tax_year: number;
+  jurisdiction: string;
+  donor_name: string;
+  donor_email: string | null;
+  organization_name: string;
+  organization_tax_id: string | null;
+  deductible_amount: string;
+  currency: string;
+  status: string;
+  content_markdown: string;
+  content_checksum: string;
+  download_filename: string;
+  notes: string | null;
+};
+
 export type DonorProfileRead = {
   id: UUID;
   organization_id: UUID;

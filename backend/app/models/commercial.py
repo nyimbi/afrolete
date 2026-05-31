@@ -239,6 +239,33 @@ class Donation(IdMixin, TimestampMixin, Base):
     )
 
 
+class DonationTaxReceipt(IdMixin, TimestampMixin, Base):
+    __tablename__ = "donation_tax_receipts"
+    __table_args__ = (
+        UniqueConstraint("donation_id", name="uq_donation_tax_receipts_donation_id"),
+        UniqueConstraint("organization_id", "receipt_number", name="uq_donation_tax_receipts_org_number"),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    donation_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("donations.id"), index=True)
+    donor_profile_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("donor_profiles.id"), index=True)
+    receipt_number: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    issued_on: Mapped[date] = mapped_column(index=True)
+    tax_year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    jurisdiction: Mapped[str] = mapped_column(String(120), default="local", nullable=False, index=True)
+    donor_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    donor_email: Mapped[str | None] = mapped_column(String(320), index=True)
+    organization_name: Mapped[str] = mapped_column(String(240), nullable=False)
+    organization_tax_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    deductible_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="issued", nullable=False, index=True)
+    content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    content_checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    download_filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class DonorProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "donor_profiles"
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_donor_profiles_org_email"),)

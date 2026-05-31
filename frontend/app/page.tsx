@@ -169,6 +169,7 @@ import type {
   ConsentCaptureChannel,
   ConsentRequestRead,
   DonationRead,
+  DonationTaxReceiptRead,
   DonorDashboardRead,
   DonorInteractionRead,
   DonorProfileRead,
@@ -2380,6 +2381,7 @@ export default function HomePage() {
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
   const [donations, setDonations] = useState<DonationRead[]>([]);
+  const [donationTaxReceipts, setDonationTaxReceipts] = useState<DonationTaxReceiptRead[]>([]);
   const [donorProfiles, setDonorProfiles] = useState<DonorProfileRead[]>([]);
   const [donorInteractions, setDonorInteractions] = useState<DonorInteractionRead[]>([]);
   const [donorStewardshipPlans, setDonorStewardshipPlans] = useState<DonorStewardshipPlanRead[]>([]);
@@ -3907,7 +3909,9 @@ export default function HomePage() {
     stewardship_due_on: "2026-07-30",
     stewardship_next_step: "Send a player impact story and invite donor to facility walk-through.",
     recognition_level: "Founding supporter",
-    impact_story_needed: true
+    impact_story_needed: true,
+    tax_receipt_jurisdiction: "Kenya",
+    organization_tax_id: "PIN-AFROLETE-123"
   });
   const [grantForm, setGrantForm] = useState({
     funder_name: "Youth Sport Foundation",
@@ -5830,6 +5834,7 @@ export default function HomePage() {
       sponsorStewardshipDashboardData,
       campaignData,
       donationData,
+      donationTaxReceiptData,
       donorProfileData,
       donorInteractionData,
       donorStewardshipPlanData,
@@ -5879,6 +5884,7 @@ export default function HomePage() {
       apiRequest<SponsorStewardshipDashboardRead>(`/commercial/sponsor-stewardship-dashboard?organization_id=${organizationId}`),
       apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
       apiRequest<DonationRead[]>(`/commercial/donations?organization_id=${organizationId}`),
+      apiRequest<DonationTaxReceiptRead[]>(`/commercial/donation-tax-receipts?organization_id=${organizationId}`),
       apiRequest<DonorProfileRead[]>(`/commercial/donors?organization_id=${organizationId}`),
       apiRequest<DonorInteractionRead[]>(`/commercial/donor-interactions?organization_id=${organizationId}`),
       apiRequest<DonorStewardshipPlanRead[]>(`/commercial/donor-stewardship-plans?organization_id=${organizationId}`),
@@ -5930,6 +5936,7 @@ export default function HomePage() {
     setSponsorStewardshipDashboard(sponsorStewardshipDashboardData);
     setCampaigns(campaignData);
     setDonations(donationData);
+    setDonationTaxReceipts(donationTaxReceiptData);
     setDonorProfiles(donorProfileData);
     setDonorInteractions(donorInteractionData);
     setDonorStewardshipPlans(donorStewardshipPlanData);
@@ -6618,6 +6625,7 @@ export default function HomePage() {
       setSponsorships([]);
       setCampaigns([]);
       setDonations([]);
+      setDonationTaxReceipts([]);
       setDonorProfiles([]);
       setDonorInteractions([]);
       setDonorStewardshipPlans([]);
@@ -21152,6 +21160,38 @@ export default function HomePage() {
     );
   };
 
+  const issueDonationTaxReceipt = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const donation = donations[0];
+    if (!donation) {
+      addLog("Record a donation before issuing a tax receipt", "bad");
+      return;
+    }
+    runAction(
+      `issue-donation-tax-receipt-${donation.id}`,
+      () =>
+        apiRequest<DonationTaxReceiptRead>(`/commercial/donations/${donation.id}/tax-receipt`, {
+          method: "POST",
+          identity,
+          body: {
+            issued_on: new Date().toISOString().slice(0, 10),
+            jurisdiction: campaignForm.tax_receipt_jurisdiction,
+            organization_tax_id: campaignForm.organization_tax_id || null,
+            deductible_amount: donation.amount,
+            notes: "Issued from the commercial console after donation settlement."
+          }
+        }),
+      async (receipt) => {
+        setDonationTaxReceipts((current) => [receipt, ...current.filter((item) => item.id !== receipt.id)]);
+        await loadCommercial(selectedOrganizationId);
+        addLog(`${receipt.receipt_number} tax receipt issued`, "good");
+      }
+    );
+  };
+
   const createDonorStewardshipWorkflow = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -28790,6 +28830,7 @@ export default function HomePage() {
                 <button type="button" onClick={recordSponsorDigitalSignagePlayback} disabled={busyAction !== null}>Log play</button>
                 <button type="button" onClick={createSponsorStewardshipWorkflow} disabled={busyAction !== null}>Steward</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
+                <button type="button" onClick={issueDonationTaxReceipt} disabled={busyAction !== null}>Tax receipt</button>
                 <button type="button" onClick={createDonorStewardshipWorkflow} disabled={busyAction !== null}>Donor CRM</button>
                 <button type="button" onClick={completeSelectedDonorStewardshipPlan} disabled={busyAction !== null}>Complete donor</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
@@ -28937,6 +28978,14 @@ export default function HomePage() {
               <label>
                 Amount
                 <input type="number" min="1" value={campaignForm.donation_amount} onChange={(event) => setCampaignForm({ ...campaignForm, donation_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                Receipt jurisdiction
+                <input value={campaignForm.tax_receipt_jurisdiction} onChange={(event) => setCampaignForm({ ...campaignForm, tax_receipt_jurisdiction: event.target.value })} />
+              </label>
+              <label>
+                Tax ID
+                <input value={campaignForm.organization_tax_id} onChange={(event) => setCampaignForm({ ...campaignForm, organization_tax_id: event.target.value })} />
               </label>
               <label>
                 Donor phone
@@ -29286,6 +29335,15 @@ export default function HomePage() {
                   <div>
                     <strong>{donation.donor_name} · {donation.amount}</strong>
                     <span>{donation.donor_lifetime_giving ?? "new donor"} lifetime · {donation.status}</span>
+                  </div>
+                </article>
+              ))}
+              {donationTaxReceipts.slice(0, 3).map((receipt) => (
+                <article key={receipt.id} className="task-card selected">
+                  <div>
+                    <strong>{receipt.receipt_number}</strong>
+                    <span>{receipt.donor_name} · {receipt.deductible_amount} {receipt.currency} · {receipt.tax_year}</span>
+                    <small>{receipt.jurisdiction} · checksum {receipt.content_checksum.slice(0, 10)} · {receipt.status}</small>
                   </div>
                 </article>
               ))}

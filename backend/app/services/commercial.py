@@ -20,6 +20,7 @@ from app.models.commercial import (
     CommercialPaymentSession,
     CommercialSettlementPayout,
     Donation,
+    DonationTaxReceipt,
     DonorInteraction,
     DonorProfile,
     DonorStewardshipPlan,
@@ -81,6 +82,8 @@ from app.schemas.commercial import (
     CommercialSettlementPayoutRead,
     CommercialTaxFilingRead,
     DonationCreate,
+    DonationTaxReceiptCreate,
+    DonationTaxReceiptRead,
     DonorDashboardRead,
     DonorInteractionCreate,
     DonorInteractionRead,
@@ -802,6 +805,88 @@ async def record_donation(db: AsyncSession, identity: CurrentIdentity, payload: 
     await db.commit()
     await db.refresh(donation)
     return donation
+
+
+async def issue_donation_tax_receipt(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    donation_id: UUID,
+    payload: DonationTaxReceiptCreate,
+    authz: AuthorizationService,
+) -> DonationTaxReceiptRead:
+    donation = await db.get(Donation, donation_id)
+    if donation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Donation not found")
+    await ensure_manage_commercial(authz, identity, donation.organization_id)
+    if donation.status != CommercialStatus.PAID:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Only paid donations can receive tax receipts")
+    existing = await db.scalar(select(DonationTaxReceipt).where(DonationTaxReceipt.donation_id == donation_id))
+    if existing is not None:
+        return donation_tax_receipt_read(existing)
+    organization = await get_organization(db, donation.organization_id)
+    donor = await db.get(DonorProfile, donation.donor_profile_id) if donation.donor_profile_id else None
+    issued_on = payload.issued_on or date.today()
+    tax_year = payload.tax_year or issued_on.year
+    deductible_amount = (payload.deductible_amount or donation.amount).quantize(Decimal("0.01"))
+    if deductible_amount > donation.amount:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Deductible amount cannot exceed donation amount")
+    receipt_number = f"DON-{tax_year}-{str(uuid4()).split('-')[0].upper()}"
+    content = render_donation_tax_receipt_markdown(
+        receipt_number=receipt_number,
+        organization_name=organization.public_name or organization.name,
+        organization_tax_id=payload.organization_tax_id,
+        donor_name=donation.donor_name,
+        donor_email=donation.donor_email,
+        amount=donation.amount.quantize(Decimal("0.01")),
+        deductible_amount=deductible_amount,
+        currency=donation.currency.upper(),
+        issued_on=issued_on,
+        tax_year=tax_year,
+        jurisdiction=payload.jurisdiction,
+        external_reference=donation.external_reference,
+        message=donation.message,
+    )
+    checksum = sha256(content.encode()).hexdigest()
+    receipt = DonationTaxReceipt(
+        organization_id=donation.organization_id,
+        donation_id=donation.id,
+        donor_profile_id=donor.id if donor is not None else None,
+        receipt_number=receipt_number,
+        issued_on=issued_on,
+        tax_year=tax_year,
+        jurisdiction=payload.jurisdiction,
+        donor_name=donation.donor_name,
+        donor_email=donation.donor_email,
+        organization_name=organization.public_name or organization.name,
+        organization_tax_id=payload.organization_tax_id,
+        deductible_amount=deductible_amount,
+        currency=donation.currency.upper(),
+        status="issued",
+        content_markdown=content,
+        content_checksum=checksum,
+        download_filename=f"{receipt_number.lower()}-tax-receipt.md",
+        notes=payload.notes,
+    )
+    db.add(receipt)
+    await db.commit()
+    await db.refresh(receipt)
+    return donation_tax_receipt_read(receipt)
+
+
+async def list_donation_tax_receipts(
+    db: AsyncSession,
+    organization_id: UUID,
+    donation_id: UUID | None = None,
+) -> list[DonationTaxReceiptRead]:
+    statement = (
+        select(DonationTaxReceipt)
+        .where(DonationTaxReceipt.organization_id == organization_id)
+        .order_by(DonationTaxReceipt.issued_on.desc(), DonationTaxReceipt.created_at.desc())
+    )
+    if donation_id is not None:
+        statement = statement.where(DonationTaxReceipt.donation_id == donation_id)
+    receipts = (await db.scalars(statement)).all()
+    return [donation_tax_receipt_read(receipt) for receipt in receipts]
 
 async def create_donor_profile(
     db: AsyncSession,
@@ -4146,6 +4231,71 @@ def donation_read(donation: Donation, donor: DonorProfile | None = None) -> dict
         "donor_lifetime_giving": donor.lifetime_giving if donor else None,
     }
     return data
+
+
+def donation_tax_receipt_read(receipt: DonationTaxReceipt) -> DonationTaxReceiptRead:
+    return DonationTaxReceiptRead(
+        id=receipt.id,
+        organization_id=receipt.organization_id,
+        donation_id=receipt.donation_id,
+        donor_profile_id=receipt.donor_profile_id,
+        receipt_number=receipt.receipt_number,
+        issued_on=receipt.issued_on,
+        tax_year=receipt.tax_year,
+        jurisdiction=receipt.jurisdiction,
+        donor_name=receipt.donor_name,
+        donor_email=receipt.donor_email,
+        organization_name=receipt.organization_name,
+        organization_tax_id=receipt.organization_tax_id,
+        deductible_amount=receipt.deductible_amount,
+        currency=receipt.currency,
+        status=receipt.status,
+        content_markdown=receipt.content_markdown,
+        content_checksum=receipt.content_checksum,
+        download_filename=receipt.download_filename,
+        notes=receipt.notes,
+    )
+
+
+def render_donation_tax_receipt_markdown(
+    *,
+    receipt_number: str,
+    organization_name: str,
+    organization_tax_id: str | None,
+    donor_name: str,
+    donor_email: str | None,
+    amount: Decimal,
+    deductible_amount: Decimal,
+    currency: str,
+    issued_on: date,
+    tax_year: int,
+    jurisdiction: str,
+    external_reference: str | None,
+    message: str | None,
+) -> str:
+    lines = [
+        "# Donation Tax Receipt",
+        "",
+        f"Receipt number: {receipt_number}",
+        f"Issued on: {issued_on.isoformat()}",
+        f"Tax year: {tax_year}",
+        f"Jurisdiction: {jurisdiction}",
+        "",
+        f"Organization: {organization_name}",
+        f"Organization tax id: {organization_tax_id or 'not provided'}",
+        "",
+        f"Donor: {donor_name}",
+        f"Donor email: {donor_email or 'not provided'}",
+        f"Donation amount: {amount} {currency}",
+        f"Deductible amount: {deductible_amount} {currency}",
+        f"Payment reference: {external_reference or 'not provided'}",
+        "",
+        "No goods or services were provided in exchange for this donation unless separately noted by the organization.",
+        "Donors should consult their tax adviser or local authority for deductibility rules.",
+    ]
+    if message:
+        lines.extend(["", f"Donor message: {message}"])
+    return "\n".join(lines) + "\n"
 
 
 def donor_stewardship_health(

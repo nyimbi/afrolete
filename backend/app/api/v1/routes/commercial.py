@@ -24,6 +24,8 @@ from app.schemas.commercial import (
     CommercialTaxFilingRead,
     DonationCreate,
     DonationRead,
+    DonationTaxReceiptCreate,
+    DonationTaxReceiptRead,
     DonorDashboardRead,
     DonorInteractionCreate,
     DonorInteractionRead,
@@ -175,6 +177,7 @@ from app.services.commercial import (
     list_commercial_settlement_payouts,
     list_campaigns,
     list_donations,
+    list_donation_tax_receipts,
     list_donor_interactions,
     list_donor_profiles,
     list_donor_stewardship_plans,
@@ -219,6 +222,7 @@ from app.services.commercial import (
     list_merchandise_products,
     payment_settlement,
     purchase_ticket_resale_listing,
+    issue_donation_tax_receipt,
     record_donation,
     review_sponsor_content_asset,
     record_sponsor_coupon_redemption,
@@ -618,6 +622,30 @@ async def list_donations_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[DonationRead]:
     return [donation_read(donation) for donation in await list_donations(db, organization_id)]
+
+
+@router.post(
+    "/donations/{donation_id}/tax-receipt",
+    response_model=DonationTaxReceiptRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def issue_donation_tax_receipt_route(
+    donation_id: UUID,
+    payload: DonationTaxReceiptCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DonationTaxReceiptRead:
+    return await issue_donation_tax_receipt(db, identity, donation_id, payload, authz)
+
+
+@router.get("/donation-tax-receipts", response_model=list[DonationTaxReceiptRead])
+async def list_donation_tax_receipts_route(
+    organization_id: UUID = Query(),
+    donation_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[DonationTaxReceiptRead]:
+    return await list_donation_tax_receipts(db, organization_id, donation_id)
 
 
 @router.post("/donors", response_model=DonorProfileRead, status_code=status.HTTP_201_CREATED)

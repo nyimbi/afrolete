@@ -405,6 +405,48 @@ def test_donor_crm_tracks_lifetime_giving_touchpoints_and_stewardship(client, id
     donation = donation_response.json()
     assert donation["donor_profile_id"]
 
+    receipt_response = client.post(
+        f"/api/v1/commercial/donations/{donation['id']}/tax-receipt",
+        headers=identity_headers,
+        json={
+            "issued_on": "2026-06-30",
+            "tax_year": 2026,
+            "jurisdiction": "Kenya",
+            "organization_tax_id": "PIN-AFROLETE-123",
+            "deductible_amount": "1250.00",
+            "notes": "Auto-issued after M-Pesa donation settlement.",
+        },
+    )
+    assert receipt_response.status_code == 201
+    receipt = receipt_response.json()
+    assert receipt["donation_id"] == donation["id"]
+    assert receipt["receipt_number"].startswith("DON-2026-")
+    assert receipt["deductible_amount"] == "1250.00"
+    assert receipt["currency"] == "KES"
+    assert receipt["status"] == "issued"
+    assert receipt["content_checksum"]
+    assert "Donation Tax Receipt" in receipt["content_markdown"]
+    assert "PIN-AFROLETE-123" in receipt["content_markdown"]
+
+    duplicate_receipt_response = client.post(
+        f"/api/v1/commercial/donations/{donation['id']}/tax-receipt",
+        headers=identity_headers,
+        json={
+            "issued_on": "2026-06-30",
+            "tax_year": 2026,
+            "jurisdiction": "Kenya",
+        },
+    )
+    assert duplicate_receipt_response.status_code == 201
+    assert duplicate_receipt_response.json()["id"] == receipt["id"]
+
+    receipts_response = client.get(
+        f"/api/v1/commercial/donation-tax-receipts?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert receipts_response.status_code == 200
+    assert [item["id"] for item in receipts_response.json()] == [receipt["id"]]
+
     donors_response = client.get(
         f"/api/v1/commercial/donors?organization_id={organization['id']}",
         headers=identity_headers,
