@@ -1095,6 +1095,55 @@ class MembershipRead(BaseModel):
     status: str
 
 
+class MemberDuesCollectionRailCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    provider: str = Field(default="mpesa", min_length=2, max_length=80)
+    method: str = Field(default="mobile_money", min_length=2, max_length=80)
+    country_code: str | None = Field(default="KE", min_length=2, max_length=2)
+    currency: str = Field(default="KES", min_length=3, max_length=3)
+    paybill_number: str | None = Field(default=None, max_length=80)
+    till_number: str | None = Field(default=None, max_length=80)
+    account_number: str | None = Field(default=None, max_length=120)
+    account_name: str | None = Field(default=None, max_length=180)
+    bank_name: str | None = Field(default=None, max_length=180)
+    branch_name: str | None = Field(default=None, max_length=180)
+    phone_number: str | None = Field(default=None, max_length=80)
+    instructions: str | None = Field(default=None, max_length=4000)
+    settlement_reference_prefix: str | None = Field(default=None, max_length=80)
+    checkout_priority: int = Field(default=100, ge=0, le=10000)
+    supports_stk_push: bool = False
+    supports_manual_reconciliation: bool = True
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberDuesCollectionRailUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    provider: str | None = Field(default=None, min_length=2, max_length=80)
+    method: str | None = Field(default=None, min_length=2, max_length=80)
+    status: str | None = Field(default=None, pattern="^(active|draft|disabled)$")
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    paybill_number: str | None = Field(default=None, max_length=80)
+    till_number: str | None = Field(default=None, max_length=80)
+    account_number: str | None = Field(default=None, max_length=120)
+    account_name: str | None = Field(default=None, max_length=180)
+    bank_name: str | None = Field(default=None, max_length=180)
+    branch_name: str | None = Field(default=None, max_length=180)
+    phone_number: str | None = Field(default=None, max_length=80)
+    instructions: str | None = Field(default=None, max_length=4000)
+    settlement_reference_prefix: str | None = Field(default=None, max_length=80)
+    checkout_priority: int | None = Field(default=None, ge=0, le=10000)
+    supports_stk_push: bool | None = None
+    supports_manual_reconciliation: bool | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberDuesCollectionRailRead(MemberDuesCollectionRailCreate):
+    id: UUID
+    organization_id: UUID
+    status: str
+
+
 class MemberSubscriptionPlanCreate(BaseModel):
     name: str = Field(
         min_length=2,
@@ -1761,6 +1810,7 @@ class MemberSubscriptionHostedCheckoutRead(BaseModel):
     session_status: str
     client_reference: str
     payment_methods: list[str]
+    collection_rails: list[MemberDuesCollectionRailRead] = Field(default_factory=list)
     settlement_endpoint: str
     checkout_summary: str
 

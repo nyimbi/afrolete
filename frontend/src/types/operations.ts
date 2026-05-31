@@ -1077,6 +1077,30 @@ export type MemberSubscriptionPaymentPlanRead = {
   notes: string | null;
 };
 
+export type MemberDuesCollectionRailRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  provider: string;
+  method: string;
+  status: string;
+  country_code: string | null;
+  currency: string;
+  paybill_number: string | null;
+  till_number: string | null;
+  account_number: string | null;
+  account_name: string | null;
+  bank_name: string | null;
+  branch_name: string | null;
+  phone_number: string | null;
+  instructions: string | null;
+  settlement_reference_prefix: string | null;
+  checkout_priority: number;
+  supports_stk_push: boolean;
+  supports_manual_reconciliation: boolean;
+  notes: string | null;
+};
+
 export type MemberSubscriptionRenewalCampaignRead = {
   id: UUID;
   organization_id: UUID;
@@ -1443,6 +1467,7 @@ export type MemberSubscriptionHostedCheckoutRead = {
   session_status: string;
   client_reference: string;
   payment_methods: string[];
+  collection_rails: MemberDuesCollectionRailRead[];
   settlement_endpoint: string;
   checkout_summary: string;
 };

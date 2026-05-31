@@ -184,7 +184,7 @@ Major capability areas include:
   packages, award payments, expenditures, compliance obligations, milestones,
   auto-generated funder reports, grant portfolio utilization/impact/ROI
   analytics, financial budgeting, forecasting, management financial statements,
-  club-managed member dues with M-Pesa/mobile-money collection support,
+  club-managed member dues with tenant-configured M-Pesa/mobile-money/bank/cash collection rails,
   recurring charge ledgers with payment allocation, receivables aging summaries, payment plans, renewal campaigns with early-bird offers, financial-aid programs, award application review, renewal tracking, appeal resolution, compliance/impact summaries, auditable waivers, downloadable and deliverable member account statements, hosted dues payment links, scheduled dues reminders, lifecycle controls for pausing/reactivating/cancelling member dues accounts and retiring dues plans, and venue
   digital-signage sponsor rotations with playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
@@ -206,7 +206,7 @@ Major capability areas include:
   hosting payer so members are never treated as the AfroLete hosting payer.
   Member dues are a separate club-managed receivables workflow with recurring
   charge cycles, per-period balances, payment allocation, aging summaries, payment plans, renewal campaigns with early-bird offers, financial-aid awards, renewals, appeals, and impact reporting, auditable waivers, downloadable/deliverable member account statements, payment links, reminders, lifecycle controls, and
-  M-Pesa/manual/provider settlements, not AfroLete platform hosting.
+  M-Pesa/manual/provider settlements through tenant-configured collection rails, not AfroLete platform hosting.
 - Offline/PWA operation: installable frontend shell, service worker caching,
   encrypted travel-manifest cache, signed offline artifacts, offline mutation
   outbox, and replay controls.

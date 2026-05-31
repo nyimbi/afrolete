@@ -367,6 +367,7 @@ import type {
   MessageDeliveryStatus,
   MessageRecipientRead,
   MembershipRead,
+  MemberDuesCollectionRailRead,
   MemberSubscriptionChargeRead,
   MemberSubscriptionChargeRunRead,
   MemberSubscriptionChargeWaiverRead,
@@ -1902,6 +1903,7 @@ export default function HomePage() {
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
   const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
+  const [memberDuesCollectionRails, setMemberDuesCollectionRails] = useState<MemberDuesCollectionRailRead[]>([]);
   const [memberRenewalCampaigns, setMemberRenewalCampaigns] = useState<MemberSubscriptionRenewalCampaignRead[]>([]);
   const [memberRenewalOffers, setMemberRenewalOffers] = useState<MemberSubscriptionRenewalOfferRead[]>([]);
   const [memberRenewalRun, setMemberRenewalRun] = useState<MemberSubscriptionRenewalOfferRunRead | null>(null);
@@ -2729,6 +2731,22 @@ export default function HomePage() {
     provider: "mpesa",
     method: "stk_push",
     external_payment_id: "MPESA-DEMO-001"
+  });
+  const [memberDuesCollectionRailForm, setMemberDuesCollectionRailForm] = useState({
+    name: "Club M-Pesa till",
+    provider: "mpesa",
+    method: "mpesa_stk",
+    country_code: "KE",
+    currency: "KES",
+    till_number: "123456",
+    paybill_number: "",
+    account_number: "DUES",
+    account_name: "Dues Managed FC",
+    instructions: "Use the club till or hosted M-Pesa prompt and quote the member dues reference.",
+    settlement_reference_prefix: "DUES",
+    checkout_priority: 10,
+    supports_stk_push: true,
+    supports_manual_reconciliation: true
   });
   const [memberDuesPaymentPlanForm, setMemberDuesPaymentPlanForm] = useState({
     name: "Hardship installment plan",
@@ -4479,6 +4497,7 @@ export default function HomePage() {
       subscriptions,
       charges,
       paymentPlans,
+      collectionRails,
       renewalCampaigns,
       renewalOffers,
       aidPrograms,
@@ -4493,6 +4512,9 @@ export default function HomePage() {
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
       apiRequest<MemberSubscriptionPaymentPlanRead[]>(
         `/organizations/${organizationId}/member-subscription-payment-plans`
+      ),
+      apiRequest<MemberDuesCollectionRailRead[]>(
+        `/organizations/${organizationId}/member-dues-collection-rails`
       ),
       apiRequest<MemberSubscriptionRenewalCampaignRead[]>(
         `/organizations/${organizationId}/member-subscription-renewal-campaigns`
@@ -4513,6 +4535,7 @@ export default function HomePage() {
     setMemberSubscriptions(subscriptions);
     setMemberSubscriptionCharges(charges);
     setMemberDuesPaymentPlans(paymentPlans);
+    setMemberDuesCollectionRails(collectionRails);
     setMemberRenewalCampaigns(renewalCampaigns);
     setMemberRenewalOffers(renewalOffers);
     setFinancialAidPrograms(aidPrograms);
@@ -6230,6 +6253,7 @@ export default function HomePage() {
       setMemberSubscriptions([]);
       setMemberSubscriptionCharges([]);
       setMemberDuesPaymentPlans([]);
+      setMemberDuesCollectionRails([]);
       setMemberRenewalCampaigns([]);
       setMemberRenewalOffers([]);
       setMemberRenewalRun(null);
@@ -7589,6 +7613,54 @@ export default function HomePage() {
           current.map((item) => (item.id === updatedPlan.id ? updatedPlan : item))
         );
         addLog(`${updatedPlan.name} payment plan ${status}`, "good");
+      }
+    );
+  };
+
+  const createMemberDuesCollectionRail = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before adding a dues collection rail", "bad");
+      return;
+    }
+    runAction(
+      "create-member-dues-collection-rail",
+      () =>
+        apiRequest<MemberDuesCollectionRailRead>(
+          `/organizations/${selectedOrganizationId}/member-dues-collection-rails`,
+          {
+            method: "POST",
+            identity,
+            body: memberDuesCollectionRailForm
+          }
+        ),
+      async (rail) => {
+        setMemberDuesCollectionRails((current) => [rail, ...current.filter((item) => item.id !== rail.id)]);
+        await loadMemberDues(selectedOrganizationId);
+        addLog(`${rail.name} dues collection rail active`, "good");
+      }
+    );
+  };
+
+  const updateMemberDuesCollectionRailStatus = (rail: MemberDuesCollectionRailRead, status: "active" | "disabled") => {
+    runAction(
+      `update-member-dues-collection-rail-${rail.id}-${status}`,
+      () =>
+        apiRequest<MemberDuesCollectionRailRead>(
+          `/organizations/member-dues-collection-rails/${rail.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body: { status }
+          }
+        ),
+      async (updated) => {
+        setMemberDuesCollectionRails((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item))
+        );
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
+        addLog(`${updated.name} collection rail ${status}`, "good");
       }
     );
   };
@@ -25088,6 +25160,7 @@ export default function HomePage() {
               <button type="button" onClick={runMemberDuesCharges} disabled={busyAction !== null}>Bill cycle</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
               <button type="button" onClick={createMemberDuesPaymentPlan} disabled={busyAction !== null}>Payment plan</button>
+              <button type="button" onClick={createMemberDuesCollectionRail} disabled={busyAction !== null}>Collection rail</button>
               <button type="button" onClick={createMemberRenewalCampaign} disabled={busyAction !== null}>Renewal campaign</button>
               <button type="button" onClick={runMemberRenewalOffers} disabled={busyAction !== null}>Renewal offers</button>
               <button type="button" onClick={acceptFirstMemberRenewalOffer} disabled={busyAction !== null}>Accept renewal</button>
@@ -25123,6 +25196,28 @@ export default function HomePage() {
               <label>
                 Receipt
                 <input value={memberDuesPaymentForm.external_payment_id} onChange={(event) => setMemberDuesPaymentForm({ ...memberDuesPaymentForm, external_payment_id: event.target.value })} />
+              </label>
+              <label>
+                Rail name
+                <input value={memberDuesCollectionRailForm.name} onChange={(event) => setMemberDuesCollectionRailForm({ ...memberDuesCollectionRailForm, name: event.target.value })} />
+              </label>
+              <label>
+                Rail provider
+                <select value={memberDuesCollectionRailForm.provider} onChange={(event) => setMemberDuesCollectionRailForm({ ...memberDuesCollectionRailForm, provider: event.target.value, method: event.target.value === "bank_transfer" ? "bank_transfer" : memberDuesCollectionRailForm.method })}>
+                  <option value="mpesa">M-Pesa</option>
+                  <option value="airtel_money">Airtel Money</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="cash_office">Cash office</option>
+                  <option value="card">Card</option>
+                </select>
+              </label>
+              <label>
+                Till / account
+                <input value={memberDuesCollectionRailForm.till_number || memberDuesCollectionRailForm.account_number} onChange={(event) => setMemberDuesCollectionRailForm({ ...memberDuesCollectionRailForm, till_number: event.target.value, account_number: event.target.value })} />
+              </label>
+              <label>
+                Rail priority
+                <input type="number" min="0" max="10000" value={memberDuesCollectionRailForm.checkout_priority} onChange={(event) => setMemberDuesCollectionRailForm({ ...memberDuesCollectionRailForm, checkout_priority: Number(event.target.value) })} />
               </label>
               <label>
                 Plan amount
@@ -25243,6 +25338,25 @@ export default function HomePage() {
                     <small>{subscription.dues_reminder_count} reminder(s) · last {subscription.dues_last_reminded_at ? new Date(subscription.dues_last_reminded_at).toLocaleString() : "not sent"}</small>
                   </div>
                   <button type="button" onClick={() => setSelectedMemberSubscriptionId(subscription.id)}>Select</button>
+                </article>
+              ))}
+              {memberDuesCollectionRails.slice(0, 5).map((rail) => (
+                <article key={rail.id} className={`task-card ${rail.status === "active" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{rail.name}</strong>
+                    <span>{rail.provider.replaceAll("_", " ")} · {rail.method.replaceAll("_", " ")} · {rail.currency} · {rail.status}</span>
+                    <small>
+                      {rail.till_number ? `Till ${rail.till_number}` : rail.paybill_number ? `Paybill ${rail.paybill_number}` : rail.account_number ?? "No account reference"} · priority {rail.checkout_priority}
+                    </small>
+                    <small>{rail.instructions ?? "Club-owned collection rail for member dues, separate from AfroLete hosting."}</small>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updateMemberDuesCollectionRailStatus(rail, rail.status === "active" ? "disabled" : "active")}
+                    disabled={busyAction !== null}
+                  >
+                    {rail.status === "active" ? "Disable" : "Activate"}
+                  </button>
                 </article>
               ))}
               {memberDuesPaymentPlans.slice(0, 5).map((paymentPlan) => (

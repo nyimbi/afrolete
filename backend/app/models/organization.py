@@ -409,6 +409,32 @@ class Membership(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
 
 
+class MemberDuesCollectionRail(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_dues_collection_rails"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="mpesa", nullable=False, index=True)
+    method: Mapped[str] = mapped_column(String(80), default="mobile_money", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    country_code: Mapped[str | None] = mapped_column(String(2), index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    paybill_number: Mapped[str | None] = mapped_column(String(80), index=True)
+    till_number: Mapped[str | None] = mapped_column(String(80), index=True)
+    account_number: Mapped[str | None] = mapped_column(String(120), index=True)
+    account_name: Mapped[str | None] = mapped_column(String(180))
+    bank_name: Mapped[str | None] = mapped_column(String(180))
+    branch_name: Mapped[str | None] = mapped_column(String(180))
+    phone_number: Mapped[str | None] = mapped_column(String(80))
+    instructions: Mapped[str | None] = mapped_column(Text)
+    settlement_reference_prefix: Mapped[str | None] = mapped_column(String(80), index=True)
+    checkout_priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False, index=True)
+    supports_stk_push: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    supports_manual_reconciliation: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class MemberSubscriptionPlan(IdMixin, TimestampMixin, Base):
     __tablename__ = "member_subscription_plans"
     __table_args__ = (UniqueConstraint("organization_id", "name"),)

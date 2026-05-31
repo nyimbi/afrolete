@@ -308,6 +308,38 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     ).json()
     assert [item["id"] for item in payment_plans] == [payment_plan["id"]]
 
+    collection_rail_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-dues-collection-rails",
+        headers=identity_headers,
+        json={
+            "name": "Club M-Pesa till",
+            "provider": "mpesa",
+            "method": "mpesa_stk",
+            "country_code": "KE",
+            "currency": "KES",
+            "till_number": "123456",
+            "account_number": "DUES",
+            "account_name": "Dues Managed FC",
+            "instructions": "Pay through the club till and quote your member dues reference.",
+            "settlement_reference_prefix": "DUES",
+            "checkout_priority": 10,
+            "supports_stk_push": True,
+            "supports_manual_reconciliation": True,
+        },
+    )
+    assert collection_rail_response.status_code == 201
+    collection_rail = collection_rail_response.json()
+    assert collection_rail["provider"] == "mpesa"
+    assert collection_rail["method"] == "mpesa_stk"
+    assert collection_rail["status"] == "active"
+    assert collection_rail["till_number"] == "123456"
+
+    collection_rails = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-dues-collection-rails",
+        headers=identity_headers,
+    ).json()
+    assert [item["id"] for item in collection_rails] == [collection_rail["id"]]
+
     checkout_response = client.post(
         f"/api/v1/organizations/member-subscriptions/{subscription['id']}/checkout-link",
         headers=identity_headers,
@@ -317,6 +349,8 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     checkout = checkout_response.json()
     assert checkout["hosted_checkout"]["open_amount"] == "500.00"
     assert checkout["hosted_checkout"]["dues_reference"] == "club-dues-2026-06"
+    assert checkout["hosted_checkout"]["payment_methods"] == ["mpesa_stk"]
+    assert checkout["hosted_checkout"]["collection_rails"][0]["id"] == collection_rail["id"]
     assert "kind=member_dues" in checkout["checkout_url"]
 
     public_checkout_response = client.get(
@@ -326,13 +360,22 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert public_checkout_response.status_code == 200
     public_checkout = public_checkout_response.json()
     assert public_checkout["title"] == "Senior player monthly dues for Member Dues"
-    assert public_checkout["payment_methods"][0] == "mobile_money"
+    assert public_checkout["payment_methods"] == ["mpesa_stk"]
+    assert public_checkout["collection_rails"][0]["till_number"] == "123456"
     assert public_checkout["platform_hosting_charge"] is False
     assert public_checkout["receivable_owner_type"] == "tenant_organization"
     assert public_checkout["receivable_collector_type"] == "club"
     assert public_checkout["hosting_payer_type"] == "club_or_tenant_organization"
     assert public_checkout["mpesa_collection_supported"] is True
     assert "does not pay AfroLete platform hosting" in public_checkout["receivable_note"]
+
+    disabled_rail_response = client.patch(
+        f"/api/v1/organizations/member-dues-collection-rails/{collection_rail['id']}",
+        headers=identity_headers,
+        json={"status": "disabled"},
+    )
+    assert disabled_rail_response.status_code == 200
+    assert disabled_rail_response.json()["status"] == "disabled"
 
     reminder_response = client.post(
         f"/api/v1/organizations/{organization['id']}/member-subscription-reminders/run",

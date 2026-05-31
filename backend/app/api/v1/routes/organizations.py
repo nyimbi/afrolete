@@ -17,6 +17,9 @@ from app.schemas.organization import (
     CommitteeRead,
     FamilyRegistrationInquiryRead,
     MemberAdd,
+    MemberDuesCollectionRailCreate,
+    MemberDuesCollectionRailRead,
+    MemberDuesCollectionRailUpdate,
     MemberSubscriptionCheckoutLinkRead,
     MemberSubscriptionCheckoutSettlementCreate,
     MemberSubscriptionCheckoutSettlementRead,
@@ -172,6 +175,7 @@ from app.services.organizations import (
     create_recovery_drill,
     create_recovery_plan,
     add_organization_group_member,
+    create_member_dues_collection_rail,
     create_member_subscription,
     create_member_subscription_checkout_link,
     create_member_subscription_payment_plan,
@@ -226,12 +230,14 @@ from app.services.organizations import (
     list_recovery_drills,
     list_recovery_plans,
     list_member_subscription_charges,
+    list_member_dues_collection_rails,
     list_member_subscription_payment_plans,
     list_member_subscription_plans,
     list_member_subscription_renewal_campaigns,
     list_member_subscription_renewal_offers,
     list_member_subscriptions,
     member_subscription_receivables_summary,
+    update_member_dues_collection_rail,
     list_organization_market_profiles,
     list_committees,
     list_organizations_for_identity,
@@ -1935,6 +1941,47 @@ def to_member_subscription_charge_read(item) -> MemberSubscriptionChargeRead:
         created_by_person_id=charge.created_by_person_id,
         created_at=charge.created_at,
     )
+
+
+@router.post(
+    "/{organization_id}/member-dues-collection-rails",
+    response_model=MemberDuesCollectionRailRead,
+    status_code=201,
+)
+async def create_member_dues_collection_rail_route(
+    organization_id: UUID,
+    payload: MemberDuesCollectionRailCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberDuesCollectionRailRead:
+    return await create_member_dues_collection_rail(db, identity, organization_id, payload, authz)
+
+
+@router.get(
+    "/{organization_id}/member-dues-collection-rails",
+    response_model=list[MemberDuesCollectionRailRead],
+)
+async def list_member_dues_collection_rails_route(
+    organization_id: UUID,
+    include_disabled: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberDuesCollectionRailRead]:
+    return await list_member_dues_collection_rails(db, organization_id, include_disabled=include_disabled)
+
+
+@router.patch(
+    "/member-dues-collection-rails/{rail_id}",
+    response_model=MemberDuesCollectionRailRead,
+)
+async def update_member_dues_collection_rail_route(
+    rail_id: UUID,
+    payload: MemberDuesCollectionRailUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberDuesCollectionRailRead:
+    return await update_member_dues_collection_rail(db, identity, rail_id, payload, authz)
 
 
 @router.post(

@@ -49,6 +49,7 @@ from app.models.identity import AppUser, Person
 from app.models.organization import (
     Committee,
     CommitteeMembership,
+    MemberDuesCollectionRail,
     MemberSubscription,
     MemberSubscriptionCharge,
     MemberSubscriptionPayment,
@@ -87,6 +88,9 @@ from app.schemas.organization import (
     CommitteeMemberAdd,
     FamilyRegistrationInquiryRead,
     MemberAdd,
+    MemberDuesCollectionRailCreate,
+    MemberDuesCollectionRailRead,
+    MemberDuesCollectionRailUpdate,
     MemberSubscriptionCheckoutLinkRead,
     MemberSubscriptionCheckoutSettlementCreate,
     MemberSubscriptionCheckoutSettlementRead,
@@ -4828,6 +4832,108 @@ async def update_member_subscription(
     return subscription
 
 
+def member_dues_collection_rail_read(rail: MemberDuesCollectionRail) -> MemberDuesCollectionRailRead:
+    return MemberDuesCollectionRailRead(
+        id=rail.id,
+        organization_id=rail.organization_id,
+        name=rail.name,
+        provider=rail.provider,
+        method=rail.method,
+        status=rail.status,
+        country_code=rail.country_code,
+        currency=rail.currency,
+        paybill_number=rail.paybill_number,
+        till_number=rail.till_number,
+        account_number=rail.account_number,
+        account_name=rail.account_name,
+        bank_name=rail.bank_name,
+        branch_name=rail.branch_name,
+        phone_number=rail.phone_number,
+        instructions=rail.instructions,
+        settlement_reference_prefix=rail.settlement_reference_prefix,
+        checkout_priority=rail.checkout_priority,
+        supports_stk_push=rail.supports_stk_push,
+        supports_manual_reconciliation=rail.supports_manual_reconciliation,
+        notes=rail.notes,
+    )
+
+
+async def create_member_dues_collection_rail(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: MemberDuesCollectionRailCreate,
+    authz: AuthorizationService,
+) -> MemberDuesCollectionRailRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    rail = MemberDuesCollectionRail(
+        organization_id=organization_id,
+        name=payload.name,
+        provider=normalize_payment_provider(payload.provider),
+        method=payload.method.strip().lower(),
+        status="active",
+        country_code=payload.country_code.upper() if payload.country_code else None,
+        currency=payload.currency.upper(),
+        paybill_number=payload.paybill_number,
+        till_number=payload.till_number,
+        account_number=payload.account_number,
+        account_name=payload.account_name,
+        bank_name=payload.bank_name,
+        branch_name=payload.branch_name,
+        phone_number=payload.phone_number,
+        instructions=payload.instructions,
+        settlement_reference_prefix=payload.settlement_reference_prefix,
+        checkout_priority=payload.checkout_priority,
+        supports_stk_push=payload.supports_stk_push,
+        supports_manual_reconciliation=payload.supports_manual_reconciliation,
+        notes=payload.notes,
+    )
+    db.add(rail)
+    await db.commit()
+    await db.refresh(rail)
+    return member_dues_collection_rail_read(rail)
+
+
+async def list_member_dues_collection_rails(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    include_disabled: bool = True,
+) -> list[MemberDuesCollectionRailRead]:
+    statement = (
+        select(MemberDuesCollectionRail)
+        .where(MemberDuesCollectionRail.organization_id == organization_id)
+        .order_by(MemberDuesCollectionRail.status, MemberDuesCollectionRail.checkout_priority, MemberDuesCollectionRail.name)
+    )
+    if not include_disabled:
+        statement = statement.where(MemberDuesCollectionRail.status == "active")
+    rails = (await db.scalars(statement)).all()
+    return [member_dues_collection_rail_read(rail) for rail in rails]
+
+
+async def update_member_dues_collection_rail(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    rail_id: UUID,
+    payload: MemberDuesCollectionRailUpdate,
+    authz: AuthorizationService,
+) -> MemberDuesCollectionRailRead:
+    rail = await db.get(MemberDuesCollectionRail, rail_id)
+    if rail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues collection rail not found")
+    await ensure_manage_organization(db, identity, rail.organization_id, authz)
+    updates = payload.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        if field in {"provider", "method"} and value is not None:
+            value = normalize_payment_provider(value) if field == "provider" else value.strip().lower()
+        if field in {"country_code", "currency"} and value is not None:
+            value = value.upper()
+        setattr(rail, field, value)
+    await db.commit()
+    await db.refresh(rail)
+    return member_dues_collection_rail_read(rail)
+
+
 async def list_member_subscriptions(
     db: AsyncSession,
     organization_id: UUID,
@@ -6812,6 +6918,7 @@ async def create_member_subscription_checkout_link(
     await ensure_manage_organization(db, identity, subscription.organization_id, authz)
     normalized_provider = normalize_payment_provider(provider)
     session_id = member_subscription_checkout_session_id(subscription, normalized_provider)
+    collection_rails = await list_member_dues_collection_rails(db, subscription.organization_id, include_disabled=False)
     return MemberSubscriptionCheckoutLinkRead(
         subscription_id=subscription.id,
         provider=normalized_provider,
@@ -6828,6 +6935,7 @@ async def create_member_subscription_checkout_link(
             subject_label,
             normalized_provider,
             session_id,
+            collection_rails,
         ),
     )
 
@@ -6843,12 +6951,14 @@ async def get_member_subscription_hosted_checkout(
     expected_session_id = member_subscription_checkout_session_id(subscription, normalized_provider)
     if session_id != expected_session_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues checkout session not found")
+    collection_rails = await list_member_dues_collection_rails(db, subscription.organization_id, include_disabled=False)
     return member_subscription_hosted_checkout_read(
         subscription,
         plan,
         subject_label,
         normalized_provider,
         session_id,
+        collection_rails,
     )
 
 
@@ -7395,11 +7505,14 @@ def member_subscription_hosted_checkout_read(
     subject_label: str | None,
     provider: str,
     session_id: str,
+    collection_rails: list[MemberDuesCollectionRailRead] | None = None,
 ) -> MemberSubscriptionHostedCheckoutRead:
     open_amount = member_subscription_open_amount(subscription)
     paid_amount = max(plan.amount - open_amount, Decimal("0.00")).quantize(Decimal("0.01"))
     display_subject = subject_label or f"{subscription.subject_type.value}:{subscription.subject_id}"
     title = f"{plan.name} for {display_subject}"
+    active_rails = collection_rails or []
+    payment_methods = [rail.method for rail in active_rails] or ["mobile_money", "mpesa_stk", "bank_transfer", "cash_office"]
     return MemberSubscriptionHostedCheckoutRead(
         subscription_id=subscription.id,
         organization_id=subscription.organization_id,
@@ -7413,7 +7526,7 @@ def member_subscription_hosted_checkout_read(
         ),
         hosting_payer_type="club_or_tenant_organization",
         platform_hosting_charge=False,
-        mpesa_collection_supported=True,
+        mpesa_collection_supported=any(rail.provider == "mpesa" for rail in active_rails) or not active_rails,
         subject_label=subject_label,
         dues_reference=subscription.external_reference or f"DUES-{str(subscription.id).split('-')[0].upper()}",
         title=title,
@@ -7428,7 +7541,8 @@ def member_subscription_hosted_checkout_read(
         session_id=session_id,
         session_status=member_subscription_checkout_session_status(subscription),
         client_reference=f"member-dues:{subscription.id}",
-        payment_methods=["mobile_money", "mpesa_stk", "bank_transfer", "cash_office"],
+        payment_methods=payment_methods,
+        collection_rails=active_rails,
         settlement_endpoint=f"/api/v1/organizations/member-subscription-checkout-sessions/{session_id}/settle",
         checkout_summary=(
             f"{title} has {open_amount} {plan.currency.upper()} outstanding for the club."
