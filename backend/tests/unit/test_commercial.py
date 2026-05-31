@@ -610,6 +610,26 @@ def test_grant_application_internal_approval_workflow(client, identity_headers) 
     assert award_summary["overdue_count"] == 1
     assert award_summary["health"] == "attention_required"
 
+    generated_report_response = client.post(
+        "/api/v1/commercial/grants/reports/generate",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "grant_application_id": application["id"],
+            "report_type": "interim_progress",
+            "due_on": "2026-06-30",
+            "template_name": "standard_funder_report",
+            "narrative_notes": "Weather delayed one community session.",
+        },
+    )
+    assert generated_report_response.status_code == 201
+    generated_report = generated_report_response.json()
+    assert generated_report["status"] == "draft"
+    assert "Financial report: 25000.00 USD received, 15200.00 expended" in generated_report["narrative"]
+    assert "Open compliance items: Progress photos due" in generated_report["narrative"]
+    assert "Funds received 25000.00; spent 15200.00" in generated_report["metrics_summary"]
+    assert generated_report["project_title"] == "Scholarship expansion"
+
 
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,

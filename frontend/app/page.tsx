@@ -20280,6 +20280,36 @@ export default function HomePage() {
     );
   };
 
+  const generateGrantReport = () => {
+    if (!selectedOrganizationId || !selectedGrantApplicationId) {
+      addLog("Create or select a grant application first", "bad");
+      return;
+    }
+    runAction(
+      "generate-grant-report",
+      () =>
+        apiRequest<GrantReportRead>("/commercial/grants/reports/generate", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            grant_application_id: selectedGrantApplicationId,
+            report_type: grantForm.report_type,
+            due_on: grantForm.report_due_on,
+            status: "draft",
+            template_name: "standard_funder_report",
+            narrative_notes: grantForm.narrative,
+            external_reference: `GRANT-GEN-${Date.now()}`
+          }
+        }),
+      (report) => {
+        setGrantReports((current) => [report, ...current.filter((item) => item.id !== report.id)]);
+        addLog(`${report.report_type} funder report generated`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const requestGrantApplicationApproval = () => {
     if (!selectedOrganizationId || !selectedGrantApplicationId) {
       addLog("Create or select a grant application first", "bad");
@@ -27248,6 +27278,7 @@ export default function HomePage() {
                 <button type="button" onClick={completeSelectedDonorStewardshipPlan} disabled={busyAction !== null}>Complete donor</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
+                <button type="button" onClick={generateGrantReport} disabled={busyAction !== null}>Draft report</button>
                 <button type="button" onClick={requestGrantApplicationApproval} disabled={busyAction !== null}>Approve grant</button>
                 <button type="button" onClick={createGrantSubmissionPackage} disabled={busyAction !== null}>Submit grant</button>
                 <button type="button" onClick={createGrantAwardRecord} disabled={busyAction !== null}>Award record</button>
@@ -27977,6 +28008,7 @@ export default function HomePage() {
                   <div>
                     <strong>{report.report_type} report · {report.status}</strong>
                     <span>{report.project_title ?? "Grant application"} · due {report.due_on}</span>
+                    <small>{report.metrics_summary ?? report.narrative ?? "No generated metrics yet"}</small>
                   </div>
                 </article>
               ))}

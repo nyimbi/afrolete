@@ -108,6 +108,7 @@ from app.schemas.commercial import (
     GrantDashboardRead,
     GrantOpportunityCreate,
     GrantReportCreate,
+    GrantReportGenerateCreate,
     GrantSubmissionPackageCreate,
     GrantSubmissionPackageRead,
     GrantSubmissionPackageUpdate,
@@ -1322,6 +1323,86 @@ async def create_grant_report(
     await ensure_manage_commercial(authz, identity, payload.organization_id)
     await get_grant_application_for_organization(db, payload.grant_application_id, payload.organization_id)
     report = GrantReport(**payload.model_dump())
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
+async def generate_grant_report(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantReportGenerateCreate,
+    authz: AuthorizationService,
+) -> GrantReport:
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    application = await get_grant_application_for_organization(
+        db,
+        payload.grant_application_id,
+        payload.organization_id,
+    )
+    summary = await grant_award_summary(db, payload.organization_id, payload.grant_application_id)
+    records = list(
+        (
+            await db.scalars(
+                select(GrantAwardRecord)
+                .where(GrantAwardRecord.organization_id == payload.organization_id)
+                .where(GrantAwardRecord.grant_application_id == payload.grant_application_id)
+                .order_by(GrantAwardRecord.record_type, GrantAwardRecord.due_on)
+            )
+        ).all()
+    )
+    packages = (
+        await db.scalars(
+            select(GrantSubmissionPackage)
+            .where(GrantSubmissionPackage.organization_id == payload.organization_id)
+            .where(GrantSubmissionPackage.grant_application_id == payload.grant_application_id)
+            .order_by(GrantSubmissionPackage.created_at.desc())
+        )
+    ).all()
+    milestone_done = [record.title for record in records if record.record_type == "milestone" and record.status in {"complete", "completed", "accepted"}]
+    compliance_open = [record.title for record in records if record.record_type == "compliance" and record.status not in {"complete", "completed", "accepted"}]
+    expenditure_categories: dict[str, Decimal] = {}
+    for record in records:
+        if record.record_type == "expenditure" and record.status in {"approved", "paid", "recorded", "submitted"}:
+            key = record.category or "uncategorized"
+            expenditure_categories[key] = expenditure_categories.get(key, Decimal("0")) + record.amount
+    latest_package = packages[0] if packages else None
+    narrative_parts = [
+        f"Template: {payload.template_name}.",
+        f"Project progress: {summary.milestone_completed_count}/{summary.milestone_total_count} milestones completed.",
+        f"Completed activities: {', '.join(milestone_done) if milestone_done else 'No completed milestones recorded yet.'}",
+        f"Financial report: {summary.funds_received} {summary.currency} received, {summary.expenditures_to_date} expended, {summary.funds_balance} cash balance, {summary.budget_remaining} budget remaining.",
+        "Expenditure breakdown: "
+        + (
+            "; ".join(f"{category}: {amount.quantize(Decimal('0.01'))}" for category, amount in sorted(expenditure_categories.items()))
+            if expenditure_categories
+            else "No grant-funded expenditures recorded yet."
+        ),
+        f"Compliance: {summary.compliance_open_count}/{summary.compliance_total_count} requirements open; overdue obligations {summary.overdue_count}.",
+        f"Open compliance items: {', '.join(compliance_open) if compliance_open else 'None.'}",
+        f"Impact metrics: {application.impact_metrics or 'No impact metrics recorded yet.'}",
+        f"Submission tracking: {latest_package.confirmation_reference if latest_package and latest_package.confirmation_reference else 'No funder confirmation reference recorded.'}",
+        f"Recommendations: {' '.join(summary.recommendations)}",
+    ]
+    if payload.narrative_notes:
+        narrative_parts.append(f"Staff notes: {payload.narrative_notes}")
+    metrics_summary = (
+        f"Funds received {summary.funds_received}; spent {summary.expenditures_to_date}; "
+        f"balance {summary.funds_balance}; compliance open {summary.compliance_open_count}; "
+        f"milestones {summary.milestone_completed_count}/{summary.milestone_total_count}; health {summary.health}."
+    )
+    report = GrantReport(
+        organization_id=payload.organization_id,
+        grant_application_id=payload.grant_application_id,
+        report_type=payload.report_type,
+        due_on=payload.due_on,
+        status=payload.status,
+        narrative="\n".join(narrative_parts),
+        metrics_summary=metrics_summary,
+        artifact_url=payload.artifact_url,
+        external_reference=payload.external_reference or f"GEN-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}",
+    )
     db.add(report)
     await db.commit()
     await db.refresh(report)

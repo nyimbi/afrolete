@@ -648,6 +648,18 @@ class GrantReportCreate(BaseModel):
     external_reference: str | None = Field(default=None, max_length=240)
 
 
+class GrantReportGenerateCreate(BaseModel):
+    organization_id: UUID
+    grant_application_id: UUID
+    report_type: str = Field(default="interim_progress", min_length=2, max_length=80)
+    due_on: date
+    status: str = Field(default="draft", min_length=2, max_length=40)
+    template_name: str = Field(default="standard_funder_report", min_length=2, max_length=120)
+    narrative_notes: str | None = Field(default=None, max_length=4000)
+    artifact_url: str | None = Field(default=None, max_length=500)
+    external_reference: str | None = Field(default=None, max_length=240)
+
+
 class GrantReportRead(GrantReportCreate):
     id: UUID
     project_title: str | None = None

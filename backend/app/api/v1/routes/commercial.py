@@ -58,6 +58,7 @@ from app.schemas.commercial import (
     GrantOpportunityCreate,
     GrantOpportunityRead,
     GrantReportCreate,
+    GrantReportGenerateCreate,
     GrantReportRead,
     GrantSubmissionPackageCreate,
     GrantSubmissionPackageRead,
@@ -153,6 +154,7 @@ from app.services.commercial import (
     donor_dashboard,
     execute_payment_settlement_payout,
     generate_financial_statement_package,
+    generate_grant_report,
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
     issue_complimentary_tickets,
@@ -814,6 +816,19 @@ async def create_grant_report_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> GrantReportRead:
     report = await create_grant_report(db, identity, payload, authz)
+    applications = await list_grant_applications(db, payload.organization_id)
+    application_by_id = {application.id: application for application, _ in applications}
+    return grant_report_read(report, application_by_id.get(report.grant_application_id))
+
+
+@router.post("/grants/reports/generate", response_model=GrantReportRead, status_code=status.HTTP_201_CREATED)
+async def generate_grant_report_route(
+    payload: GrantReportGenerateCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantReportRead:
+    report = await generate_grant_report(db, identity, payload, authz)
     applications = await list_grant_applications(db, payload.organization_id)
     application_by_id = {application.id: application for application, _ in applications}
     return grant_report_read(report, application_by_id.get(report.grant_application_id))
