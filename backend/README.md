@@ -58,7 +58,7 @@ cd backend
 uv run python -m app.workers.due --limit 25
 ```
 
-Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, `--lane billing-payment-retries`, `--lane billing-recurring-invoices`, `--lane communication-digests`,
+Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, `--lane billing-payment-retries`, `--lane billing-recurring-invoices`, `--lane commercial-grant-alerts`, `--lane communication-digests`,
 `--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
@@ -76,6 +76,9 @@ open invoices, records retry attempt state, applies webhook-reported
 collections, and marks subscriptions past due while respecting retry windows and
 max-attempt limits. The communication digest lane creates daily/weekly digests
 for people with matching notification preferences and unread inbox items. The
+commercial grant alert lane executes due saved searches, persists run evidence,
+updates last-run match counts, and leaves outbound funder/channel delivery to
+the later provider integration layer. The
 communication escalation lane scans unresolved urgent messages and creates
 quiet-hours-override escalation messages with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with

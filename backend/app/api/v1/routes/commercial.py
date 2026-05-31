@@ -65,6 +65,8 @@ from app.schemas.commercial import (
     GrantReportCreate,
     GrantReportGenerateCreate,
     GrantReportRead,
+    GrantSavedSearchAlertRunCreate,
+    GrantSavedSearchAlertRunRead,
     GrantSavedSearchCreate,
     GrantSavedSearchRead,
     GrantSavedSearchRunRead,
@@ -193,6 +195,7 @@ from app.services.commercial import (
     grant_portfolio_summary,
     update_grant_opportunity_match,
     run_grant_saved_search,
+    run_grant_saved_search_alert_scheduler,
     update_grant_saved_search,
     update_grant_submission_package,
     list_invoices,
@@ -780,6 +783,16 @@ async def run_grant_saved_search_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> GrantSavedSearchRunRead:
     return await run_grant_saved_search(db, identity, saved_search_id, authz)
+
+
+@router.post("/grants/saved-search-alerts/run", response_model=GrantSavedSearchAlertRunRead)
+async def run_grant_saved_search_alerts_route(
+    payload: GrantSavedSearchAlertRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantSavedSearchAlertRunRead:
+    return await run_grant_saved_search_alert_scheduler(db, identity, payload, authz)
 
 
 @router.post("/grants/applications", response_model=GrantApplicationRead, status_code=status.HTTP_201_CREATED)

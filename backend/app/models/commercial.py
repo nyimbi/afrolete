@@ -364,6 +364,23 @@ class GrantSavedSearch(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class GrantSavedSearchRun(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_saved_search_runs"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    saved_search_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("grant_saved_searches.id"), index=True)
+    triggered_by: Mapped[str] = mapped_column(String(80), default="manual", nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="completed", nullable=False, index=True)
+    match_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    high_fit_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    alert_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    average_score: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0"), nullable=False)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    message: Mapped[str | None] = mapped_column(Text)
+
+
 class GrantApplication(IdMixin, TimestampMixin, Base):
     __tablename__ = "grant_applications"
 

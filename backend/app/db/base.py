@@ -85,6 +85,7 @@ from app.models.commercial import (  # noqa: F401,E402
     GrantOpportunityMatch,
     GrantReport,
     GrantSavedSearch,
+    GrantSavedSearchRun,
     GrantSubmissionPackage,
     MerchandiseOrder,
     MerchandiseOrderLine,

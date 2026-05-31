@@ -203,6 +203,66 @@ def test_grant_saved_searches_preserve_criteria_and_run_alerts(client, identity_
     assert paused["alert_frequency"] == "manual"
 
 
+def test_grant_saved_search_alert_run_executes_due_searches(client, identity_headers) -> None:
+    organization, _, _ = create_commercial_context(client, identity_headers)
+    client.post(
+        "/api/v1/commercial/grants/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "funder_name": "Foundation Alert Fund",
+            "program_name": "Youth Football Equipment Alert Grant",
+            "category": "equipment",
+            "impact_area": "Youth football equipment, coach development, and scholarships",
+            "award_ceiling": "20000.00",
+            "matching_required": "0.00",
+            "currency": "KES",
+            "due_on": "2026-10-01",
+            "eligibility_summary": "Youth football clubs with scholarship access programs.",
+            "requirements": "Equipment budget and safeguarding evidence.",
+            "status": "open",
+        },
+    )
+    saved_search = client.post(
+        "/api/v1/commercial/grants/saved-searches",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Equipment alerts",
+            "profile_name": "equipment access",
+            "focus_terms": ["youth", "football", "equipment", "scholarship"],
+            "excluded_terms": [],
+            "minimum_score": "50.00",
+            "limit": 5,
+            "alert_enabled": True,
+            "alert_frequency": "daily",
+            "alert_channel": "in_app",
+        },
+    ).json()
+
+    alert_run_response = client.post(
+        "/api/v1/commercial/grants/saved-search-alerts/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "run_at": "2026-06-01T09:00:00Z",
+            "limit": 10,
+            "dry_run": False,
+        },
+    )
+    assert alert_run_response.status_code == 200
+    alert_run = alert_run_response.json()
+    assert alert_run["eligible_count"] == 1
+    assert alert_run["executed_count"] == 1
+    assert alert_run["match_count"] == 1
+    assert alert_run["high_fit_count"] == 1
+    assert alert_run["alert_count"] == 1
+    assert alert_run["saved_search_ids"] == [saved_search["id"]]
+    assert len(alert_run["run_record_ids"]) == 1
+    assert alert_run["results"][0]["triggered_by"] == "scheduled_alert"
+    assert alert_run["results"][0]["saved_search_name"] == "Equipment alerts"
+
+
 def test_financial_budget_planning_tracks_variance_cash_and_scenarios(client, identity_headers) -> None:
     organization, _, _ = create_commercial_context(client, identity_headers)
 

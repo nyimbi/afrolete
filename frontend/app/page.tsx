@@ -310,6 +310,7 @@ import type {
   GrantOpportunityRead,
   GrantPortfolioSummaryRead,
   GrantReportRead,
+  GrantSavedSearchAlertRunRead,
   GrantSavedSearchRead,
   GrantSavedSearchRunRead,
   GrantSubmissionPackageRead,
@@ -2355,6 +2356,7 @@ export default function HomePage() {
   const [grantDiscoveryRun, setGrantDiscoveryRun] = useState<GrantOpportunityDiscoveryRunRead | null>(null);
   const [grantSavedSearches, setGrantSavedSearches] = useState<GrantSavedSearchRead[]>([]);
   const [grantSavedSearchRun, setGrantSavedSearchRun] = useState<GrantSavedSearchRunRead | null>(null);
+  const [grantSavedSearchAlertRun, setGrantSavedSearchAlertRun] = useState<GrantSavedSearchAlertRunRead | null>(null);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
@@ -6406,6 +6408,7 @@ export default function HomePage() {
       setGrantDiscoveryRun(null);
       setGrantSavedSearches([]);
       setGrantSavedSearchRun(null);
+      setGrantSavedSearchAlertRun(null);
       setGrantReports([]);
       setGrantDashboard(null);
       setMerchandiseProducts([]);
@@ -20409,6 +20412,33 @@ export default function HomePage() {
     );
   };
 
+  const runGrantSavedSearchAlerts = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running grant alerts", "bad");
+      return;
+    }
+    runAction(
+      "run-grant-saved-search-alerts",
+      () =>
+        apiRequest<GrantSavedSearchAlertRunRead>("/commercial/grants/saved-search-alerts/run", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            limit: 25,
+            dry_run: false
+          }
+        }),
+      (run) => {
+        setGrantSavedSearchAlertRun(run);
+        addLog(`Grant alerts executed ${run.executed_count}/${run.eligible_count} search(es)`, run.failed_count ? "bad" : "good");
+        if (selectedOrganizationId) {
+          void loadCommercial(selectedOrganizationId);
+        }
+      }
+    );
+  };
+
   const reviewGrantOpportunityMatch = (match: GrantOpportunityMatchRead, alertStatus: "reviewed" | "dismissed" | "applied") => {
     runAction(
       `grant-match-${match.id}-${alertStatus}`,
@@ -21730,7 +21760,7 @@ export default function HomePage() {
 
   const createUsageMeterAndRecord = () => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
-      addLog("Create or select a subscription first", "bad");
+      addLog("Create or select a club hosting subscription first", "bad");
       return;
     }
     runAction(
@@ -21774,7 +21804,7 @@ export default function HomePage() {
 
   const createSaaSInvoiceAndPayment = () => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
-      addLog("Create or select a subscription first", "bad");
+      addLog("Create or select a club hosting subscription first", "bad");
       return;
     }
     runAction(
@@ -21848,7 +21878,7 @@ export default function HomePage() {
 
   const createBillingEntitlement = () => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
-      addLog("Create or select a subscription first", "bad");
+      addLog("Create or select a club hosting subscription first", "bad");
       return;
     }
     runAction(
@@ -21946,7 +21976,7 @@ export default function HomePage() {
 
   const quoteBillingProration = () => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
-      addLog("Create or select a subscription first", "bad");
+      addLog("Create or select a club hosting subscription first", "bad");
       return;
     }
     runAction(
@@ -21965,7 +21995,7 @@ export default function HomePage() {
 
   const applyBillingPlanChange = () => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
-      addLog("Create or select a subscription first", "bad");
+      addLog("Create or select a club hosting subscription first", "bad");
       return;
     }
     runAction(
@@ -21997,7 +22027,7 @@ export default function HomePage() {
     action: "cancel_at_period_end" | "cancel_now" | "undo_cancel" | "pause" | "resume"
   ) => {
     if (!selectedOrganizationId || !selectedSubscriptionId) {
-      addLog("Create or select a subscription first", "bad");
+      addLog("Create or select a club hosting subscription first", "bad");
       return;
     }
     runAction(
@@ -22175,7 +22205,7 @@ export default function HomePage() {
         ),
       (link) => {
         setSaasCheckoutLink(link);
-        addLog(`SaaS checkout ready: ${link.hosted_checkout.open_amount}`, "good");
+        addLog(`Club hosting checkout ready: ${link.hosted_checkout.open_amount}`, "good");
         if (typeof window !== "undefined") {
           window.open(link.checkout_url, "_blank", "noopener,noreferrer");
         }
@@ -24086,7 +24116,7 @@ export default function HomePage() {
             <div className="panel-head">
               <div>
                 <p className="section-label">Member dues</p>
-                <h2>Member dues ledger</h2>
+                <h2>Club-managed dues ledger</h2>
               </div>
               <button type="button" onClick={createMemberDuesPlan} disabled={busyAction !== null}>Plan</button>
             </div>
@@ -27475,6 +27505,7 @@ export default function HomePage() {
                 <button type="button" onClick={runGrantDiscovery} disabled={busyAction !== null}>Discover grants</button>
                 <button type="button" onClick={saveGrantDiscoverySearch} disabled={busyAction !== null}>Save search</button>
                 <button type="button" onClick={runSelectedGrantSavedSearch} disabled={busyAction !== null}>Run saved</button>
+                <button type="button" onClick={runGrantSavedSearchAlerts} disabled={busyAction !== null}>Run alerts</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
                 <button type="button" onClick={generateGrantReport} disabled={busyAction !== null}>Draft report</button>
                 <button type="button" onClick={requestGrantApplicationApproval} disabled={busyAction !== null}>Approve grant</button>
@@ -28008,6 +28039,19 @@ export default function HomePage() {
                       {grantSavedSearchRun.saved_search.last_match_count} matches · {grantSavedSearchRun.saved_search.last_high_fit_count} high fit · {grantSavedSearchRun.saved_search.alert_frequency}
                     </span>
                     <small>{grantSavedSearchRun.saved_search.alert_channel} · last run {grantSavedSearchRun.saved_search.last_run_at ?? "not run"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {grantSavedSearchAlertRun ? (
+                <article className={`task-card ${grantSavedSearchAlertRun.failed_count ? "risk-card" : "selected"}`}>
+                  <div>
+                    <strong>Scheduled grant alerts · {grantSavedSearchAlertRun.executed_count}/{grantSavedSearchAlertRun.eligible_count}</strong>
+                    <span>
+                      {grantSavedSearchAlertRun.match_count} matches · {grantSavedSearchAlertRun.high_fit_count} high fit · {grantSavedSearchAlertRun.alert_count} alerts
+                    </span>
+                    <small>
+                      {grantSavedSearchAlertRun.failed_count} failed · {grantSavedSearchAlertRun.dry_run ? "dry run" : "recorded"} · {grantSavedSearchAlertRun.run_record_ids.length} run logs
+                    </small>
                   </div>
                 </article>
               ) : null}
@@ -29136,7 +29180,7 @@ export default function HomePage() {
             <div className="panel-head">
               <div>
                 <p className="section-label">Club-paid hosting</p>
-                <h2>Tenant plans</h2>
+                <h2>Club hosting plans</h2>
               </div>
               <div className="event-toolbar">
                 <button type="button" onClick={createBillingPlanAndSubscription} disabled={busyAction !== null}>Bill club</button>
@@ -29283,7 +29327,7 @@ export default function HomePage() {
           <div className="panel form-panel">
             <div className="panel-head">
               <div>
-                <p className="section-label">Usage and invoices</p>
+                <p className="section-label">Club hosting usage and invoices</p>
                 <h2>Metering and collection</h2>
               </div>
               <div className="event-toolbar">

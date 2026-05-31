@@ -601,6 +601,46 @@ class GrantSavedSearchRunRead(BaseModel):
     discovery_run: GrantOpportunityDiscoveryRunRead
 
 
+class GrantSavedSearchRunRecordRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    saved_search_id: UUID
+    saved_search_name: str | None = None
+    triggered_by: str
+    started_at: datetime
+    completed_at: datetime | None
+    status: str
+    match_count: int
+    high_fit_count: int
+    alert_count: int
+    average_score: Decimal
+    dry_run: bool
+    message: str | None
+
+
+class GrantSavedSearchAlertRunCreate(BaseModel):
+    organization_id: UUID
+    run_at: datetime | None = None
+    limit: int = Field(default=25, ge=1, le=200)
+    dry_run: bool = False
+
+
+class GrantSavedSearchAlertRunRead(BaseModel):
+    organization_id: UUID | None
+    run_at: datetime
+    eligible_count: int
+    executed_count: int
+    skipped_count: int
+    failed_count: int
+    match_count: int
+    high_fit_count: int
+    alert_count: int
+    dry_run: bool
+    saved_search_ids: list[UUID]
+    run_record_ids: list[UUID]
+    results: list[GrantSavedSearchRunRecordRead]
+
+
 class GrantApplicationCreate(BaseModel):
     organization_id: UUID
     grant_opportunity_id: UUID

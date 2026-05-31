@@ -19,6 +19,7 @@ from app.services.billing import (
     run_payment_retry_worker,
     run_recurring_invoice_worker,
 )
+from app.services.commercial import run_grant_saved_search_alert_worker
 from app.services.communications import (
     run_digest_scheduler_worker,
     run_message_escalation_worker,
@@ -53,6 +54,7 @@ WORKER_LANES = (
     "communication-digests",
     "communication-escalations",
     "communication-scheduled-dispatch",
+    "commercial-grant-alerts",
     "compliance-reconciliation",
     "developer-webhooks",
     "emergency-escalations",
@@ -111,6 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run-communication-escalations", action="store_true")
     parser.add_argument("--communication-scheduled-dispatch-limit", type=int, default=None)
     parser.add_argument("--dry-run-communication-scheduled-dispatch", action="store_true")
+    parser.add_argument("--commercial-grant-alert-limit", type=int, default=None)
+    parser.add_argument("--dry-run-commercial-grant-alerts", action="store_true")
     parser.add_argument(
         "--communication-escalation-channel",
         choices=[channel.value for channel in CommunicationChannel],
@@ -313,6 +317,8 @@ async def run_due_workers(
     dry_run_communication_escalations: bool = False,
     communication_scheduled_dispatch_limit: int | None = None,
     dry_run_communication_scheduled_dispatch: bool = False,
+    commercial_grant_alert_limit: int | None = None,
+    dry_run_commercial_grant_alerts: bool = False,
     compliance_reconciliation_limit: int | None = None,
     webhook_limit: int | None = None,
     emergency_escalation_limit: int | None = None,
@@ -469,6 +475,15 @@ async def run_due_workers(
                 organization_id=organization_id,
                 limit=communication_scheduled_dispatch_limit or limit,
                 dry_run=dry_run_communication_scheduled_dispatch,
+            )
+        ).model_dump(mode="json")
+    if "commercial-grant-alerts" in active_lanes:
+        results["commercial_grant_alerts"] = (
+            await run_grant_saved_search_alert_worker(
+                db,
+                organization_id=organization_id,
+                limit=commercial_grant_alert_limit or limit,
+                dry_run=dry_run_commercial_grant_alerts,
             )
         ).model_dump(mode="json")
     if "compliance-reconciliation" in active_lanes:
@@ -736,6 +751,8 @@ async def run() -> None:
             dry_run_communication_escalations=args.dry_run_communication_escalations,
             communication_scheduled_dispatch_limit=args.communication_scheduled_dispatch_limit,
             dry_run_communication_scheduled_dispatch=args.dry_run_communication_scheduled_dispatch,
+            commercial_grant_alert_limit=args.commercial_grant_alert_limit,
+            dry_run_commercial_grant_alerts=args.dry_run_commercial_grant_alerts,
             compliance_reconciliation_limit=args.compliance_reconciliation_limit,
             webhook_limit=args.webhook_limit,
             emergency_escalation_limit=args.emergency_escalation_limit,

@@ -178,7 +178,7 @@ Major capability areas include:
 - Finance, sponsorship, fundraising, ticketing, invoices, payments, refunds,
   tax, accounting, payouts, sponsor portals, public support showcases,
   donor CRM and stewardship, grant opportunity discovery/matching/alerts,
-  saved grant searches, grant application internal approvals, submission
+  saved grant searches with scheduled alert runs, grant application internal approvals, submission
   packages, award payments, expenditures, compliance obligations, milestones,
   auto-generated funder reports, grant portfolio utilization/impact/ROI
   analytics, financial budgeting, forecasting, management financial statements,
@@ -197,7 +197,7 @@ Major capability areas include:
   inbound provider callback contracts, replay, retry workers, database or
   Redis-backed quotas, and integration catalogs.
 - SaaS billing and subscriptions: AfroLete hosting plans paid by the tenant
-  organization, tenant subscriptions, lifecycle actions, entitlements,
+  club, school, association, or organization, tenant subscriptions, lifecycle actions, entitlements,
   enforcement, metering, recurring invoices, dunning, late fees, payment
   retries, checkout links, signed tax filing packages, provider webhooks, and
   billing summaries. Member dues are a separate club-managed receivables
@@ -316,7 +316,7 @@ or MinIO. It must not duplicate backend source-of-truth business rules.
 ### Workers
 
 The backend includes a unified due-worker that can run scheduler-ready lanes for
-agent tasks, developer webhooks, billing, communications, travel reminders,
+agent tasks, developer webhooks, billing, communications, commercial grant alerts, travel reminders,
 emergency escalation, performance achievements, forecast validation, review
 escalation, injury-risk alerts, object-storage lifecycle cleanup, performance
 video pose extraction, wearable pulls, and compliance reconciliation. The video

@@ -37,6 +37,7 @@ from app.models.commercial import (
     GrantOpportunityMatch,
     GrantReport,
     GrantSavedSearch,
+    GrantSavedSearchRun,
     GrantSubmissionPackage,
     MerchandiseOrder,
     MerchandiseOrderLine,
@@ -118,8 +119,11 @@ from app.schemas.commercial import (
     GrantReportCreate,
     GrantReportGenerateCreate,
     GrantSavedSearchCreate,
+    GrantSavedSearchAlertRunCreate,
+    GrantSavedSearchAlertRunRead,
     GrantSavedSearchRead,
     GrantSavedSearchRunRead,
+    GrantSavedSearchRunRecordRead,
     GrantSavedSearchUpdate,
     GrantSubmissionPackageCreate,
     GrantSubmissionPackageRead,
@@ -1023,6 +1027,13 @@ async def discover_grant_opportunities(
 ) -> GrantOpportunityDiscoveryRunRead:
     await get_organization(db, payload.organization_id)
     await ensure_manage_commercial(authz, identity, payload.organization_id)
+    return await execute_grant_discovery(db, payload)
+
+
+async def execute_grant_discovery(
+    db: AsyncSession,
+    payload: GrantOpportunityDiscoveryRunCreate,
+) -> GrantOpportunityDiscoveryRunRead:
     focus_terms = normalize_discovery_terms(payload.focus_terms)
     excluded_terms = normalize_discovery_terms(payload.excluded_terms)
     profile_name = payload.profile_name.strip() or "default"
@@ -1194,9 +1205,137 @@ async def run_grant_saved_search(
 ) -> GrantSavedSearchRunRead:
     saved_search = await get_grant_saved_search(db, saved_search_id)
     await ensure_manage_commercial(authz, identity, saved_search.organization_id)
-    discovery_run = await discover_grant_opportunities(
+    discovery_run, _record = await run_grant_saved_search_record(
         db,
-        identity,
+        saved_search,
+        triggered_by="manual",
+        dry_run=False,
+    )
+    return GrantSavedSearchRunRead(
+        saved_search=grant_saved_search_read(saved_search),
+        discovery_run=discovery_run,
+    )
+
+
+async def run_grant_saved_search_alert_scheduler(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantSavedSearchAlertRunCreate,
+    authz: AuthorizationService,
+) -> GrantSavedSearchAlertRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    return await run_grant_saved_search_alert_worker(
+        db,
+        organization_id=payload.organization_id,
+        run_at=payload.run_at,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_grant_saved_search_alert_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    run_at: datetime | None = None,
+    limit: int = 25,
+    dry_run: bool = False,
+) -> GrantSavedSearchAlertRunRead:
+    effective_run_at = run_at or datetime.now(UTC)
+    searches = await due_grant_saved_searches(
+        db,
+        organization_id=organization_id,
+        run_at=effective_run_at,
+        limit=limit,
+    )
+    results: list[GrantSavedSearchRunRecordRead] = []
+    saved_search_ids: list[UUID] = []
+    run_record_ids: list[UUID] = []
+    failed_count = 0
+    match_count = 0
+    high_fit_count = 0
+    alert_count = 0
+    for saved_search in searches:
+        saved_search_ids.append(saved_search.id)
+        if dry_run:
+            result = grant_saved_search_run_record_preview(saved_search, effective_run_at)
+            results.append(result)
+            continue
+        try:
+            discovery_run, record = await run_grant_saved_search_record(
+                db,
+                saved_search,
+                triggered_by="scheduled_alert",
+                run_at=effective_run_at,
+                dry_run=False,
+            )
+            match_count += discovery_run.generated_count
+            high_fit_count += discovery_run.high_fit_count
+            alert_count += discovery_run.alert_count
+            if record is not None:
+                run_record_ids.append(record.id)
+                results.append(grant_saved_search_run_record_read(record, saved_search))
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+    return GrantSavedSearchAlertRunRead(
+        organization_id=organization_id,
+        run_at=effective_run_at,
+        eligible_count=len(searches),
+        executed_count=0 if dry_run else len(searches) - failed_count,
+        skipped_count=0,
+        failed_count=failed_count,
+        match_count=match_count,
+        high_fit_count=high_fit_count,
+        alert_count=alert_count,
+        dry_run=dry_run,
+        saved_search_ids=saved_search_ids,
+        run_record_ids=run_record_ids,
+        results=results,
+    )
+
+
+async def due_grant_saved_searches(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    run_at: datetime,
+    limit: int,
+) -> list[GrantSavedSearch]:
+    statement = (
+        select(GrantSavedSearch)
+        .where(GrantSavedSearch.status == "active")
+        .where(GrantSavedSearch.alert_enabled.is_(True))
+        .where(GrantSavedSearch.alert_frequency != "manual")
+        .order_by(GrantSavedSearch.last_run_at.asc().nulls_first(), GrantSavedSearch.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(GrantSavedSearch.organization_id == organization_id)
+    searches = list((await db.scalars(statement)).all())
+    return [search for search in searches if grant_saved_search_is_due(search, run_at)]
+
+
+def grant_saved_search_is_due(saved_search: GrantSavedSearch, run_at: datetime) -> bool:
+    if saved_search.last_run_at is None:
+        return True
+    elapsed = normalize_aware_datetime(run_at) - normalize_aware_datetime(saved_search.last_run_at)
+    minimum_hours = {"daily": 24, "weekly": 24 * 7, "monthly": 24 * 30}.get(saved_search.alert_frequency, 24 * 7)
+    return elapsed.total_seconds() >= minimum_hours * 3600
+
+
+async def run_grant_saved_search_record(
+    db: AsyncSession,
+    saved_search: GrantSavedSearch,
+    *,
+    triggered_by: str,
+    run_at: datetime | None = None,
+    dry_run: bool = False,
+) -> tuple[GrantOpportunityDiscoveryRunRead, GrantSavedSearchRun | None]:
+    started_at = run_at or datetime.now(UTC)
+    discovery_run = await execute_grant_discovery(
+        db,
         GrantOpportunityDiscoveryRunCreate(
             organization_id=saved_search.organization_id,
             profile_name=saved_search.profile_name,
@@ -1205,18 +1344,38 @@ async def run_grant_saved_search(
             minimum_score=saved_search.minimum_score,
             limit=saved_search.limit,
         ),
-        authz,
     )
-    saved_search.last_run_at = datetime.now(UTC)
+    if dry_run:
+        return discovery_run, None
+    saved_search.last_run_at = started_at
     saved_search.last_match_count = discovery_run.generated_count
     saved_search.last_high_fit_count = discovery_run.high_fit_count
     saved_search.last_alert_count = discovery_run.alert_count
+    record = GrantSavedSearchRun(
+        organization_id=saved_search.organization_id,
+        saved_search_id=saved_search.id,
+        triggered_by=triggered_by,
+        started_at=started_at,
+        completed_at=datetime.now(UTC),
+        status="completed",
+        match_count=discovery_run.generated_count,
+        high_fit_count=discovery_run.high_fit_count,
+        alert_count=discovery_run.alert_count,
+        average_score=discovery_run.average_score,
+        dry_run=False,
+        message=discovery_run.recommendations[0] if discovery_run.recommendations else None,
+    )
+    db.add(record)
     await db.commit()
     await db.refresh(saved_search)
-    return GrantSavedSearchRunRead(
-        saved_search=grant_saved_search_read(saved_search),
-        discovery_run=discovery_run,
-    )
+    await db.refresh(record)
+    return discovery_run, record
+
+
+def normalize_aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 async def get_grant_saved_search(db: AsyncSession, saved_search_id: UUID) -> GrantSavedSearch:
@@ -3605,6 +3764,50 @@ def grant_saved_search_read(saved_search: GrantSavedSearch) -> GrantSavedSearchR
         last_alert_count=saved_search.last_alert_count,
         status=saved_search.status,
         notes=saved_search.notes,
+    )
+
+
+def grant_saved_search_run_record_read(
+    record: GrantSavedSearchRun,
+    saved_search: GrantSavedSearch | None = None,
+) -> GrantSavedSearchRunRecordRead:
+    return GrantSavedSearchRunRecordRead(
+        id=record.id,
+        organization_id=record.organization_id,
+        saved_search_id=record.saved_search_id,
+        saved_search_name=saved_search.name if saved_search else None,
+        triggered_by=record.triggered_by,
+        started_at=record.started_at,
+        completed_at=record.completed_at,
+        status=record.status,
+        match_count=record.match_count,
+        high_fit_count=record.high_fit_count,
+        alert_count=record.alert_count,
+        average_score=record.average_score,
+        dry_run=record.dry_run,
+        message=record.message,
+    )
+
+
+def grant_saved_search_run_record_preview(
+    saved_search: GrantSavedSearch,
+    run_at: datetime,
+) -> GrantSavedSearchRunRecordRead:
+    return GrantSavedSearchRunRecordRead(
+        id=saved_search.id,
+        organization_id=saved_search.organization_id,
+        saved_search_id=saved_search.id,
+        saved_search_name=saved_search.name,
+        triggered_by="scheduled_alert",
+        started_at=run_at,
+        completed_at=None,
+        status="dry_run",
+        match_count=saved_search.last_match_count,
+        high_fit_count=saved_search.last_high_fit_count,
+        alert_count=saved_search.last_alert_count,
+        average_score=Decimal("0.00"),
+        dry_run=True,
+        message="Grant saved search is due; dry run did not execute discovery.",
     )
 
 

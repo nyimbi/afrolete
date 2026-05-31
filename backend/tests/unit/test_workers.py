@@ -13,6 +13,7 @@ from app.models.agent import Agent, AgentRunRecord, AgentTask
 from app.models.assets import EmergencyActionPlan, EmergencyPlanActivation
 from app.models.billing import BillingPlan, SaaSInvoice, TenantSubscription
 from app.models.communication import CommunicationMessage, MessageRecipient, NotificationPreference
+from app.models.commercial import GrantOpportunity, GrantSavedSearch, GrantSavedSearchRun
 from app.models.enums import (
     AgentKind,
     AgentTaskStatus,
@@ -670,6 +671,65 @@ async def test_due_worker_sends_dunning_for_overdue_saas_invoice(db_session) -> 
     assert invoice.dunning_last_severity == "urgent"
     assert invoice.dunning_last_sent_at is not None
     assert subscription.status == SubscriptionStatus.PAST_DUE
+
+
+async def test_due_worker_runs_commercial_grant_alerts(db_session) -> None:
+    organization = Organization(
+        name="Grant Alert Worker Club",
+        slug="grant-alert-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    opportunity = GrantOpportunity(
+        organization_id=organization.id,
+        funder_name="Worker Foundation",
+        program_name="Youth Football Coach Scholarship",
+        category="youth_development",
+        impact_area="Youth football scholarships, safeguarding, and coach education",
+        award_ceiling=Decimal("30000.00"),
+        matching_required=Decimal("1000.00"),
+        currency="KES",
+        due_on=date(2026, 9, 1),
+        eligibility_summary="Youth football clubs with scholarship access.",
+        requirements="Safeguarding policy and coach education plan.",
+        status="open",
+    )
+    search = GrantSavedSearch(
+        organization_id=organization.id,
+        name="Worker youth grants",
+        profile_name="worker youth",
+        focus_terms_json=json.dumps(["youth", "football", "coach", "scholarship"]),
+        excluded_terms_json=json.dumps([]),
+        minimum_score=Decimal("50.00"),
+        limit=5,
+        alert_enabled=True,
+        alert_frequency="daily",
+        alert_channel="in_app",
+        status="active",
+    )
+    db_session.add_all([opportunity, search])
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("commercial-grant-alerts",),
+        limit=10,
+    )
+
+    grant_alerts = result["results"]["commercial_grant_alerts"]
+    assert grant_alerts["eligible_count"] == 1
+    assert grant_alerts["executed_count"] == 1
+    assert grant_alerts["match_count"] == 1
+    assert grant_alerts["high_fit_count"] == 1
+    assert result["summary"]["processed_count"] == 1
+    run_count = await db_session.scalar(select(func.count()).select_from(GrantSavedSearchRun))
+    assert run_count == 1
+    await db_session.refresh(search)
+    assert search.last_run_at is not None
+    assert search.last_match_count == 1
 
 
 async def test_due_worker_applies_late_fee_for_overdue_saas_invoice(db_session) -> None:

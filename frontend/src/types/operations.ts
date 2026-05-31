@@ -4461,6 +4461,39 @@ export type GrantSavedSearchRunRead = {
   discovery_run: GrantOpportunityDiscoveryRunRead;
 };
 
+export type GrantSavedSearchRunRecordRead = {
+  id: UUID;
+  organization_id: UUID;
+  saved_search_id: UUID;
+  saved_search_name: string | null;
+  triggered_by: string;
+  started_at: string;
+  completed_at: string | null;
+  status: string;
+  match_count: number;
+  high_fit_count: number;
+  alert_count: number;
+  average_score: string;
+  dry_run: boolean;
+  message: string | null;
+};
+
+export type GrantSavedSearchAlertRunRead = {
+  organization_id: UUID | null;
+  run_at: string;
+  eligible_count: number;
+  executed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  match_count: number;
+  high_fit_count: number;
+  alert_count: number;
+  dry_run: boolean;
+  saved_search_ids: UUID[];
+  run_record_ids: UUID[];
+  results: GrantSavedSearchRunRecordRead[];
+};
+
 export type GrantApplicationRead = {
   id: UUID;
   organization_id: UUID;
