@@ -426,6 +426,7 @@ import type {
   CommercialSettlementPayoutCallbackRead,
   CoachEducationActivityRead,
   CoachEducationCatalogRead,
+  CoachEducationCertificationReviewRead,
   CoachEducationDashboardRead,
   CoachEducationEnrollmentRead,
   CoachVoiceCommandSessionRead,
@@ -2227,6 +2228,8 @@ export default function HomePage() {
   const [coachEducationDashboard, setCoachEducationDashboard] = useState<CoachEducationDashboardRead | null>(null);
   const [coachEducationEnrollments, setCoachEducationEnrollments] = useState<CoachEducationEnrollmentRead[]>([]);
   const [coachEducationActivity, setCoachEducationActivity] = useState<CoachEducationActivityRead | null>(null);
+  const [coachEducationCertificationReview, setCoachEducationCertificationReview] =
+    useState<CoachEducationCertificationReviewRead | null>(null);
   const [productExperienceCatalog, setProductExperienceCatalog] = useState<ProductExperienceCatalogRead | null>(null);
   const [productExperienceDashboard, setProductExperienceDashboard] =
     useState<ProductExperienceDashboardRead | null>(null);
@@ -3405,7 +3408,12 @@ export default function HomePage() {
     learning_style: "hands_on",
     module_key: "platform_basics",
     score_percent: 92,
-    evidence_ref: "coach-lab://platform-basics"
+    evidence_ref: "coach-lab://platform-basics",
+    accreditation_provider: "AfroLete Coach Academy",
+    cpd_hours: 4,
+    cpd_hours_required: 20,
+    cpd_hours_completed: 20,
+    review_notes: "CPD evidence reviewed for certification renewal."
   });
   const [productExperienceForm, setProductExperienceForm] = useState({
     tour_key: "video_analysis_tour",
@@ -6461,6 +6469,7 @@ export default function HomePage() {
       setCoachEducationDashboard(null);
       setCoachEducationEnrollments([]);
       setCoachEducationActivity(null);
+      setCoachEducationCertificationReview(null);
       setSelectedCoachEducationEnrollmentId("");
       setProductExperienceCatalog(null);
       setProductExperienceDashboard(null);
@@ -15956,7 +15965,9 @@ export default function HomePage() {
             program_key: coachEducationForm.program_key,
             role: coachEducationForm.role,
             skill_level: coachEducationForm.skill_level,
-            learning_style: coachEducationForm.learning_style
+            learning_style: coachEducationForm.learning_style,
+            accreditation_provider: coachEducationForm.accreditation_provider,
+            cpd_hours_required: coachEducationForm.cpd_hours_required
           }
         }),
       (enrollment) => {
@@ -15993,7 +16004,9 @@ export default function HomePage() {
             body: {
               module_key: moduleKey,
               evidence_ref: coachEducationForm.evidence_ref || `coach-lab://${moduleKey}`,
-              score_percent: coachEducationForm.score_percent
+              score_percent: coachEducationForm.score_percent,
+              cpd_hours: coachEducationForm.cpd_hours,
+              feedback: `Accepted evidence for ${moduleKey}.`
             }
           }
         ),
@@ -16013,6 +16026,40 @@ export default function HomePage() {
           `${activity.title} complete · +${activity.xp_awarded} XP`,
           activity.enrollment.status === "certified" ? "good" : "neutral"
         );
+        void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
+      }
+    );
+  };
+
+  const reviewCoachEducationCertification = (action: "record_cpd" | "renew" | "suspend" | "revoke") => {
+    if (!selectedOrganizationId || !selectedCoachEducationEnrollmentId) {
+      addLog("Select a coach certification before recording CPD or renewal", "bad");
+      return;
+    }
+    runAction(
+      `coach-education-certification-${action}`,
+      () =>
+        apiRequest<CoachEducationCertificationReviewRead>(
+          `/coach-education/enrollments/${selectedCoachEducationEnrollmentId}/certification-review`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              action,
+              cpd_hours_completed: coachEducationForm.cpd_hours_completed,
+              portfolio_evidence_ref: coachEducationForm.evidence_ref || "coach-portfolio://renewal-evidence",
+              review_notes: coachEducationForm.review_notes
+            }
+          }
+        ),
+      (review) => {
+        setCoachEducationCertificationReview(review);
+        setCoachEducationEnrollments((current) => [
+          review.enrollment,
+          ...current.filter((item) => item.id !== review.enrollment.id)
+        ]);
+        setSelectedCoachEducationEnrollmentId(review.enrollment.id);
+        addLog(review.message, review.renewed || review.certification_state === "current" ? "good" : "neutral");
         void loadTraining(selectedOrganizationId, selectedTeamId || undefined);
       }
     );
@@ -27318,6 +27365,8 @@ export default function HomePage() {
               <div className="event-toolbar">
                 <button type="button" onClick={enrollCoachEducation} disabled={busyAction !== null}>Enroll</button>
                 <button type="button" onClick={completeCoachEducationModule} disabled={busyAction !== null}>Complete</button>
+                <button type="button" onClick={() => reviewCoachEducationCertification("record_cpd")} disabled={busyAction !== null}>Record CPD</button>
+                <button type="button" onClick={() => reviewCoachEducationCertification("renew")} disabled={busyAction !== null}>Renew</button>
               </div>
             </div>
             <div className="score-summary">
@@ -27325,7 +27374,7 @@ export default function HomePage() {
               <span>{coachEducationDashboard?.certified_count ?? 0} certified coach(es)</span>
               <small>
                 {coachEducationDashboard
-                  ? `${coachEducationDashboard.active_enrollment_count} active path(s) · ${coachEducationDashboard.average_xp} average XP`
+                  ? `${coachEducationDashboard.active_enrollment_count} active path(s) · ${coachEducationDashboard.renewal_due_count} due · ${coachEducationDashboard.expired_count} expired · ${coachEducationDashboard.cpd_gap_count} CPD gap(s)`
                   : "Enroll coaches in guided product and coaching certification paths."}
               </small>
             </div>
@@ -27334,13 +27383,21 @@ export default function HomePage() {
                 Program
                 <select value={coachEducationForm.program_key} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, program_key: event.target.value })}>
                   {(coachEducationCatalog?.programs ?? [
-                    { key: "foundation_coach", title: "Foundation Coach" },
-                    { key: "performance_analyst", title: "Performance Analyst" },
-                    { key: "tactical_strategist", title: "Tactical Strategist" }
+                    { key: "foundation_coach", title: "Foundation Coach", accreditation_provider: "AfroLete Coach Academy", cpd_hours_required: 20 },
+                    { key: "performance_analyst", title: "Performance Analyst", accreditation_provider: "AfroLete Performance Institute", cpd_hours_required: 30 },
+                    { key: "tactical_strategist", title: "Tactical Strategist", accreditation_provider: "AfroLete Tactical Academy", cpd_hours_required: 40 }
                   ]).map((program) => (
                     <option key={program.key} value={program.key}>{program.title}</option>
                   ))}
                 </select>
+              </label>
+              <label>
+                Accreditor
+                <input value={coachEducationForm.accreditation_provider} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, accreditation_provider: event.target.value })} />
+              </label>
+              <label>
+                CPD required
+                <input type="number" min="0" max="500" value={coachEducationForm.cpd_hours_required} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, cpd_hours_required: Number(event.target.value) })} />
               </label>
               <label>
                 Coach role
@@ -27371,18 +27428,39 @@ export default function HomePage() {
                 Score
                 <input type="number" min="0" max="100" value={coachEducationForm.score_percent} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, score_percent: Number(event.target.value) })} />
               </label>
+              <label>
+                CPD hours
+                <input type="number" min="0" max="200" value={coachEducationForm.cpd_hours} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, cpd_hours: Number(event.target.value) })} />
+              </label>
+              <label>
+                Renewal CPD
+                <input type="number" min="0" max="500" value={coachEducationForm.cpd_hours_completed} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, cpd_hours_completed: Number(event.target.value) })} />
+              </label>
               <label className="wide-field">
                 Evidence
                 <input value={coachEducationForm.evidence_ref} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, evidence_ref: event.target.value })} />
               </label>
+              <label className="wide-field">
+                Review notes
+                <input value={coachEducationForm.review_notes} onChange={(event) => setCoachEducationForm({ ...coachEducationForm, review_notes: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
+              {coachEducationCertificationReview ? (
+                <article className="task-card">
+                  <div>
+                    <strong>{coachEducationCertificationReview.message}</strong>
+                    <span>{coachEducationCertificationReview.certification_state} · {coachEducationCertificationReview.cpd_gap_hours} CPD hour(s) remaining</span>
+                    <small>{coachEducationCertificationReview.enrollment.certificate_number ?? "Certificate number pending"}</small>
+                  </div>
+                </article>
+              ) : null}
               {coachEducationActivity ? (
                 <article className="task-card">
                   <div>
                     <strong>{coachEducationActivity.title} · +{coachEducationActivity.xp_awarded} XP</strong>
-                    <span>{coachEducationActivity.enrollment.person_name} · {coachEducationActivity.enrollment.status}</span>
-                    <small>{coachEducationActivity.evidence_ref ?? "Coach education activity recorded"}</small>
+                    <span>{coachEducationActivity.enrollment.person_name} · {coachEducationActivity.enrollment.status} · {coachEducationActivity.cpd_hours} CPD hour(s)</span>
+                    <small>{coachEducationActivity.feedback ?? coachEducationActivity.evidence_ref ?? "Coach education activity recorded"}</small>
                   </div>
                 </article>
               ) : null}
@@ -27403,12 +27481,13 @@ export default function HomePage() {
                 >
                   <div>
                     <strong>{enrollment.person_name} · {enrollment.program_title}</strong>
-                    <span>{enrollment.progress_percent}% · {enrollment.xp_points} XP · {enrollment.status}</span>
+                    <span>{enrollment.progress_percent}% · {enrollment.xp_points} XP · {enrollment.certification_state}</span>
                     <small>
                       {enrollment.next_module
                         ? `${enrollment.next_module.title}: ${enrollment.next_module.practice_task}`
-                        : enrollment.badges.join(", ") || "Certification path complete"}
+                        : `${enrollment.certificate_number ?? "Certificate pending"} · CPD gap ${enrollment.cpd_gap_hours}`}
                     </small>
+                    <small>{enrollment.accreditation_provider ?? "Accreditation pending"} · expires {enrollment.certification_expires_on ?? "not issued"}</small>
                   </div>
                 </button>
               ))}

@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.coach_education import CoachEducationActivity, CoachEducationEnrollment
 from app.models.identity import Person
 from app.models.organization import Organization
-from app.schemas.coach_education import CoachEducationActivityCreate, CoachEducationEnrollmentCreate
+from app.schemas.coach_education import (
+    CoachEducationActivityCreate,
+    CoachEducationCertificationReviewCreate,
+    CoachEducationEnrollmentCreate,
+)
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService
 from app.services.training import ensure_manage_training
@@ -22,6 +26,8 @@ def coach_education_programs() -> list[dict[str, object]]:
             "title": "Foundation Coach",
             "level": 1,
             "certification_badge": "Foundation Coach Badge",
+            "accreditation_provider": "AfroLete Coach Academy",
+            "cpd_hours_required": 20,
             "specialization": None,
             "modules": [
                 module("platform_basics", "Platform Basics", 180, "guided sandbox", "Navigate the workspace and read team context.", "Set up a team view and identify one player support action.", 120),
@@ -34,6 +40,8 @@ def coach_education_programs() -> list[dict[str, object]]:
             "title": "Performance Analyst",
             "level": 2,
             "certification_badge": "Performance Analyst Certification",
+            "accreditation_provider": "AfroLete Performance Institute",
+            "cpd_hours_required": 30,
             "specialization": "video_analysis",
             "modules": [
                 module("video_analysis_mastery", "Video Analysis Mastery", 360, "video lab", "Use pose, gait, match tracking, and annotations safely.", "Upload or review a clip and tag two coaching moments.", 240),
@@ -46,6 +54,8 @@ def coach_education_programs() -> list[dict[str, object]]:
             "title": "Tactical Strategist",
             "level": 3,
             "certification_badge": "Tactical Strategist Diploma",
+            "accreditation_provider": "AfroLete Tactical Academy",
+            "cpd_hours_required": 40,
             "specialization": "opposition_analysis",
             "modules": [
                 module("opposition_analysis", "Opposition Analysis", 420, "match lab", "Read scouting evidence, shapes, pressure, and actions.", "Turn a tracking report into three match-plan cues.", 260),
@@ -134,6 +144,9 @@ async def create_coach_education_enrollment(
         existing.role = payload.role
         existing.skill_level = payload.skill_level
         existing.learning_style = payload.learning_style
+        existing.accreditation_provider = payload.accreditation_provider or str(program["accreditation_provider"])
+        existing.cpd_hours_required = float(payload.cpd_hours_required or program["cpd_hours_required"])
+        existing.mentor_person_id = payload.mentor_person_id
         if existing.current_module_key is None and existing.status != "certified":
             existing.current_module_key = first_module
         await db.commit()
@@ -148,6 +161,9 @@ async def create_coach_education_enrollment(
         role=payload.role,
         skill_level=payload.skill_level,
         learning_style=payload.learning_style,
+        accreditation_provider=payload.accreditation_provider or str(program["accreditation_provider"]),
+        cpd_hours_required=float(payload.cpd_hours_required or program["cpd_hours_required"]),
+        mentor_person_id=payload.mentor_person_id,
         current_module_key=first_module,
         completed_modules_json="[]",
         badges_json="[]",
@@ -170,7 +186,9 @@ async def record_coach_education_activity(
     program = coach_education_program(enrollment.program_key)
     module_detail = coach_education_module(program, payload.module_key)
     completed_at = datetime.now(UTC)
-    xp_awarded = int(payload.xp_awarded if payload.xp_awarded is not None else module_detail["xp"])
+    review_status = payload.review_status.lower()
+    accepted = review_status == "accepted"
+    xp_awarded = int(payload.xp_awarded if payload.xp_awarded is not None else module_detail["xp"]) if accepted else 0
     activity = CoachEducationActivity(
         organization_id=enrollment.organization_id,
         enrollment_id=enrollment.id,
@@ -181,24 +199,37 @@ async def record_coach_education_activity(
         xp_awarded=xp_awarded,
         evidence_ref=payload.evidence_ref,
         score_percent=payload.score_percent,
+        cpd_hours=payload.cpd_hours if accepted else 0.0,
+        reviewer_person_id=identity.person_id,
+        review_status=review_status,
+        feedback=payload.feedback,
         completed_at=completed_at,
     )
     db.add(activity)
-    completed_modules = append_unique(decode_string_list(enrollment.completed_modules_json), str(module_detail["key"]))
-    enrollment.completed_modules_json = json.dumps(completed_modules)
-    enrollment.xp_points += xp_awarded
     enrollment.last_activity_at = completed_at
     module_keys = [str(item["key"]) for item in program["modules"]]
-    remaining = [key for key in module_keys if key not in completed_modules]
-    enrollment.current_module_key = remaining[0] if remaining else None
-    if not remaining:
-        enrollment.status = "certified"
-        enrollment.certification_expires_on = date.today() + timedelta(days=365)
-        enrollment.badges_json = json.dumps(
-            append_unique(decode_string_list(enrollment.badges_json), str(program["certification_badge"]))
-        )
-    elif enrollment.status == "invited":
-        enrollment.status = "active"
+    completed_modules = decode_string_list(enrollment.completed_modules_json)
+    if accepted:
+        completed_modules = append_unique(completed_modules, str(module_detail["key"]))
+        enrollment.completed_modules_json = json.dumps(completed_modules)
+        enrollment.xp_points += xp_awarded
+        enrollment.cpd_hours_completed = float(enrollment.cpd_hours_completed or 0.0) + float(payload.cpd_hours or 0.0)
+        if payload.evidence_ref:
+            enrollment.portfolio_evidence_ref = payload.evidence_ref
+        remaining = [key for key in module_keys if key not in completed_modules]
+        enrollment.current_module_key = remaining[0] if remaining else None
+        if not remaining:
+            enrollment.status = "certified"
+            today = date.today()
+            enrollment.certification_issued_on = today
+            enrollment.certification_expires_on = today + timedelta(days=365)
+            enrollment.renewal_due_on = today + timedelta(days=335)
+            enrollment.certificate_number = enrollment.certificate_number or coach_education_certificate_number(enrollment, today)
+            enrollment.badges_json = json.dumps(
+                append_unique(decode_string_list(enrollment.badges_json), str(program["certification_badge"]))
+            )
+        elif enrollment.status == "invited":
+            enrollment.status = "active"
     await db.commit()
     await db.refresh(activity)
     await db.refresh(enrollment)
@@ -233,6 +264,9 @@ async def coach_education_dashboard(
     reads = [await coach_education_enrollment_read(db, enrollment) for enrollment in enrollments]
     total_xp = sum(int(item["xp_points"]) for item in reads)
     certified = [item for item in reads if item["status"] == "certified"]
+    renewal_due = [item for item in reads if item["certification_state"] == "renewal_due"]
+    expired = [item for item in reads if item["certification_state"] == "expired"]
+    cpd_gaps = [item for item in reads if float(item["cpd_gap_hours"]) > 0 and item["status"] == "certified"]
     leaderboard = [
         {
             "rank": index + 1,
@@ -249,6 +283,9 @@ async def coach_education_dashboard(
         "organization_id": organization_id,
         "active_enrollment_count": len([item for item in reads if item["status"] in {"active", "invited"}]),
         "certified_count": len(certified),
+        "renewal_due_count": len(renewal_due),
+        "expired_count": len(expired),
+        "cpd_gap_count": len(cpd_gaps),
         "average_xp": round(total_xp / len(reads)) if reads else 0,
         "total_xp": total_xp,
         "leaderboard": leaderboard,
@@ -263,11 +300,17 @@ async def coach_education_enrollment_read(
     enrollment: CoachEducationEnrollment,
 ) -> dict[str, object]:
     person = await db.get(Person, enrollment.person_id)
+    mentor = await db.get(Person, enrollment.mentor_person_id) if enrollment.mentor_person_id else None
     program = coach_education_program(enrollment.program_key)
     completed = decode_string_list(enrollment.completed_modules_json)
     modules = [dict(item) for item in program["modules"]]
     next_module = next((module for module in modules if module["key"] == enrollment.current_module_key), None)
     progress_percent = round(len(completed) / len(modules) * 100) if modules else 100
+    certification_state = coach_education_certification_state(enrollment)
+    days_until_expiry = (
+        (enrollment.certification_expires_on - date.today()).days if enrollment.certification_expires_on else None
+    )
+    cpd_gap_hours = max(float(enrollment.cpd_hours_required or 0.0) - float(enrollment.cpd_hours_completed or 0.0), 0.0)
     return {
         "id": enrollment.id,
         "organization_id": enrollment.organization_id,
@@ -284,11 +327,78 @@ async def coach_education_enrollment_read(
         "completed_modules": completed,
         "badges": decode_string_list(enrollment.badges_json),
         "status": enrollment.status,
+        "accreditation_provider": enrollment.accreditation_provider,
+        "certificate_number": enrollment.certificate_number,
+        "certification_issued_on": enrollment.certification_issued_on,
         "certification_expires_on": enrollment.certification_expires_on,
+        "renewal_due_on": enrollment.renewal_due_on,
+        "certification_state": certification_state,
+        "days_until_expiry": days_until_expiry,
+        "cpd_hours_required": enrollment.cpd_hours_required,
+        "cpd_hours_completed": enrollment.cpd_hours_completed,
+        "cpd_gap_hours": cpd_gap_hours,
+        "portfolio_evidence_ref": enrollment.portfolio_evidence_ref,
+        "mentor_person_id": enrollment.mentor_person_id,
+        "mentor_name": mentor.display_name if mentor is not None else None,
+        "last_reviewed_by_person_id": enrollment.last_reviewed_by_person_id,
+        "last_reviewed_at": enrollment.last_reviewed_at,
+        "review_notes": enrollment.review_notes,
         "progress_percent": progress_percent,
         "next_module": next_module,
         "last_activity_at": enrollment.last_activity_at,
         "created_at": enrollment.created_at,
+    }
+
+
+async def review_coach_education_certification(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    enrollment_id: UUID,
+    payload: CoachEducationCertificationReviewCreate,
+    authz: AuthorizationService,
+) -> dict[str, object]:
+    enrollment = await get_coach_education_enrollment(db, enrollment_id)
+    await ensure_manage_training(authz, identity, enrollment.organization_id)
+    if payload.mentor_person_id is not None and await db.get(Person, payload.mentor_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mentor person not found")
+    now = datetime.now(UTC)
+    renewed = False
+    if payload.cpd_hours_completed is not None:
+        enrollment.cpd_hours_completed = float(payload.cpd_hours_completed)
+    if payload.portfolio_evidence_ref is not None:
+        enrollment.portfolio_evidence_ref = payload.portfolio_evidence_ref
+    if payload.mentor_person_id is not None:
+        enrollment.mentor_person_id = payload.mentor_person_id
+    if payload.action == "renew":
+        if enrollment.status != "certified":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Only certified enrollments can renew")
+        if float(enrollment.cpd_hours_completed or 0.0) < float(enrollment.cpd_hours_required or 0.0):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="CPD hours are below the renewal requirement")
+        renewed_on = date.today()
+        enrollment.certification_issued_on = renewed_on
+        enrollment.certification_expires_on = payload.certification_expires_on or renewed_on + timedelta(days=365)
+        enrollment.renewal_due_on = enrollment.certification_expires_on - timedelta(days=30)
+        enrollment.status = "certified"
+        enrollment.certificate_number = enrollment.certificate_number or coach_education_certificate_number(enrollment, renewed_on)
+        enrollment.cpd_hours_completed = 0.0
+        renewed = True
+    elif payload.action == "suspend":
+        enrollment.status = "suspended"
+    elif payload.action == "revoke":
+        enrollment.status = "revoked"
+    enrollment.last_reviewed_by_person_id = identity.person_id
+    enrollment.last_reviewed_at = now
+    enrollment.review_notes = payload.review_notes
+    await db.commit()
+    await db.refresh(enrollment)
+    read = await coach_education_enrollment_read(db, enrollment)
+    return {
+        "enrollment": read,
+        "action": payload.action,
+        "certification_state": read["certification_state"],
+        "cpd_gap_hours": read["cpd_gap_hours"],
+        "renewed": renewed,
+        "message": coach_education_review_message(payload.action, read, renewed),
     }
 
 
@@ -337,6 +447,36 @@ def append_unique(values: list[str], value: str) -> list[str]:
     return list(dict.fromkeys([*values, value]))
 
 
+def coach_education_certificate_number(enrollment: CoachEducationEnrollment, issued_on: date) -> str:
+    prefix = enrollment.program_key.upper().replace("_", "-")[:24]
+    return f"CE-{prefix}-{issued_on.strftime('%Y%m%d')}-{str(enrollment.id)[:8]}"
+
+
+def coach_education_certification_state(enrollment: CoachEducationEnrollment) -> str:
+    if enrollment.status in {"suspended", "revoked"}:
+        return enrollment.status
+    if enrollment.status != "certified":
+        return "in_progress"
+    today = date.today()
+    if enrollment.certification_expires_on and enrollment.certification_expires_on < today:
+        return "expired"
+    if enrollment.renewal_due_on and enrollment.renewal_due_on <= today:
+        return "renewal_due"
+    return "current"
+
+
+def coach_education_review_message(action: str, enrollment: dict[str, object], renewed: bool) -> str:
+    if renewed:
+        return f"{enrollment['person_name']} renewed {enrollment['program_title']}."
+    if action == "record_cpd":
+        return f"CPD evidence recorded; {enrollment['cpd_gap_hours']} hour(s) remain."
+    if action == "suspend":
+        return f"{enrollment['program_title']} certification suspended."
+    if action == "revoke":
+        return f"{enrollment['program_title']} certification revoked."
+    return "Certification review recorded."
+
+
 def coach_education_recommended_actions(enrollments: list[dict[str, object]]) -> list[str]:
     if not enrollments:
         return [
@@ -352,5 +492,11 @@ def coach_education_recommended_actions(enrollments: list[dict[str, object]]) ->
             actions.append(f"Coach {next_item['person_name']} should complete {next_module['title']}.")
     if not any(item["status"] == "certified" for item in enrollments):
         actions.append("Complete one certification path to create an internal mentor for new coaches.")
+    renewal_due = [item for item in enrollments if item.get("certification_state") in {"renewal_due", "expired"}]
+    if renewal_due:
+        actions.append(f"Review {len(renewal_due)} coach certification renewal(s) before session assignments.")
+    cpd_gap = [item for item in enrollments if float(item.get("cpd_gap_hours", 0.0)) > 0 and item["status"] == "certified"]
+    if cpd_gap:
+        actions.append(f"Close CPD evidence gaps for {len(cpd_gap)} certified coach(es).")
     actions.append("Review the leaderboard during staff meetings and recognize completed badges.")
     return list(dict.fromkeys(actions))

@@ -10385,6 +10385,8 @@ export type CoachEducationProgramRead = {
   title: string;
   level: number;
   certification_badge: string;
+  accreditation_provider: string;
+  cpd_hours_required: number;
   specialization: string | null;
   modules: CoachEducationModuleRead[];
 };
@@ -10418,7 +10420,22 @@ export type CoachEducationEnrollmentRead = {
   completed_modules: string[];
   badges: string[];
   status: string;
+  accreditation_provider: string | null;
+  certificate_number: string | null;
+  certification_issued_on: string | null;
   certification_expires_on: string | null;
+  renewal_due_on: string | null;
+  certification_state: string;
+  days_until_expiry: number | null;
+  cpd_hours_required: number;
+  cpd_hours_completed: number;
+  cpd_gap_hours: number;
+  portfolio_evidence_ref: string | null;
+  mentor_person_id: UUID | null;
+  mentor_name: string | null;
+  last_reviewed_by_person_id: UUID | null;
+  last_reviewed_at: string | null;
+  review_notes: string | null;
   progress_percent: number;
   next_module: CoachEducationModuleRead | null;
   last_activity_at: string | null;
@@ -10436,14 +10453,30 @@ export type CoachEducationActivityRead = {
   xp_awarded: number;
   evidence_ref: string | null;
   score_percent: number | null;
+  cpd_hours: number;
+  reviewer_person_id: UUID | null;
+  review_status: string;
+  feedback: string | null;
   completed_at: string;
   enrollment: CoachEducationEnrollmentRead;
+};
+
+export type CoachEducationCertificationReviewRead = {
+  enrollment: CoachEducationEnrollmentRead;
+  action: string;
+  certification_state: string;
+  cpd_gap_hours: number;
+  renewed: boolean;
+  message: string;
 };
 
 export type CoachEducationDashboardRead = {
   organization_id: UUID;
   active_enrollment_count: number;
   certified_count: number;
+  renewal_due_count: number;
+  expired_count: number;
+  cpd_gap_count: number;
   average_xp: number;
   total_xp: number;
   leaderboard: Array<Record<string, unknown>>;

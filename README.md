@@ -161,7 +161,8 @@ Major capability areas include:
   profiles, pose/gait benchmarking, AI video coaching analysis, slow-motion
   review, human annotations, and athlete dashboards.
 - Training drills, plans, sessions, readiness checks, feedback, workload
-  management, schedule exports, and AI-assisted plan generation.
+  management, schedule exports, AI-assisted plan generation, coach education,
+  CPD evidence, accredited certification lifecycles, and renewal reviews.
 - Competition management, standings, officials, fixture generation, brackets,
   broadcasts, ticketing, conflict detection, and advancement flows.
 - Communications: templates, scoped broadcasts, inboxes, preferences, quiet

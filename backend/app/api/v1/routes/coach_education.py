@@ -8,6 +8,8 @@ from app.schemas.coach_education import (
     CoachEducationActivityCreate,
     CoachEducationActivityRead,
     CoachEducationCatalogRead,
+    CoachEducationCertificationReviewCreate,
+    CoachEducationCertificationReviewRead,
     CoachEducationDashboardRead,
     CoachEducationEnrollmentCreate,
     CoachEducationEnrollmentRead,
@@ -22,6 +24,7 @@ from app.services.coach_education import (
     create_coach_education_enrollment,
     list_coach_education_enrollments,
     record_coach_education_activity,
+    review_coach_education_certification,
 )
 
 router = APIRouter(prefix="/coach-education", tags=["coach-education"])
@@ -80,8 +83,28 @@ async def record_coach_education_activity_route(
         xp_awarded=activity.xp_awarded,
         evidence_ref=activity.evidence_ref,
         score_percent=activity.score_percent,
+        cpd_hours=activity.cpd_hours,
+        reviewer_person_id=activity.reviewer_person_id,
+        review_status=activity.review_status,
+        feedback=activity.feedback,
         completed_at=activity.completed_at,
         enrollment=CoachEducationEnrollmentRead(**await coach_education_enrollment_read(db, enrollment)),
+    )
+
+
+@router.post(
+    "/enrollments/{enrollment_id}/certification-review",
+    response_model=CoachEducationCertificationReviewRead,
+)
+async def review_coach_education_certification_route(
+    enrollment_id: UUID,
+    payload: CoachEducationCertificationReviewCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> CoachEducationCertificationReviewRead:
+    return CoachEducationCertificationReviewRead(
+        **await review_coach_education_certification(db, identity, enrollment_id, payload, authz)
     )
 
 
