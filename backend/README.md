@@ -125,7 +125,12 @@ grace period, and keeps those receivables separate from AfroLete hosting
 invoices; tune with
 `--member-dues-reminder-due-within-days`,
 `--member-dues-reminder-repeat-after-days`, and
-`--dry-run-member-dues-reminders`. The
+`--dry-run-member-dues-reminders`. Member dues payment providers can also post
+callbacks to `/api/v1/organizations/member-dues-payment-webhooks`; the endpoint
+optionally enforces `X-Afrolete-Member-Dues-Timestamp` and
+`X-Afrolete-Member-Dues-Signature`, normalizes M-Pesa STK callback metadata,
+records callback audits, ignores duplicate provider receipts, and settles only
+club-managed member dues receivables, never AfroLete hosting invoices. The
 communication escalation lane scans unresolved urgent messages and creates
 quiet-hours-override escalation messages with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with

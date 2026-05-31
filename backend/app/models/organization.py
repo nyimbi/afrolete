@@ -536,6 +536,41 @@ class MemberSubscriptionPayment(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class MemberDuesPaymentCallback(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_dues_payment_callbacks"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "provider",
+            "external_payment_id",
+            name="uq_member_dues_payment_callbacks_provider_payment",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    collection_rail_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("member_dues_collection_rails.id"), index=True
+    )
+    subscription_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    payment_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("member_subscription_payments.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="mpesa", nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    external_payment_id: Mapped[str | None] = mapped_column(String(180), index=True)
+    dues_reference: Mapped[str | None] = mapped_column(String(180), index=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str | None] = mapped_column(String(3), index=True)
+    method: Mapped[str | None] = mapped_column(String(80), index=True)
+    payer_phone: Mapped[str | None] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="received", nullable=False, index=True)
+    accepted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    duplicate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    signature_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    signature_validated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    raw_payload_json: Mapped[str | None] = mapped_column(Text)
+
+
 class MemberSubscriptionPaymentPlan(IdMixin, TimestampMixin, Base):
     __tablename__ = "member_subscription_payment_plans"
 

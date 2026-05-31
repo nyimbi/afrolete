@@ -1498,6 +1498,32 @@ export type MemberSubscriptionCheckoutSettlementRead = {
   message: string;
 };
 
+export type MemberDuesPaymentWebhookRead = {
+  callback_id: UUID;
+  organization_id: UUID;
+  collection_rail_id: UUID | null;
+  subscription_id: UUID | null;
+  payment_id: UUID | null;
+  provider: string;
+  event_type: string;
+  external_payment_id: string | null;
+  dues_reference: string | null;
+  amount: string | null;
+  currency: string | null;
+  method: string | null;
+  payer_phone: string | null;
+  accepted: boolean;
+  duplicate: boolean;
+  signature_required: boolean;
+  signature_validated: boolean;
+  callback_status: string;
+  subscription_status: string | null;
+  subscription_balance_amount: string | null;
+  platform_hosting_charge: boolean;
+  receivable_collector_type: string;
+  message: string;
+};
+
 export type MemberSubscriptionReminderItemRead = {
   subscription_id: UUID;
   plan_name: string;

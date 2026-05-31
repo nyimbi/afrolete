@@ -1,12 +1,14 @@
 import csv
+import hmac
 import io
 import json
 import re
+import time
 from base64 import b64decode
 from binascii import Error as BinasciiError
 from calendar import monthrange
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -50,6 +52,7 @@ from app.models.organization import (
     Committee,
     CommitteeMembership,
     MemberDuesCollectionRail,
+    MemberDuesPaymentCallback,
     MemberSubscription,
     MemberSubscriptionCharge,
     MemberSubscriptionPayment,
@@ -91,6 +94,8 @@ from app.schemas.organization import (
     MemberDuesCollectionRailCreate,
     MemberDuesCollectionRailRead,
     MemberDuesCollectionRailUpdate,
+    MemberDuesPaymentWebhookCreate,
+    MemberDuesPaymentWebhookRead,
     MemberSubscriptionCheckoutLinkRead,
     MemberSubscriptionCheckoutSettlementCreate,
     MemberSubscriptionCheckoutSettlementRead,
@@ -200,6 +205,7 @@ from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.agents import queue_agent_task
 from app.services.communications import create_message, create_message_for_recipients, destination_for_channel
+from app.services.secrets import resolve_secret
 from app.schemas.communication import CommunicationMessageCreate
 from app.services.storage.objects import put_object
 
@@ -7046,6 +7052,405 @@ async def settle_member_subscription_checkout(
             else f"Member dues payment marked {payload.status}."
         ),
     )
+
+
+async def ingest_member_dues_payment_webhook(
+    db: AsyncSession,
+    payload: MemberDuesPaymentWebhookCreate,
+    *,
+    signature_required: bool = False,
+    signature_validated: bool = False,
+) -> MemberDuesPaymentWebhookRead:
+    organization = await db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    normalized = normalize_member_dues_payment_callback(payload)
+    provider = normalize_payment_provider(normalized["provider"] or payload.provider)
+    external_payment_id = normalized["external_payment_id"]
+    if external_payment_id:
+        existing = await db.scalar(
+            select(MemberDuesPaymentCallback)
+            .where(MemberDuesPaymentCallback.organization_id == payload.organization_id)
+            .where(MemberDuesPaymentCallback.provider == provider)
+            .where(MemberDuesPaymentCallback.external_payment_id == external_payment_id)
+            .order_by(MemberDuesPaymentCallback.created_at.asc())
+            .limit(1)
+        )
+        if existing is not None:
+            return await member_dues_payment_callback_read(db, existing, duplicate=True)
+
+    rail = await resolve_member_dues_collection_rail(
+        db,
+        payload.organization_id,
+        provider,
+        payload.collection_rail_id,
+    )
+    subscription = await resolve_member_dues_callback_subscription(
+        db,
+        payload.organization_id,
+        payload.subscription_id,
+        normalized["dues_reference"],
+    )
+    raw_payload_json = json.dumps(
+        payload.model_dump(mode="json"),
+        sort_keys=True,
+    )
+    callback = MemberDuesPaymentCallback(
+        organization_id=payload.organization_id,
+        collection_rail_id=rail.id if rail else None,
+        subscription_id=subscription.id if subscription else None,
+        provider=provider,
+        event_type=normalized["event_type"],
+        external_payment_id=external_payment_id,
+        dues_reference=normalized["dues_reference"],
+        amount=normalized["amount"],
+        currency=normalized["currency"],
+        method=normalized["method"],
+        payer_phone=normalized["payer_phone"],
+        status="received",
+        accepted=False,
+        duplicate=False,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+        received_at=datetime.now(UTC),
+        raw_payload_json=raw_payload_json,
+    )
+    db.add(callback)
+
+    if normalized["status"] != "succeeded":
+        callback.status = "ignored"
+        callback.failure_reason = f"Provider reported payment status {normalized['status']}."
+    elif subscription is None:
+        callback.status = "unmatched"
+        callback.failure_reason = "No member dues account matched the callback subscription id or dues reference."
+    elif normalized["amount"] is None or normalized["amount"] <= 0:
+        callback.status = "failed"
+        callback.failure_reason = "Payment amount is required for member dues settlement."
+    else:
+        plan = await db.get(MemberSubscriptionPlan, subscription.plan_id)
+        currency = (normalized["currency"] or (plan.currency if plan else "KES")).upper()
+        expected_currency = (plan.currency if plan else currency).upper()
+        open_amount = member_subscription_open_amount(subscription)
+        amount = normalized["amount"].quantize(Decimal("0.01"))
+        if currency != expected_currency:
+            callback.status = "failed"
+            callback.failure_reason = f"Currency mismatch: expected {expected_currency}, received {currency}."
+        elif open_amount <= 0:
+            callback.status = "ignored"
+            callback.failure_reason = "Member dues account is already settled."
+        elif amount > open_amount:
+            callback.status = "failed"
+            callback.failure_reason = "Payment exceeds open member dues balance; credit handling is not yet configured."
+        else:
+            payment = MemberSubscriptionPayment(
+                organization_id=subscription.organization_id,
+                subscription_id=subscription.id,
+                payment_plan_id=None,
+                amount=amount,
+                currency=currency,
+                provider=provider,
+                method=normalized["method"] or provider,
+                external_payment_id=external_payment_id,
+                received_at=callback.received_at,
+                status="succeeded",
+                raw_reference=payload.raw_reference or raw_payload_json[:4000],
+                notes="Member dues provider callback settlement.",
+            )
+            db.add(payment)
+            await db.flush()
+            payment_plan = await select_member_subscription_payment_plan_for_payment(db, subscription, None)
+            if payment_plan is not None:
+                payment.payment_plan_id = payment_plan.id
+            await apply_member_subscription_payment_to_charges(
+                db,
+                subscription,
+                amount,
+                payment.id,
+                payment.received_at,
+            )
+            subscription.balance_amount = max(Decimal("0.00"), open_amount - amount).quantize(Decimal("0.01"))
+            if subscription.balance_amount <= 0:
+                subscription.balance_amount = Decimal("0.00")
+                if subscription.status == "past_due":
+                    subscription.status = "active"
+            if payment_plan is not None:
+                apply_member_subscription_payment_plan_payment(payment_plan, amount)
+            await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
+            await complete_member_subscription_payment_plans_if_settled(db, subscription)
+            callback.payment_id = payment.id
+            callback.subscription_id = subscription.id
+            callback.accepted = True
+            callback.status = "settled"
+
+    await db.commit()
+    await db.refresh(callback)
+    return await member_dues_payment_callback_read(db, callback)
+
+
+async def resolve_member_dues_collection_rail(
+    db: AsyncSession,
+    organization_id: UUID,
+    provider: str,
+    collection_rail_id: UUID | None,
+) -> MemberDuesCollectionRail | None:
+    if collection_rail_id is not None:
+        rail = await db.get(MemberDuesCollectionRail, collection_rail_id)
+        if rail is None or rail.organization_id != organization_id:
+            return None
+        return rail
+    return await db.scalar(
+        select(MemberDuesCollectionRail)
+        .where(MemberDuesCollectionRail.organization_id == organization_id)
+        .where(MemberDuesCollectionRail.provider == provider)
+        .where(MemberDuesCollectionRail.status == "active")
+        .order_by(MemberDuesCollectionRail.checkout_priority.asc(), MemberDuesCollectionRail.created_at.asc())
+        .limit(1)
+    )
+
+
+async def resolve_member_dues_callback_subscription(
+    db: AsyncSession,
+    organization_id: UUID,
+    subscription_id: UUID | None,
+    dues_reference: str | None,
+) -> MemberSubscription | None:
+    if subscription_id is not None:
+        subscription = await db.get(MemberSubscription, subscription_id)
+        if subscription is None or subscription.organization_id != organization_id:
+            return None
+        return subscription
+    if dues_reference:
+        subscription = await db.scalar(
+            select(MemberSubscription)
+            .where(MemberSubscription.organization_id == organization_id)
+            .where(MemberSubscription.external_reference == dues_reference)
+            .limit(1)
+        )
+        if subscription is not None:
+            return subscription
+        normalized = dues_reference.strip().lower()
+        if normalized.startswith("dues-"):
+            prefix = normalized.removeprefix("dues-")
+            subscriptions = (
+                await db.scalars(
+                    select(MemberSubscription)
+                    .where(MemberSubscription.organization_id == organization_id)
+                    .limit(500)
+                )
+            ).all()
+            for candidate in subscriptions:
+                if str(candidate.id).replace("-", "").startswith(prefix.replace("-", "")):
+                    return candidate
+    return None
+
+
+async def member_dues_payment_callback_read(
+    db: AsyncSession,
+    callback: MemberDuesPaymentCallback,
+    *,
+    duplicate: bool | None = None,
+) -> MemberDuesPaymentWebhookRead:
+    subscription = await db.get(MemberSubscription, callback.subscription_id) if callback.subscription_id else None
+    return MemberDuesPaymentWebhookRead(
+        callback_id=callback.id,
+        organization_id=callback.organization_id,
+        collection_rail_id=callback.collection_rail_id,
+        subscription_id=callback.subscription_id,
+        payment_id=callback.payment_id,
+        provider=callback.provider,
+        event_type=callback.event_type,
+        external_payment_id=callback.external_payment_id,
+        dues_reference=callback.dues_reference,
+        amount=callback.amount,
+        currency=callback.currency,
+        method=callback.method,
+        payer_phone=callback.payer_phone,
+        accepted=callback.accepted,
+        duplicate=callback.duplicate if duplicate is None else duplicate,
+        signature_required=callback.signature_required,
+        signature_validated=callback.signature_validated,
+        callback_status=callback.status,
+        subscription_status=subscription.status if subscription else None,
+        subscription_balance_amount=subscription.balance_amount if subscription else None,
+        platform_hosting_charge=False,
+        receivable_collector_type="club",
+        message=member_dues_payment_callback_message(callback, duplicate=duplicate),
+    )
+
+
+def member_dues_payment_callback_message(
+    callback: MemberDuesPaymentCallback,
+    *,
+    duplicate: bool | None = None,
+) -> str:
+    if duplicate:
+        return "Duplicate member dues provider callback ignored."
+    if callback.accepted:
+        return "Member dues provider callback settled against the club receivables ledger."
+    return callback.failure_reason or "Member dues provider callback recorded without settlement."
+
+
+def normalize_member_dues_payment_callback(payload: MemberDuesPaymentWebhookCreate) -> dict:
+    provider_payload = payload.provider_payload or {}
+    provider = normalize_payment_provider(payload.provider)
+    event_type = payload.event_type
+    payment_status = payload.status
+    amount = payload.amount
+    currency = payload.currency.upper() if payload.currency else None
+    method = payload.method
+    external_payment_id = payload.external_payment_id
+    dues_reference = payload.dues_reference
+    payer_phone = payload.payer_phone
+
+    if provider == "mpesa":
+        callback = nested_dict(provider_payload, "Body", "stkCallback")
+        metadata = callback_metadata_items(callback)
+        result_code = callback.get("ResultCode")
+        if result_code is not None:
+            payment_status = "succeeded" if str(result_code) == "0" else "failed"
+        amount = amount or decimal_or_none(metadata.get("Amount"))
+        external_payment_id = (
+            external_payment_id
+            or string_or_none(metadata.get("MpesaReceiptNumber"))
+            or string_or_none(callback.get("CheckoutRequestID"))
+            or string_or_none(callback.get("MerchantRequestID"))
+        )
+        payer_phone = payer_phone or string_or_none(metadata.get("PhoneNumber"))
+        method = method or "mpesa_stk"
+        event_type = event_type or "mpesa.stk.callback"
+
+    amount = amount or decimal_or_none(payload_lookup(provider_payload, "amount", "Amount", "TransAmount"))
+    currency = currency or string_or_none(
+        payload_lookup(provider_payload, "currency", "Currency"),
+        upper=True,
+    )
+    external_payment_id = external_payment_id or string_or_none(
+        payload_lookup(
+            provider_payload,
+            "external_payment_id",
+            "transaction_id",
+            "TransID",
+            "receipt_number",
+            "MpesaReceiptNumber",
+        )
+    )
+    dues_reference = dues_reference or string_or_none(
+        payload_lookup(
+            provider_payload,
+            "dues_reference",
+            "account_reference",
+            "AccountReference",
+            "BillRefNumber",
+            "account",
+        )
+    )
+    payer_phone = payer_phone or string_or_none(
+        payload_lookup(provider_payload, "payer_phone", "MSISDN", "PhoneNumber")
+    )
+
+    return {
+        "provider": provider,
+        "event_type": event_type,
+        "status": payment_status,
+        "amount": amount,
+        "currency": currency,
+        "method": method or provider,
+        "external_payment_id": external_payment_id,
+        "dues_reference": dues_reference,
+        "payer_phone": payer_phone,
+    }
+
+
+def payload_lookup(payload: object, *keys: str) -> object | None:
+    if isinstance(payload, dict):
+        for key in keys:
+            if key in payload:
+                return payload[key]
+        for value in payload.values():
+            found = payload_lookup(value, *keys)
+            if found is not None:
+                return found
+    if isinstance(payload, list):
+        for item in payload:
+            found = payload_lookup(item, *keys)
+            if found is not None:
+                return found
+    return None
+
+
+def nested_dict(payload: dict, *keys: str) -> dict:
+    current: object = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def callback_metadata_items(callback: dict) -> dict:
+    metadata = callback.get("CallbackMetadata")
+    items = metadata.get("Item") if isinstance(metadata, dict) else []
+    result: dict[str, object] = {}
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and item.get("Name"):
+                result[str(item["Name"])] = item.get("Value")
+    return result
+
+
+def string_or_none(value: object, upper: bool = False) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text.upper() if upper else text
+
+
+def decimal_or_none(value: object) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except InvalidOperation as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid payment amount") from exc
+
+
+async def validate_member_dues_payment_webhook_signature(
+    raw_body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    settings: Settings | None = None,
+) -> tuple[bool, bool]:
+    selected_settings = settings or get_settings()
+    signing_key = await resolve_secret(
+        selected_settings,
+        env_value=selected_settings.member_dues_payment_webhook_signing_key,
+        path=selected_settings.member_dues_payment_webhook_signing_key_secret_path,
+        field_name=selected_settings.member_dues_payment_webhook_signing_key_secret_field,
+        label="member dues payment webhook signing key",
+    )
+    if not signing_key:
+        return False, False
+    if not timestamp_header or not signature_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing member dues webhook signature")
+    try:
+        timestamp = int(timestamp_header)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid member dues webhook timestamp") from exc
+    age = abs(int(time.time()) - timestamp)
+    if age > selected_settings.member_dues_payment_webhook_tolerance_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Stale member dues webhook signature")
+    expected = hmac.new(
+        signing_key.encode(),
+        timestamp_header.encode() + b"." + raw_body,
+        sha256,
+    ).hexdigest()
+    submitted = signature_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, submitted):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid member dues webhook signature")
+    return True, True
 
 
 async def run_member_subscription_charge_generation(

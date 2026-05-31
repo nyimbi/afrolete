@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -1849,6 +1850,49 @@ class MemberSubscriptionCheckoutSettlementRead(BaseModel):
     amount_paid: Decimal
     open_amount: Decimal
     session_status: str
+    message: str
+
+
+class MemberDuesPaymentWebhookCreate(BaseModel):
+    organization_id: UUID
+    provider: str = Field(default="mpesa", min_length=2, max_length=80)
+    event_type: str = Field(default="payment.succeeded", min_length=2, max_length=120)
+    status: str = Field(default="succeeded", pattern="^(succeeded|pending|failed|cancelled)$")
+    subscription_id: UUID | None = None
+    collection_rail_id: UUID | None = None
+    dues_reference: str | None = Field(default=None, max_length=180)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    method: str | None = Field(default=None, min_length=2, max_length=80)
+    external_payment_id: str | None = Field(default=None, max_length=240)
+    payer_phone: str | None = Field(default=None, max_length=80)
+    provider_payload: dict[str, Any] = Field(default_factory=dict)
+    raw_reference: str | None = Field(default=None, max_length=4000)
+
+
+class MemberDuesPaymentWebhookRead(BaseModel):
+    callback_id: UUID
+    organization_id: UUID
+    collection_rail_id: UUID | None
+    subscription_id: UUID | None
+    payment_id: UUID | None
+    provider: str
+    event_type: str
+    external_payment_id: str | None
+    dues_reference: str | None
+    amount: Decimal | None
+    currency: str | None
+    method: str | None
+    payer_phone: str | None
+    accepted: bool
+    duplicate: bool
+    signature_required: bool
+    signature_validated: bool
+    callback_status: str
+    subscription_status: str | None
+    subscription_balance_amount: Decimal | None
+    platform_hosting_charge: bool
+    receivable_collector_type: str
     message: str
 
 

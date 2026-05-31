@@ -1,8 +1,14 @@
+import asyncio
+import hmac
 import json
+import time
 from base64 import b64encode
 from decimal import Decimal
+from hashlib import sha256
 
+from app.core.config import Settings
 from app.services.authz.service import authorization_service
+from app.services.organizations import validate_member_dues_payment_webhook_signature
 
 
 def test_create_and_list_organization(client, identity_headers) -> None:
@@ -45,6 +51,25 @@ def test_create_and_list_organization(client, identity_headers) -> None:
         and relationship.subject_type == "user"
         for relationship in authorization_service.relationships
     )
+
+
+def test_member_dues_payment_webhook_signature_validation() -> None:
+    raw_body = b'{"provider":"mpesa"}'
+    timestamp = str(int(time.time()))
+    signing_key = "member-dues-test-secret"
+    signature = hmac.new(signing_key.encode(), timestamp.encode() + b"." + raw_body, sha256).hexdigest()
+
+    signature_required, signature_validated = asyncio.run(
+        validate_member_dues_payment_webhook_signature(
+            raw_body,
+            timestamp,
+            f"sha256={signature}",
+            settings=Settings(member_dues_payment_webhook_signing_key=signing_key),
+        )
+    )
+
+    assert signature_required is True
+    assert signature_validated is True
 
 
 def test_organization_handle_availability_suggests_conflict_recovery(client, identity_headers) -> None:
@@ -375,6 +400,58 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert public_checkout["mpesa_collection_supported"] is True
     assert "does not pay AfroLete platform hosting" in public_checkout["receivable_note"]
 
+    callback_payload = {
+        "organization_id": organization["id"],
+        "provider": "mpesa",
+        "event_type": "mpesa.stk.callback",
+        "status": "succeeded",
+        "dues_reference": "club-dues-2026-06",
+        "currency": "KES",
+        "provider_payload": {
+            "Body": {
+                "stkCallback": {
+                    "ResultCode": 0,
+                    "CheckoutRequestID": "ws_CO_member_dues_001",
+                    "CallbackMetadata": {
+                        "Item": [
+                            {"Name": "Amount", "Value": "200.00"},
+                            {"Name": "MpesaReceiptNumber", "Value": "MPESA-CALLBACK-001"},
+                            {"Name": "PhoneNumber", "Value": "254700000000"},
+                        ]
+                    },
+                }
+            }
+        },
+    }
+    callback_response = client.post("/api/v1/organizations/member-dues-payment-webhooks", json=callback_payload)
+    assert callback_response.status_code == 200
+    callback = callback_response.json()
+    assert callback["accepted"] is True
+    assert callback["duplicate"] is False
+    assert callback["collection_rail_id"] == collection_rail["id"]
+    assert callback["subscription_id"] == subscription["id"]
+    assert callback["amount"] == "200.00"
+    assert callback["currency"] == "KES"
+    assert callback["method"] == "mpesa_stk"
+    assert callback["external_payment_id"] == "MPESA-CALLBACK-001"
+    assert callback["subscription_balance_amount"] == "300.00"
+    assert callback["platform_hosting_charge"] is False
+    assert callback["receivable_collector_type"] == "club"
+
+    duplicate_callback_response = client.post("/api/v1/organizations/member-dues-payment-webhooks", json=callback_payload)
+    assert duplicate_callback_response.status_code == 200
+    duplicate_callback = duplicate_callback_response.json()
+    assert duplicate_callback["duplicate"] is True
+    assert duplicate_callback["payment_id"] == callback["payment_id"]
+    assert duplicate_callback["subscription_balance_amount"] == "300.00"
+
+    callback_charges = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges",
+        headers=identity_headers,
+    ).json()
+    assert callback_charges[0]["amount_paid"] == "1200.00"
+    assert callback_charges[0]["balance_amount"] == "300.00"
+
     disabled_rail_response = client.patch(
         f"/api/v1/organizations/member-dues-collection-rails/{collection_rail['id']}",
         headers=identity_headers,
@@ -436,7 +513,7 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
         json={
             "subscription_id": subscription["id"],
             "provider": "mpesa",
-            "amount": "500.00",
+            "amount": "300.00",
             "currency": "KES",
             "method": "mpesa_stk",
             "external_payment_id": "MPESA-DEF-456",
@@ -570,9 +647,9 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert statement["total_paid"] == "1500.00"
     assert statement["total_waived"] == "1500.00"
     assert statement["closing_balance"] == "0.00"
-    assert statement["line_count"] == 5
+    assert statement["line_count"] == 6
     assert [line["entry_type"] for line in statement["lines"]].count("charge") == 2
-    assert [line["entry_type"] for line in statement["lines"]].count("payment") == 2
+    assert [line["entry_type"] for line in statement["lines"]].count("payment") == 3
     assert [line["entry_type"] for line in statement["lines"]].count("waiver") == 1
     assert statement["lines"][-1]["balance_amount"] == "0.00"
 

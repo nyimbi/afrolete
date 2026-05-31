@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     billing_tax_filing_webhook_key_secret_path: str = ""
     billing_tax_filing_webhook_key_secret_field: str = "value"
     billing_tax_filing_timeout_seconds: float = 5.0
+    member_dues_payment_webhook_signing_key: str = ""
+    member_dues_payment_webhook_signing_key_secret_path: str = ""
+    member_dues_payment_webhook_signing_key_secret_field: str = "value"
+    member_dues_payment_webhook_tolerance_seconds: int = 300
 
     commercial_payment_webhook_signing_key: str = ""
     commercial_payment_webhook_signing_key_secret_path: str = ""

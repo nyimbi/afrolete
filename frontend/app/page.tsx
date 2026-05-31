@@ -369,6 +369,7 @@ import type {
   MessageRecipientRead,
   MembershipRead,
   MemberDuesCollectionRailRead,
+  MemberDuesPaymentWebhookRead,
   MemberSubscriptionChargeRead,
   MemberSubscriptionChargeRunRead,
   MemberSubscriptionChargeWaiverRead,
@@ -1925,6 +1926,7 @@ export default function HomePage() {
   const [memberDuesStatement, setMemberDuesStatement] = useState<MemberSubscriptionStatementRead | null>(null);
   const [memberDuesStatementSend, setMemberDuesStatementSend] = useState<MemberSubscriptionStatementSendRead | null>(null);
   const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
+  const [memberDuesPaymentCallback, setMemberDuesPaymentCallback] = useState<MemberDuesPaymentWebhookRead | null>(null);
   const [memberDuesReminderRun, setMemberDuesReminderRun] = useState<MemberSubscriptionReminderRunRead | null>(null);
   const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
   const [marketProfileSummary, setMarketProfileSummary] = useState<OrganizationMarketProfileSummaryRead | null>(null);
@@ -6300,6 +6302,7 @@ export default function HomePage() {
       setMemberDuesStatement(null);
       setMemberDuesStatementSend(null);
       setMemberDuesCheckoutLink(null);
+      setMemberDuesPaymentCallback(null);
       setMemberDuesReminderRun(null);
       setSelectedMemberSubscriptionId("");
       setSelectedMemberDuesPaymentPlanId("");
@@ -8168,6 +8171,60 @@ export default function HomePage() {
         if (typeof window !== "undefined") {
           window.open(link.checkout_url, "_blank", "noopener,noreferrer");
         }
+      }
+    );
+  };
+
+  const simulateMemberDuesProviderCallback = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before simulating a dues provider callback", "bad");
+      return;
+    }
+    const subscription = memberSubscriptions.find((item) => item.id === selectedMemberSubscriptionId) || memberSubscriptions[0];
+    if (!subscription || Number(subscription.balance_amount) <= 0) {
+      addLog("Select an open member dues account before simulating a provider callback", "bad");
+      return;
+    }
+    const amount = Math.min(Number(subscription.balance_amount), 100).toFixed(2);
+    const receipt = `MPESA-SIM-${Date.now()}`;
+    runAction(
+      "simulate-member-dues-provider-callback",
+      () =>
+        apiRequest<MemberDuesPaymentWebhookRead>(
+          "/organizations/member-dues-payment-webhooks",
+          {
+            method: "POST",
+            body: {
+              organization_id: selectedOrganizationId,
+              provider: "mpesa",
+              event_type: "mpesa.stk.callback",
+              status: "succeeded",
+              dues_reference: subscription.external_reference,
+              currency: subscription.currency,
+              provider_payload: {
+                Body: {
+                  stkCallback: {
+                    ResultCode: 0,
+                    CheckoutRequestID: `ws_sim_${Date.now()}`,
+                    CallbackMetadata: {
+                      Item: [
+                        { Name: "Amount", Value: amount },
+                        { Name: "MpesaReceiptNumber", Value: receipt },
+                        { Name: "PhoneNumber", Value: "254700000000" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ),
+      async (callback) => {
+        setMemberDuesPaymentCallback(callback);
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
+        addLog(`${callback.provider.toUpperCase()} callback ${callback.callback_status}: ${callback.message}`, callback.accepted ? "good" : "bad");
       }
     );
   };
@@ -25413,6 +25470,7 @@ export default function HomePage() {
               <button type="button" onClick={() => downloadMemberDuesStatement("txt")} disabled={busyAction !== null}>Download</button>
               <button type="button" onClick={sendMemberDuesStatement} disabled={busyAction !== null}>Send</button>
               <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
+              <button type="button" onClick={simulateMemberDuesProviderCallback} disabled={busyAction !== null}>Provider callback</button>
               <button type="button" onClick={runMemberDuesReminders} disabled={busyAction !== null}>Remind due</button>
               <button type="button" onClick={() => updateMemberDuesSubscriptionStatus("paused")} disabled={busyAction !== null}>Pause</button>
               <button type="button" onClick={() => updateMemberDuesSubscriptionStatus("active")} disabled={busyAction !== null}>Reactivate</button>
@@ -25740,6 +25798,19 @@ export default function HomePage() {
                     <strong>{memberSubscriptionPayment.provider.toUpperCase()} payment recorded</strong>
                     <span>{memberSubscriptionPayment.amount} {memberSubscriptionPayment.currency} · balance {memberSubscriptionPayment.subscription_balance_amount}</span>
                     <small>{memberSubscriptionPayment.external_payment_id ?? memberSubscriptionPayment.method}</small>
+                  </div>
+                </article>
+              ) : null}
+              {memberDuesPaymentCallback ? (
+                <article className={`task-card ${memberDuesPaymentCallback.accepted ? "selected" : "risk-card"}`}>
+                  <div>
+                    <strong>{memberDuesPaymentCallback.provider.toUpperCase()} callback · {memberDuesPaymentCallback.callback_status}</strong>
+                    <span>
+                      {memberDuesPaymentCallback.amount ?? "0.00"} {memberDuesPaymentCallback.currency ?? "KES"} · balance {memberDuesPaymentCallback.subscription_balance_amount ?? "unmatched"}
+                    </span>
+                    <small>
+                      {memberDuesPaymentCallback.duplicate ? "duplicate" : "new"} · {memberDuesPaymentCallback.platform_hosting_charge ? "hosting" : "not hosting"} · {memberDuesPaymentCallback.message}
+                    </small>
                   </div>
                 </article>
               ) : null}

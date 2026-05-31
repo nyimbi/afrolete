@@ -2,7 +2,7 @@ from datetime import date
 from uuid import UUID
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -20,6 +20,8 @@ from app.schemas.organization import (
     MemberDuesCollectionRailCreate,
     MemberDuesCollectionRailRead,
     MemberDuesCollectionRailUpdate,
+    MemberDuesPaymentWebhookCreate,
+    MemberDuesPaymentWebhookRead,
     MemberSubscriptionCheckoutLinkRead,
     MemberSubscriptionCheckoutSettlementCreate,
     MemberSubscriptionCheckoutSettlementRead,
@@ -198,6 +200,7 @@ from app.services.organizations import (
     get_member_subscription_hosted_checkout,
     get_member_subscription_statement,
     get_registration_payment_hosted_checkout,
+    ingest_member_dues_payment_webhook,
     get_organization_for_identity,
     get_public_registration_inquiry,
     get_public_site,
@@ -271,6 +274,7 @@ from app.services.organizations import (
     upload_public_registration_document,
     update_public_registration_packet,
     update_registration_inquiry,
+    validate_member_dues_payment_webhook_signature,
 )
 from app.services.communications import list_recipients
 
@@ -2528,6 +2532,36 @@ async def settle_member_subscription_checkout_route(
     db: AsyncSession = Depends(get_db),
 ) -> MemberSubscriptionCheckoutSettlementRead:
     return await settle_member_subscription_checkout(db, session_id, payload)
+
+
+@router.post(
+    "/member-dues-payment-webhooks",
+    response_model=MemberDuesPaymentWebhookRead,
+)
+async def member_dues_payment_webhook_route(
+    request: Request,
+    payload: MemberDuesPaymentWebhookCreate,
+    x_afrolete_member_dues_timestamp: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Member-Dues-Timestamp",
+    ),
+    x_afrolete_member_dues_signature: str | None = Header(
+        default=None,
+        alias="X-Afrolete-Member-Dues-Signature",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> MemberDuesPaymentWebhookRead:
+    signature_required, signature_validated = await validate_member_dues_payment_webhook_signature(
+        await request.body(),
+        x_afrolete_member_dues_timestamp,
+        x_afrolete_member_dues_signature,
+    )
+    return await ingest_member_dues_payment_webhook(
+        db,
+        payload,
+        signature_required=signature_required,
+        signature_validated=signature_validated,
+    )
 
 
 @router.post(
