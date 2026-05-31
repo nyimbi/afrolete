@@ -36,6 +36,7 @@ from app.models.commercial import (
     GrantOpportunity,
     GrantOpportunityMatch,
     GrantReport,
+    GrantSavedSearch,
     GrantSubmissionPackage,
     MerchandiseOrder,
     MerchandiseOrderLine,
@@ -116,6 +117,10 @@ from app.schemas.commercial import (
     GrantPortfolioSummaryRead,
     GrantReportCreate,
     GrantReportGenerateCreate,
+    GrantSavedSearchCreate,
+    GrantSavedSearchRead,
+    GrantSavedSearchRunRead,
+    GrantSavedSearchUpdate,
     GrantSubmissionPackageCreate,
     GrantSubmissionPackageRead,
     GrantSubmissionPackageUpdate,
@@ -1106,6 +1111,119 @@ async def update_grant_opportunity_match(
     await db.commit()
     await db.refresh(match)
     return grant_opportunity_match_read(match, opportunity)
+
+
+async def create_grant_saved_search(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantSavedSearchCreate,
+    authz: AuthorizationService,
+) -> GrantSavedSearchRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    saved_search = GrantSavedSearch(
+        organization_id=payload.organization_id,
+        name=payload.name,
+        profile_name=payload.profile_name,
+        focus_terms_json=commercial_json_dumps_list(normalize_discovery_terms(payload.focus_terms)),
+        excluded_terms_json=commercial_json_dumps_list(normalize_discovery_terms(payload.excluded_terms)),
+        minimum_score=payload.minimum_score,
+        limit=payload.limit,
+        alert_enabled=payload.alert_enabled,
+        alert_frequency=payload.alert_frequency,
+        alert_channel=payload.alert_channel,
+        status=payload.status,
+        notes=payload.notes,
+    )
+    db.add(saved_search)
+    await db.commit()
+    await db.refresh(saved_search)
+    return grant_saved_search_read(saved_search)
+
+
+async def list_grant_saved_searches(db: AsyncSession, organization_id: UUID) -> list[GrantSavedSearchRead]:
+    searches = list(
+        (
+            await db.scalars(
+                select(GrantSavedSearch)
+                .where(GrantSavedSearch.organization_id == organization_id)
+                .order_by(GrantSavedSearch.status, GrantSavedSearch.name)
+            )
+        ).all()
+    )
+    return [grant_saved_search_read(search) for search in searches]
+
+
+async def update_grant_saved_search(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    saved_search_id: UUID,
+    payload: GrantSavedSearchUpdate,
+    authz: AuthorizationService,
+) -> GrantSavedSearchRead:
+    saved_search = await get_grant_saved_search(db, saved_search_id)
+    await ensure_manage_commercial(authz, identity, saved_search.organization_id)
+    update_data = payload.model_dump(exclude_unset=True)
+    for field in (
+        "name",
+        "profile_name",
+        "minimum_score",
+        "limit",
+        "alert_enabled",
+        "alert_frequency",
+        "alert_channel",
+        "status",
+        "notes",
+    ):
+        if field in update_data:
+            setattr(saved_search, field, update_data[field])
+    if "focus_terms" in update_data:
+        saved_search.focus_terms_json = commercial_json_dumps_list(normalize_discovery_terms(payload.focus_terms))
+    if "excluded_terms" in update_data:
+        saved_search.excluded_terms_json = commercial_json_dumps_list(normalize_discovery_terms(payload.excluded_terms))
+    await db.commit()
+    await db.refresh(saved_search)
+    return grant_saved_search_read(saved_search)
+
+
+async def run_grant_saved_search(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    saved_search_id: UUID,
+    authz: AuthorizationService,
+) -> GrantSavedSearchRunRead:
+    saved_search = await get_grant_saved_search(db, saved_search_id)
+    await ensure_manage_commercial(authz, identity, saved_search.organization_id)
+    discovery_run = await discover_grant_opportunities(
+        db,
+        identity,
+        GrantOpportunityDiscoveryRunCreate(
+            organization_id=saved_search.organization_id,
+            profile_name=saved_search.profile_name,
+            focus_terms=commercial_json_loads_list(saved_search.focus_terms_json),
+            excluded_terms=commercial_json_loads_list(saved_search.excluded_terms_json),
+            minimum_score=saved_search.minimum_score,
+            limit=saved_search.limit,
+        ),
+        authz,
+    )
+    saved_search.last_run_at = datetime.now(UTC)
+    saved_search.last_match_count = discovery_run.generated_count
+    saved_search.last_high_fit_count = discovery_run.high_fit_count
+    saved_search.last_alert_count = discovery_run.alert_count
+    await db.commit()
+    await db.refresh(saved_search)
+    return GrantSavedSearchRunRead(
+        saved_search=grant_saved_search_read(saved_search),
+        discovery_run=discovery_run,
+    )
+
+
+async def get_grant_saved_search(db: AsyncSession, saved_search_id: UUID) -> GrantSavedSearch:
+    saved_search = await db.get(GrantSavedSearch, saved_search_id)
+    if saved_search is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grant saved search not found")
+    return saved_search
 
 
 async def create_grant_application(
@@ -3466,6 +3584,28 @@ def grant_discovery_recommendations(
     if not generated_count:
         recommendations.append("Add grant opportunities or lower the minimum score to start discovery.")
     return recommendations
+
+
+def grant_saved_search_read(saved_search: GrantSavedSearch) -> GrantSavedSearchRead:
+    return GrantSavedSearchRead(
+        id=saved_search.id,
+        organization_id=saved_search.organization_id,
+        name=saved_search.name,
+        profile_name=saved_search.profile_name,
+        focus_terms=commercial_json_loads_list(saved_search.focus_terms_json),
+        excluded_terms=commercial_json_loads_list(saved_search.excluded_terms_json),
+        minimum_score=saved_search.minimum_score,
+        limit=saved_search.limit,
+        alert_enabled=saved_search.alert_enabled,
+        alert_frequency=saved_search.alert_frequency,
+        alert_channel=saved_search.alert_channel,
+        last_run_at=saved_search.last_run_at,
+        last_match_count=saved_search.last_match_count,
+        last_high_fit_count=saved_search.last_high_fit_count,
+        last_alert_count=saved_search.last_alert_count,
+        status=saved_search.status,
+        notes=saved_search.notes,
+    )
 
 
 def grant_submission_json_loads(value: str | None) -> list[str]:

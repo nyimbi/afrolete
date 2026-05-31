@@ -65,6 +65,10 @@ from app.schemas.commercial import (
     GrantReportCreate,
     GrantReportGenerateCreate,
     GrantReportRead,
+    GrantSavedSearchCreate,
+    GrantSavedSearchRead,
+    GrantSavedSearchRunRead,
+    GrantSavedSearchUpdate,
     GrantSubmissionPackageCreate,
     GrantSubmissionPackageRead,
     GrantSubmissionPackageUpdate,
@@ -134,6 +138,7 @@ from app.services.commercial import (
     create_grant_award_record,
     create_grant_opportunity,
     create_grant_report,
+    create_grant_saved_search,
     create_grant_submission_package,
     create_invoice,
     create_financial_budget,
@@ -181,11 +186,14 @@ from app.services.commercial import (
     list_grant_opportunity_matches,
     list_grant_opportunities,
     list_grant_reports,
+    list_grant_saved_searches,
     list_grant_submission_packages,
     grant_application_approval_counts,
     grant_award_summary,
     grant_portfolio_summary,
     update_grant_opportunity_match,
+    run_grant_saved_search,
+    update_grant_saved_search,
     update_grant_submission_package,
     list_invoices,
     list_commercial_payment_sessions,
@@ -733,6 +741,45 @@ async def update_grant_opportunity_match_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> GrantOpportunityMatchRead:
     return await update_grant_opportunity_match(db, identity, match_id, payload, authz)
+
+
+@router.post("/grants/saved-searches", response_model=GrantSavedSearchRead, status_code=status.HTTP_201_CREATED)
+async def create_grant_saved_search_route(
+    payload: GrantSavedSearchCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantSavedSearchRead:
+    return await create_grant_saved_search(db, identity, payload, authz)
+
+
+@router.get("/grants/saved-searches", response_model=list[GrantSavedSearchRead])
+async def list_grant_saved_searches_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantSavedSearchRead]:
+    return await list_grant_saved_searches(db, organization_id)
+
+
+@router.patch("/grants/saved-searches/{saved_search_id}", response_model=GrantSavedSearchRead)
+async def update_grant_saved_search_route(
+    saved_search_id: UUID,
+    payload: GrantSavedSearchUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantSavedSearchRead:
+    return await update_grant_saved_search(db, identity, saved_search_id, payload, authz)
+
+
+@router.post("/grants/saved-searches/{saved_search_id}/run", response_model=GrantSavedSearchRunRead)
+async def run_grant_saved_search_route(
+    saved_search_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantSavedSearchRunRead:
+    return await run_grant_saved_search(db, identity, saved_search_id, authz)
 
 
 @router.post("/grants/applications", response_model=GrantApplicationRead, status_code=status.HTTP_201_CREATED)

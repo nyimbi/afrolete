@@ -129,6 +129,80 @@ def test_grant_opportunity_discovery_scores_alerts_and_reviews_matches(client, i
     assert reviewed["notes"] == "Assign treasurer to eligibility review."
 
 
+def test_grant_saved_searches_preserve_criteria_and_run_alerts(client, identity_headers) -> None:
+    organization, _, _ = create_commercial_context(client, identity_headers)
+
+    client.post(
+        "/api/v1/commercial/grants/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "funder_name": "Community Foundation",
+            "program_name": "Youth Coaching Access Grant",
+            "category": "youth_development",
+            "impact_area": "Coach education, scholarships, equipment, and football access",
+            "award_ceiling": "30000.00",
+            "matching_required": "1500.00",
+            "currency": "KES",
+            "due_on": "2026-09-15",
+            "eligibility_summary": "Youth clubs with scholarship programs and certified coaches.",
+            "requirements": "Budget, safeguarding policy, coach plan, and impact dashboard.",
+            "status": "open",
+        },
+    )
+
+    create_response = client.post(
+        "/api/v1/commercial/grants/saved-searches",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "name": "Youth access weekly alerts",
+            "profile_name": "youth access",
+            "focus_terms": ["youth", "coach", "scholarship", "football"],
+            "excluded_terms": ["professional"],
+            "minimum_score": "55.00",
+            "limit": 5,
+            "alert_enabled": True,
+            "alert_frequency": "weekly",
+            "alert_channel": "email",
+            "notes": "Send to grants committee.",
+        },
+    )
+    assert create_response.status_code == 201
+    saved_search = create_response.json()
+    assert saved_search["focus_terms"] == ["youth", "coach", "scholarship", "football"]
+    assert saved_search["last_match_count"] == 0
+
+    run_response = client.post(
+        f"/api/v1/commercial/grants/saved-searches/{saved_search['id']}/run",
+        headers=identity_headers,
+    )
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert run["saved_search"]["last_match_count"] == 1
+    assert run["saved_search"]["last_high_fit_count"] == 1
+    assert run["saved_search"]["last_alert_count"] == 1
+    assert run["discovery_run"]["matches"][0]["program_name"] == "Youth Coaching Access Grant"
+
+    list_response = client.get(
+        f"/api/v1/commercial/grants/saved-searches?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["last_run_at"] is not None
+
+    pause_response = client.patch(
+        f"/api/v1/commercial/grants/saved-searches/{saved_search['id']}",
+        headers=identity_headers,
+        json={"alert_enabled": False, "status": "paused", "alert_frequency": "manual"},
+    )
+    assert pause_response.status_code == 200
+    paused = pause_response.json()
+    assert paused["alert_enabled"] is False
+    assert paused["status"] == "paused"
+    assert paused["alert_frequency"] == "manual"
+
+
 def test_financial_budget_planning_tracks_variance_cash_and_scenarios(client, identity_headers) -> None:
     organization, _, _ = create_commercial_context(client, identity_headers)
 

@@ -547,6 +547,60 @@ class GrantOpportunityDiscoveryRunRead(BaseModel):
     recommendations: list[str]
 
 
+class GrantSavedSearchCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    profile_name: str = Field(default="default", min_length=2, max_length=160)
+    focus_terms: list[str] = Field(default_factory=list, max_length=40)
+    excluded_terms: list[str] = Field(default_factory=list, max_length=40)
+    minimum_score: Decimal = Field(default=Decimal("0"), ge=0, le=100, max_digits=5, decimal_places=2)
+    limit: int = Field(default=25, ge=1, le=100)
+    alert_enabled: bool = True
+    alert_frequency: str = Field(default="weekly", pattern="^(daily|weekly|monthly|manual)$")
+    alert_channel: str = Field(default="email", min_length=2, max_length=80)
+    status: str = Field(default="active", pattern="^(active|paused|archived)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantSavedSearchUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    profile_name: str | None = Field(default=None, min_length=2, max_length=160)
+    focus_terms: list[str] | None = Field(default=None, max_length=40)
+    excluded_terms: list[str] | None = Field(default=None, max_length=40)
+    minimum_score: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
+    limit: int | None = Field(default=None, ge=1, le=100)
+    alert_enabled: bool | None = None
+    alert_frequency: str | None = Field(default=None, pattern="^(daily|weekly|monthly|manual)$")
+    alert_channel: str | None = Field(default=None, min_length=2, max_length=80)
+    status: str | None = Field(default=None, pattern="^(active|paused|archived)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantSavedSearchRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    name: str
+    profile_name: str
+    focus_terms: list[str]
+    excluded_terms: list[str]
+    minimum_score: Decimal
+    limit: int
+    alert_enabled: bool
+    alert_frequency: str
+    alert_channel: str
+    last_run_at: datetime | None
+    last_match_count: int
+    last_high_fit_count: int
+    last_alert_count: int
+    status: str
+    notes: str | None
+
+
+class GrantSavedSearchRunRead(BaseModel):
+    saved_search: GrantSavedSearchRead
+    discovery_run: GrantOpportunityDiscoveryRunRead
+
+
 class GrantApplicationCreate(BaseModel):
     organization_id: UUID
     grant_opportunity_id: UUID

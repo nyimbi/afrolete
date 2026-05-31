@@ -4436,6 +4436,31 @@ export type GrantOpportunityDiscoveryRunRead = {
   recommendations: string[];
 };
 
+export type GrantSavedSearchRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  profile_name: string;
+  focus_terms: string[];
+  excluded_terms: string[];
+  minimum_score: string;
+  limit: number;
+  alert_enabled: boolean;
+  alert_frequency: string;
+  alert_channel: string;
+  last_run_at: string | null;
+  last_match_count: number;
+  last_high_fit_count: number;
+  last_alert_count: number;
+  status: string;
+  notes: string | null;
+};
+
+export type GrantSavedSearchRunRead = {
+  saved_search: GrantSavedSearchRead;
+  discovery_run: GrantOpportunityDiscoveryRunRead;
+};
+
 export type GrantApplicationRead = {
   id: UUID;
   organization_id: UUID;

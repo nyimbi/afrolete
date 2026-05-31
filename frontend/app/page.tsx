@@ -310,6 +310,8 @@ import type {
   GrantOpportunityRead,
   GrantPortfolioSummaryRead,
   GrantReportRead,
+  GrantSavedSearchRead,
+  GrantSavedSearchRunRead,
   GrantSubmissionPackageRead,
   MerchandiseOrderRead,
   MerchandiseProductRead,
@@ -2351,6 +2353,8 @@ export default function HomePage() {
   const [grantPortfolioSummary, setGrantPortfolioSummary] = useState<GrantPortfolioSummaryRead | null>(null);
   const [grantOpportunityMatches, setGrantOpportunityMatches] = useState<GrantOpportunityMatchRead[]>([]);
   const [grantDiscoveryRun, setGrantDiscoveryRun] = useState<GrantOpportunityDiscoveryRunRead | null>(null);
+  const [grantSavedSearches, setGrantSavedSearches] = useState<GrantSavedSearchRead[]>([]);
+  const [grantSavedSearchRun, setGrantSavedSearchRun] = useState<GrantSavedSearchRunRead | null>(null);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
@@ -2529,6 +2533,7 @@ export default function HomePage() {
   const [selectedDonorProfileId, setSelectedDonorProfileId] = useState("");
   const [selectedGrantOpportunityId, setSelectedGrantOpportunityId] = useState("");
   const [selectedGrantApplicationId, setSelectedGrantApplicationId] = useState("");
+  const [selectedGrantSavedSearchId, setSelectedGrantSavedSearchId] = useState("");
   const [selectedMerchandiseProductId, setSelectedMerchandiseProductId] = useState("");
   const [selectedMerchandiseOrderId, setSelectedMerchandiseOrderId] = useState("");
   const [selectedTicketProductId, setSelectedTicketProductId] = useState("");
@@ -3806,9 +3811,13 @@ export default function HomePage() {
     report_status: "draft",
     metrics_summary: "Athlete access, coach certification, attendance, and retention.",
     discovery_profile_name: "youth access",
+    saved_search_name: "Youth access weekly alerts",
     discovery_focus_terms: "youth, scholarship, safeguarding, coach, football",
     discovery_excluded_terms: "professional, hospitality",
-    discovery_minimum_score: "50.00"
+    discovery_minimum_score: "50.00",
+    discovery_alert_frequency: "weekly",
+    discovery_alert_channel: "email",
+    discovery_alert_enabled: true
   });
   const [merchandiseForm, setMerchandiseForm] = useState({
     name: "Home jersey",
@@ -5626,6 +5635,7 @@ export default function HomePage() {
       grantAwardSummaryData,
       grantPortfolioSummaryData,
       grantOpportunityMatchData,
+      grantSavedSearchData,
       grantReportData,
       grantDashboardData,
       merchandiseProductData,
@@ -5676,6 +5686,7 @@ export default function HomePage() {
         : Promise.resolve(null),
       apiRequest<GrantPortfolioSummaryRead>(`/commercial/grants/portfolio-summary?organization_id=${organizationId}`),
       apiRequest<GrantOpportunityMatchRead[]>(`/commercial/grants/opportunity-matches?organization_id=${organizationId}`),
+      apiRequest<GrantSavedSearchRead[]>(`/commercial/grants/saved-searches?organization_id=${organizationId}`),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
       apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
       apiRequest<MerchandiseProductRead[]>(`/commercial/merchandise/products?organization_id=${organizationId}`),
@@ -5724,6 +5735,7 @@ export default function HomePage() {
     setGrantAwardSummary(grantAwardSummaryData);
     setGrantPortfolioSummary(grantPortfolioSummaryData);
     setGrantOpportunityMatches(grantOpportunityMatchData);
+    setGrantSavedSearches(grantSavedSearchData);
     setGrantReports(grantReportData);
     setGrantDashboard(grantDashboardData);
     setMerchandiseProducts(merchandiseProductData);
@@ -5761,6 +5773,11 @@ export default function HomePage() {
       grantApplicationData.some((application) => application.id === current)
         ? current
         : grantApplicationData[0]?.id ?? ""
+    );
+    setSelectedGrantSavedSearchId((current) =>
+      grantSavedSearchData.some((search) => search.id === current)
+        ? current
+        : grantSavedSearchData[0]?.id ?? ""
     );
     setSelectedMerchandiseProductId((current) =>
       merchandiseProductData.some((product) => product.id === current)
@@ -6387,6 +6404,8 @@ export default function HomePage() {
       setGrantPortfolioSummary(null);
       setGrantOpportunityMatches([]);
       setGrantDiscoveryRun(null);
+      setGrantSavedSearches([]);
+      setGrantSavedSearchRun(null);
       setGrantReports([]);
       setGrantDashboard(null);
       setMerchandiseProducts([]);
@@ -6432,6 +6451,7 @@ export default function HomePage() {
       setSelectedDonorProfileId("");
       setSelectedGrantOpportunityId("");
       setSelectedGrantApplicationId("");
+      setSelectedGrantSavedSearchId("");
       setSelectedMerchandiseProductId("");
       setSelectedMerchandiseOrderId("");
       setReportDefinitions([]);
@@ -20327,6 +20347,68 @@ export default function HomePage() {
     );
   };
 
+  const saveGrantDiscoverySearch = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before saving grant discovery criteria", "bad");
+      return;
+    }
+    runAction(
+      "save-grant-discovery-search",
+      () =>
+        apiRequest<GrantSavedSearchRead>("/commercial/grants/saved-searches", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: grantForm.saved_search_name,
+            profile_name: grantForm.discovery_profile_name,
+            focus_terms: parseCommaList(grantForm.discovery_focus_terms),
+            excluded_terms: parseCommaList(grantForm.discovery_excluded_terms),
+            minimum_score: grantForm.discovery_minimum_score,
+            limit: 10,
+            alert_enabled: grantForm.discovery_alert_enabled,
+            alert_frequency: grantForm.discovery_alert_frequency,
+            alert_channel: grantForm.discovery_alert_channel,
+            notes: "Saved from the commercial console grant discovery panel."
+          }
+        }),
+      (savedSearch) => {
+        setGrantSavedSearches((current) => [
+          savedSearch,
+          ...current.filter((item) => item.id !== savedSearch.id)
+        ]);
+        setSelectedGrantSavedSearchId(savedSearch.id);
+        addLog(`${savedSearch.name} grant search saved`, "good");
+      }
+    );
+  };
+
+  const runSelectedGrantSavedSearch = () => {
+    const savedSearchId = selectedGrantSavedSearchId || grantSavedSearches[0]?.id;
+    if (!savedSearchId) {
+      addLog("Save or select a grant search first", "bad");
+      return;
+    }
+    runAction(
+      `run-grant-saved-search-${savedSearchId}`,
+      () =>
+        apiRequest<GrantSavedSearchRunRead>(`/commercial/grants/saved-searches/${savedSearchId}/run`, {
+          method: "POST",
+          identity
+        }),
+      (run) => {
+        setGrantSavedSearchRun(run);
+        setGrantDiscoveryRun(run.discovery_run);
+        setGrantOpportunityMatches(run.discovery_run.matches);
+        setGrantSavedSearches((current) => [
+          run.saved_search,
+          ...current.filter((item) => item.id !== run.saved_search.id)
+        ]);
+        addLog(`${run.saved_search.name} produced ${run.discovery_run.generated_count} grant alert(s)`, run.discovery_run.generated_count ? "good" : "bad");
+      }
+    );
+  };
+
   const reviewGrantOpportunityMatch = (match: GrantOpportunityMatchRead, alertStatus: "reviewed" | "dismissed" | "applied") => {
     runAction(
       `grant-match-${match.id}-${alertStatus}`,
@@ -27391,6 +27473,8 @@ export default function HomePage() {
                 <button type="button" onClick={completeSelectedDonorStewardshipPlan} disabled={busyAction !== null}>Complete donor</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={runGrantDiscovery} disabled={busyAction !== null}>Discover grants</button>
+                <button type="button" onClick={saveGrantDiscoverySearch} disabled={busyAction !== null}>Save search</button>
+                <button type="button" onClick={runSelectedGrantSavedSearch} disabled={busyAction !== null}>Run saved</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
                 <button type="button" onClick={generateGrantReport} disabled={busyAction !== null}>Draft report</button>
                 <button type="button" onClick={requestGrantApplicationApproval} disabled={busyAction !== null}>Approve grant</button>
@@ -27660,6 +27744,10 @@ export default function HomePage() {
                 Discovery profile
                 <input value={grantForm.discovery_profile_name} onChange={(event) => setGrantForm({ ...grantForm, discovery_profile_name: event.target.value })} />
               </label>
+              <label>
+                Saved search
+                <input value={grantForm.saved_search_name} onChange={(event) => setGrantForm({ ...grantForm, saved_search_name: event.target.value })} />
+              </label>
               <label className="wide-field">
                 Focus terms
                 <input value={grantForm.discovery_focus_terms} onChange={(event) => setGrantForm({ ...grantForm, discovery_focus_terms: event.target.value })} />
@@ -27671,6 +27759,23 @@ export default function HomePage() {
               <label>
                 Minimum score
                 <input value={grantForm.discovery_minimum_score} onChange={(event) => setGrantForm({ ...grantForm, discovery_minimum_score: event.target.value })} />
+              </label>
+              <label>
+                Alert frequency
+                <select value={grantForm.discovery_alert_frequency} onChange={(event) => setGrantForm({ ...grantForm, discovery_alert_frequency: event.target.value })}>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </label>
+              <label>
+                Alert channel
+                <input value={grantForm.discovery_alert_channel} onChange={(event) => setGrantForm({ ...grantForm, discovery_alert_channel: event.target.value })} />
+              </label>
+              <label>
+                Alerts on
+                <input type="checkbox" checked={grantForm.discovery_alert_enabled} onChange={(event) => setGrantForm({ ...grantForm, discovery_alert_enabled: event.target.checked })} />
               </label>
               <label>
                 Approval level
@@ -27895,6 +28000,33 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {grantSavedSearchRun ? (
+                <article className={`task-card ${grantSavedSearchRun.saved_search.alert_enabled ? "selected" : ""}`}>
+                  <div>
+                    <strong>{grantSavedSearchRun.saved_search.name} alerts</strong>
+                    <span>
+                      {grantSavedSearchRun.saved_search.last_match_count} matches · {grantSavedSearchRun.saved_search.last_high_fit_count} high fit · {grantSavedSearchRun.saved_search.alert_frequency}
+                    </span>
+                    <small>{grantSavedSearchRun.saved_search.alert_channel} · last run {grantSavedSearchRun.saved_search.last_run_at ?? "not run"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {grantSavedSearches.slice(0, 3).map((search) => (
+                <button
+                  type="button"
+                  key={search.id}
+                  className={`task-card ${search.id === selectedGrantSavedSearchId ? "selected" : ""}`}
+                  onClick={() => setSelectedGrantSavedSearchId(search.id)}
+                >
+                  <div>
+                    <strong>{search.name}</strong>
+                    <span>
+                      {search.profile_name} · {search.minimum_score}+ · {search.alert_enabled ? search.alert_frequency : "alerts off"}
+                    </span>
+                    <small>{search.last_match_count} matches · {search.last_high_fit_count} high fit · {search.status}</small>
+                  </div>
+                </button>
+              ))}
               {grantOpportunityMatches.slice(0, 4).map((match) => (
                 <article key={match.id} className={`task-card ${match.fit_band === "high" ? "selected" : ""}`}>
                   <div>

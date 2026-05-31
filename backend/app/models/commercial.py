@@ -342,6 +342,28 @@ class GrantOpportunityMatch(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class GrantSavedSearch(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_saved_searches"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_grant_saved_searches_name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    profile_name: Mapped[str] = mapped_column(String(160), default="default", nullable=False, index=True)
+    focus_terms_json: Mapped[str | None] = mapped_column(Text)
+    excluded_terms_json: Mapped[str | None] = mapped_column(Text)
+    minimum_score: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0"), nullable=False)
+    limit: Mapped[int] = mapped_column(Integer, default=25, nullable=False)
+    alert_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    alert_frequency: Mapped[str] = mapped_column(String(40), default="weekly", nullable=False, index=True)
+    alert_channel: Mapped[str] = mapped_column(String(80), default="email", nullable=False, index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_match_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_high_fit_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_alert_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class GrantApplication(IdMixin, TimestampMixin, Base):
     __tablename__ = "grant_applications"
 
