@@ -588,6 +588,57 @@ class OrganizationFinancialAidApplication(IdMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class OrganizationFinancialAidRenewal(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_financial_aid_renewals"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    program_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_financial_aid_programs.id"), index=True)
+    application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_financial_aid_applications.id"), index=True)
+    member_subscription_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    requested_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    reviewed_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    renewal_period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    renewal_period_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    requested_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    recommended_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    approved_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    amount_applied: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    academic_status: Mapped[str | None] = mapped_column(String(80), index=True)
+    attendance_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    compliance_notes: Mapped[str | None] = mapped_column(Text)
+    renewal_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    committee_recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="submitted", nullable=False, index=True)
+    submitted_on: Mapped[date | None] = mapped_column(Date, index=True)
+    decided_on: Mapped[date | None] = mapped_column(Date, index=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationFinancialAidAppeal(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_financial_aid_appeals"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    program_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_financial_aid_programs.id"), index=True)
+    application_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_financial_aid_applications.id"), index=True)
+    submitted_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    resolved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    appeal_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_outcome: Mapped[str | None] = mapped_column(Text)
+    supporting_evidence_ref: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False, index=True)
+    submitted_on: Mapped[date | None] = mapped_column(Date, index=True)
+    due_on: Mapped[date | None] = mapped_column(Date, index=True)
+    resolved_on: Mapped[date | None] = mapped_column(Date, index=True)
+    resolution_notes: Mapped[str | None] = mapped_column(Text)
+    amount_adjustment: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    final_award_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    amount_applied: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    committee_notes: Mapped[str | None] = mapped_column(Text)
+
+
 class OrganizationMarketProfile(IdMixin, TimestampMixin, Base):
     __tablename__ = "organization_market_profiles"
     __table_args__ = (

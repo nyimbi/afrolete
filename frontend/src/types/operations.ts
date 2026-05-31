@@ -1130,6 +1130,59 @@ export type OrganizationFinancialAidApplicationRead = {
   notes: string | null;
 };
 
+export type OrganizationFinancialAidRenewalRead = {
+  id: UUID;
+  organization_id: UUID;
+  program_id: UUID;
+  program_name: string;
+  application_id: UUID;
+  applicant_label: string | null;
+  member_subscription_id: UUID | null;
+  requested_by_person_id: UUID | null;
+  reviewed_by_person_id: UUID | null;
+  renewal_period_start: string;
+  renewal_period_end: string;
+  requested_amount: string;
+  recommended_amount: string;
+  approved_amount: string;
+  amount_applied: string;
+  currency: string;
+  academic_status: string | null;
+  attendance_percent: string | null;
+  compliance_notes: string | null;
+  renewal_score: number;
+  committee_recommendation: string;
+  status: string;
+  submitted_on: string | null;
+  decided_on: string | null;
+  decision_reason: string | null;
+  notes: string | null;
+};
+
+export type OrganizationFinancialAidAppealRead = {
+  id: UUID;
+  organization_id: UUID;
+  program_id: UUID;
+  program_name: string;
+  application_id: UUID;
+  applicant_label: string | null;
+  submitted_by_person_id: UUID | null;
+  resolved_by_person_id: UUID | null;
+  appeal_reason: string;
+  requested_outcome: string | null;
+  supporting_evidence_ref: string | null;
+  status: string;
+  submitted_on: string | null;
+  due_on: string | null;
+  resolved_on: string | null;
+  resolution_notes: string | null;
+  amount_adjustment: string;
+  final_award_amount: string;
+  amount_applied: string;
+  currency: string;
+  committee_notes: string | null;
+};
+
 export type OrganizationFinancialAidSummaryRead = {
   organization_id: UUID;
   program_id: UUID | null;
@@ -1140,6 +1193,12 @@ export type OrganizationFinancialAidSummaryRead = {
   awarded_count: number;
   denied_count: number;
   waitlisted_count: number;
+  renewal_count: number;
+  pending_renewal_count: number;
+  renewed_count: number;
+  appeal_count: number;
+  pending_appeal_count: number;
+  resolved_appeal_count: number;
   total_requested: string;
   total_awarded: string;
   total_applied: string;

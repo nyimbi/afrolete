@@ -70,9 +70,15 @@ from app.schemas.organization import (
     OrganizationExternalReportRead,
     OrganizationExternalReportStatusUpdate,
     OrganizationExternalReportSummaryRead,
+    OrganizationFinancialAidAppealCreate,
+    OrganizationFinancialAidAppealRead,
+    OrganizationFinancialAidAppealReview,
     OrganizationFinancialAidApplicationCreate,
     OrganizationFinancialAidApplicationRead,
     OrganizationFinancialAidApplicationReview,
+    OrganizationFinancialAidRenewalCreate,
+    OrganizationFinancialAidRenewalRead,
+    OrganizationFinancialAidRenewalReview,
     OrganizationFinancialAidSummaryRead,
     OrganizationFinancialAidProgramCreate,
     OrganizationFinancialAidProgramRead,
@@ -153,8 +159,10 @@ from app.services.organizations import (
     create_data_migration_project,
     create_data_migration_run,
     create_organization_external_report,
+    create_organization_financial_aid_appeal,
     create_organization_financial_aid_application,
     create_organization_financial_aid_program,
+    create_organization_financial_aid_renewal,
     create_recovery_drill,
     create_recovery_plan,
     add_organization_group_member,
@@ -197,8 +205,10 @@ from app.services.organizations import (
     list_compliance_documents,
     list_compliance_document_versions,
     list_organization_external_reports,
+    list_organization_financial_aid_appeals,
     list_organization_financial_aid_applications,
     list_organization_financial_aid_programs,
+    list_organization_financial_aid_renewals,
     organization_financial_aid_summary,
     list_organization_group_members,
     list_organization_groups,
@@ -233,7 +243,9 @@ from app.services.organizations import (
     update_member_subscription_payment_plan,
     update_member_subscription_plan,
     update_organization_external_report_status,
+    review_organization_financial_aid_appeal,
     review_organization_financial_aid_application,
+    review_organization_financial_aid_renewal,
     waive_member_subscription_charge,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
@@ -2195,6 +2207,82 @@ async def organization_financial_aid_summary_route(
     db: AsyncSession = Depends(get_db),
 ) -> OrganizationFinancialAidSummaryRead:
     return await organization_financial_aid_summary(db, organization_id, program_id, as_of)
+
+
+@router.post(
+    "/{organization_id}/financial-aid-renewals",
+    response_model=OrganizationFinancialAidRenewalRead,
+    status_code=201,
+)
+async def create_organization_financial_aid_renewal_route(
+    organization_id: UUID,
+    payload: OrganizationFinancialAidRenewalCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationFinancialAidRenewalRead:
+    return await create_organization_financial_aid_renewal(db, identity, organization_id, payload, authz)
+
+
+@router.get("/{organization_id}/financial-aid-renewals", response_model=list[OrganizationFinancialAidRenewalRead])
+async def list_organization_financial_aid_renewals_route(
+    organization_id: UUID,
+    application_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationFinancialAidRenewalRead]:
+    return await list_organization_financial_aid_renewals(db, organization_id, application_id)
+
+
+@router.patch(
+    "/financial-aid-renewals/{renewal_id}/review",
+    response_model=OrganizationFinancialAidRenewalRead,
+)
+async def review_organization_financial_aid_renewal_route(
+    renewal_id: UUID,
+    payload: OrganizationFinancialAidRenewalReview,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationFinancialAidRenewalRead:
+    return await review_organization_financial_aid_renewal(db, identity, renewal_id, payload, authz)
+
+
+@router.post(
+    "/{organization_id}/financial-aid-appeals",
+    response_model=OrganizationFinancialAidAppealRead,
+    status_code=201,
+)
+async def create_organization_financial_aid_appeal_route(
+    organization_id: UUID,
+    payload: OrganizationFinancialAidAppealCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationFinancialAidAppealRead:
+    return await create_organization_financial_aid_appeal(db, identity, organization_id, payload, authz)
+
+
+@router.get("/{organization_id}/financial-aid-appeals", response_model=list[OrganizationFinancialAidAppealRead])
+async def list_organization_financial_aid_appeals_route(
+    organization_id: UUID,
+    application_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationFinancialAidAppealRead]:
+    return await list_organization_financial_aid_appeals(db, organization_id, application_id)
+
+
+@router.patch(
+    "/financial-aid-appeals/{appeal_id}/review",
+    response_model=OrganizationFinancialAidAppealRead,
+)
+async def review_organization_financial_aid_appeal_route(
+    appeal_id: UUID,
+    payload: OrganizationFinancialAidAppealReview,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationFinancialAidAppealRead:
+    return await review_organization_financial_aid_appeal(db, identity, appeal_id, payload, authz)
 
 
 @router.patch(

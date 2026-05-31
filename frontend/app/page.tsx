@@ -397,8 +397,10 @@ import type {
   OrganizationDataMigrationRunRead,
   OrganizationExternalReportRead,
   OrganizationExternalReportSummaryRead,
+  OrganizationFinancialAidAppealRead,
   OrganizationFinancialAidApplicationRead,
   OrganizationFinancialAidProgramRead,
+  OrganizationFinancialAidRenewalRead,
   OrganizationFinancialAidSummaryRead,
   OrganizationGroupMembershipRead,
   OrganizationGroupRead,
@@ -1899,6 +1901,8 @@ export default function HomePage() {
   const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
   const [financialAidPrograms, setFinancialAidPrograms] = useState<OrganizationFinancialAidProgramRead[]>([]);
   const [financialAidApplications, setFinancialAidApplications] = useState<OrganizationFinancialAidApplicationRead[]>([]);
+  const [financialAidRenewals, setFinancialAidRenewals] = useState<OrganizationFinancialAidRenewalRead[]>([]);
+  const [financialAidAppeals, setFinancialAidAppeals] = useState<OrganizationFinancialAidAppealRead[]>([]);
   const [financialAidSummary, setFinancialAidSummary] = useState<OrganizationFinancialAidSummaryRead | null>(null);
   const [memberDuesReceivablesSummary, setMemberDuesReceivablesSummary] =
     useState<MemberSubscriptionReceivablesSummaryRead | null>(null);
@@ -2759,6 +2763,22 @@ export default function HomePage() {
     review_score: 88,
     amount_awarded: "300.00",
     decision_reason: "Need and commitment verified by committee."
+  });
+  const [financialAidRenewalForm, setFinancialAidRenewalForm] = useState({
+    renewal_period_start: "2027-01-01",
+    renewal_period_end: "2027-12-31",
+    requested_amount: "350.00",
+    academic_status: "good_standing",
+    attendance_percent: "92.00",
+    compliance_notes: "Excellent attendance and family documentation remains current.",
+    decision_reason: "Renewal criteria satisfied."
+  });
+  const [financialAidAppealForm, setFinancialAidAppealForm] = useState({
+    appeal_reason: "Family submitted updated hardship evidence after the original committee decision.",
+    requested_outcome: "Increase dues relief for the next billing period.",
+    supporting_evidence_ref: "family-hardship-letter-2026",
+    amount_adjustment: "100.00",
+    resolution_notes: "Committee modified the award after reviewing updated evidence."
   });
   const [marketProfileForm, setMarketProfileForm] = useState({
     name: "Kenya operating market",
@@ -4439,7 +4459,18 @@ export default function HomePage() {
   }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
-    const [plans, subscriptions, charges, paymentPlans, aidPrograms, aidApplications, aidSummary, summary] = await Promise.all([
+    const [
+      plans,
+      subscriptions,
+      charges,
+      paymentPlans,
+      aidPrograms,
+      aidApplications,
+      aidRenewals,
+      aidAppeals,
+      aidSummary,
+      summary
+    ] = await Promise.all([
       apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
       apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
@@ -4448,6 +4479,8 @@ export default function HomePage() {
       ),
       apiRequest<OrganizationFinancialAidProgramRead[]>(`/organizations/${organizationId}/financial-aid-programs`),
       apiRequest<OrganizationFinancialAidApplicationRead[]>(`/organizations/${organizationId}/financial-aid-applications`),
+      apiRequest<OrganizationFinancialAidRenewalRead[]>(`/organizations/${organizationId}/financial-aid-renewals`),
+      apiRequest<OrganizationFinancialAidAppealRead[]>(`/organizations/${organizationId}/financial-aid-appeals`),
       apiRequest<OrganizationFinancialAidSummaryRead>(`/organizations/${organizationId}/financial-aid-summary`),
       apiRequest<MemberSubscriptionReceivablesSummaryRead>(
         `/organizations/${organizationId}/member-subscription-charges/summary`
@@ -4459,6 +4492,8 @@ export default function HomePage() {
     setMemberDuesPaymentPlans(paymentPlans);
     setFinancialAidPrograms(aidPrograms);
     setFinancialAidApplications(aidApplications);
+    setFinancialAidRenewals(aidRenewals);
+    setFinancialAidAppeals(aidAppeals);
     setFinancialAidSummary(aidSummary);
     setMemberDuesReceivablesSummary(summary);
     setSelectedMemberSubscriptionId((current) =>
@@ -6172,6 +6207,8 @@ export default function HomePage() {
       setMemberDuesPaymentPlans([]);
       setFinancialAidPrograms([]);
       setFinancialAidApplications([]);
+      setFinancialAidRenewals([]);
+      setFinancialAidAppeals([]);
       setFinancialAidSummary(null);
       setMemberDuesReceivablesSummary(null);
       setMemberDuesChargeRun(null);
@@ -7623,6 +7660,144 @@ export default function HomePage() {
           await loadMemberDues(selectedOrganizationId);
         }
         addLog(`Financial aid applied ${updated.amount_applied} ${updated.currency}`, "good");
+      }
+    );
+  };
+
+  const createFinancialAidRenewal = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a financial aid renewal", "bad");
+      return;
+    }
+    const application = financialAidApplications.find((item) => item.status === "awarded") ?? financialAidApplications[0];
+    if (!application) {
+      addLog("Create and approve financial aid before renewal", "bad");
+      return;
+    }
+    runAction(
+      "create-financial-aid-renewal",
+      () =>
+        apiRequest<OrganizationFinancialAidRenewalRead>(
+          `/organizations/${selectedOrganizationId}/financial-aid-renewals`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              application_id: application.id,
+              renewal_period_start: financialAidRenewalForm.renewal_period_start,
+              renewal_period_end: financialAidRenewalForm.renewal_period_end,
+              requested_amount: financialAidRenewalForm.requested_amount,
+              academic_status: financialAidRenewalForm.academic_status,
+              attendance_percent: financialAidRenewalForm.attendance_percent,
+              compliance_notes: financialAidRenewalForm.compliance_notes
+            }
+          }
+        ),
+      async (renewal) => {
+        setFinancialAidRenewals((current) => [renewal, ...current.filter((item) => item.id !== renewal.id)]);
+        await loadMemberDues(selectedOrganizationId);
+        addLog(`Financial aid renewal score ${renewal.renewal_score}/100`, "good");
+      }
+    );
+  };
+
+  const approveFirstFinancialAidRenewal = () => {
+    const renewal = financialAidRenewals.find((item) => ["submitted", "recommended"].includes(item.status))
+      ?? financialAidRenewals[0];
+    if (!renewal) {
+      addLog("Create a financial aid renewal before approval", "bad");
+      return;
+    }
+    runAction(
+      "approve-financial-aid-renewal",
+      () =>
+        apiRequest<OrganizationFinancialAidRenewalRead>(
+          `/organizations/financial-aid-renewals/${renewal.id}/review`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status: "renewed",
+              approved_amount: financialAidRenewalForm.requested_amount,
+              decision_reason: financialAidRenewalForm.decision_reason,
+              apply_to_member_dues: true
+            }
+          }
+        ),
+      async (updated) => {
+        setFinancialAidRenewals((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
+        addLog(`Financial aid renewed ${updated.amount_applied} ${updated.currency} applied`, "good");
+      }
+    );
+  };
+
+  const createFinancialAidAppeal = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a financial aid appeal", "bad");
+      return;
+    }
+    const application = financialAidApplications[0];
+    if (!application) {
+      addLog("Create financial aid before appeal", "bad");
+      return;
+    }
+    runAction(
+      "create-financial-aid-appeal",
+      () =>
+        apiRequest<OrganizationFinancialAidAppealRead>(
+          `/organizations/${selectedOrganizationId}/financial-aid-appeals`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              application_id: application.id,
+              appeal_reason: financialAidAppealForm.appeal_reason,
+              requested_outcome: financialAidAppealForm.requested_outcome,
+              supporting_evidence_ref: financialAidAppealForm.supporting_evidence_ref
+            }
+          }
+        ),
+      async (appeal) => {
+        setFinancialAidAppeals((current) => [appeal, ...current.filter((item) => item.id !== appeal.id)]);
+        await loadMemberDues(selectedOrganizationId);
+        addLog(`Financial aid appeal due ${appeal.due_on ?? "not set"}`, "good");
+      }
+    );
+  };
+
+  const resolveFirstFinancialAidAppeal = () => {
+    const appeal = financialAidAppeals.find((item) => ["pending", "in_review"].includes(item.status))
+      ?? financialAidAppeals[0];
+    if (!appeal) {
+      addLog("Create a financial aid appeal before resolution", "bad");
+      return;
+    }
+    runAction(
+      "resolve-financial-aid-appeal",
+      () =>
+        apiRequest<OrganizationFinancialAidAppealRead>(
+          `/organizations/financial-aid-appeals/${appeal.id}/review`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status: "modified",
+              amount_adjustment: financialAidAppealForm.amount_adjustment,
+              resolution_notes: financialAidAppealForm.resolution_notes,
+              committee_notes: "Appeal packet reviewed by aid committee.",
+              apply_to_member_dues: true
+            }
+          }
+        ),
+      async (updated) => {
+        setFinancialAidAppeals((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
+        addLog(`Financial aid appeal ${updated.status}: ${updated.amount_applied} ${updated.currency} applied`, "good");
       }
     );
   };
@@ -24795,6 +24970,10 @@ export default function HomePage() {
               <button type="button" onClick={createFinancialAidProgram} disabled={busyAction !== null}>Aid program</button>
               <button type="button" onClick={createFinancialAidApplication} disabled={busyAction !== null}>Aid app</button>
               <button type="button" onClick={approveFirstFinancialAidApplication} disabled={busyAction !== null}>Approve aid</button>
+              <button type="button" onClick={createFinancialAidRenewal} disabled={busyAction !== null}>Renew aid</button>
+              <button type="button" onClick={approveFirstFinancialAidRenewal} disabled={busyAction !== null}>Approve renewal</button>
+              <button type="button" onClick={createFinancialAidAppeal} disabled={busyAction !== null}>Appeal aid</button>
+              <button type="button" onClick={resolveFirstFinancialAidAppeal} disabled={busyAction !== null}>Resolve appeal</button>
               <button type="button" onClick={loadMemberDuesStatement} disabled={busyAction !== null}>Statement</button>
               <button type="button" onClick={() => downloadMemberDuesStatement("txt")} disabled={busyAction !== null}>Download</button>
               <button type="button" onClick={sendMemberDuesStatement} disabled={busyAction !== null}>Send</button>
@@ -24853,6 +25032,22 @@ export default function HomePage() {
                 Aid award
                 <input value={financialAidApplicationForm.amount_awarded} onChange={(event) => setFinancialAidApplicationForm({ ...financialAidApplicationForm, amount_awarded: event.target.value })} />
               </label>
+              <label>
+                Renewal start
+                <input type="date" value={financialAidRenewalForm.renewal_period_start} onChange={(event) => setFinancialAidRenewalForm({ ...financialAidRenewalForm, renewal_period_start: event.target.value })} />
+              </label>
+              <label>
+                Renewal amount
+                <input value={financialAidRenewalForm.requested_amount} onChange={(event) => setFinancialAidRenewalForm({ ...financialAidRenewalForm, requested_amount: event.target.value })} />
+              </label>
+              <label>
+                Attendance %
+                <input value={financialAidRenewalForm.attendance_percent} onChange={(event) => setFinancialAidRenewalForm({ ...financialAidRenewalForm, attendance_percent: event.target.value })} />
+              </label>
+              <label>
+                Appeal adjustment
+                <input value={financialAidAppealForm.amount_adjustment} onChange={(event) => setFinancialAidAppealForm({ ...financialAidAppealForm, amount_adjustment: event.target.value })} />
+              </label>
             </div>
             <div className="task-list">
               {memberDuesReceivablesSummary ? (
@@ -24877,7 +25072,7 @@ export default function HomePage() {
                       {financialAidSummary.total_applied} applied · {financialAidSummary.budget_remaining} budget left · {financialAidSummary.awards_remaining ?? "open"} slots left
                     </span>
                     <small>
-                      {financialAidSummary.awarded_count} awarded · {financialAidSummary.submitted_count} pending · {financialAidSummary.average_eligibility_score}/100 eligibility
+                      {financialAidSummary.awarded_count} awarded · {financialAidSummary.pending_renewal_count} renewals · {financialAidSummary.pending_appeal_count} appeals · {financialAidSummary.average_eligibility_score}/100 eligibility
                     </small>
                     <small>{financialAidSummary.next_actions[0] ?? financialAidSummary.donor_report_summary[0] ?? "Aid portfolio is current."}</small>
                   </div>
@@ -24944,6 +25139,24 @@ export default function HomePage() {
                     <strong>{application.applicant_label ?? application.member_subscription_id} · {application.program_name}</strong>
                     <span>{application.amount_applied}/{application.amount_awarded} {application.currency} applied · {application.status.replaceAll("_", " ")}</span>
                     <small>Eligibility {application.eligibility_score}/100 · {application.committee_recommendation}</small>
+                  </div>
+                </article>
+              ))}
+              {financialAidRenewals.slice(0, 4).map((renewal) => (
+                <article key={renewal.id} className={`task-card ${renewal.status === "renewed" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{renewal.applicant_label ?? renewal.application_id} · renewal</strong>
+                    <span>{renewal.amount_applied}/{renewal.approved_amount || renewal.recommended_amount} {renewal.currency} applied · {renewal.status.replaceAll("_", " ")}</span>
+                    <small>{renewal.renewal_period_start} to {renewal.renewal_period_end} · score {renewal.renewal_score}/100</small>
+                  </div>
+                </article>
+              ))}
+              {financialAidAppeals.slice(0, 4).map((appeal) => (
+                <article key={appeal.id} className={`task-card ${["pending", "in_review"].includes(appeal.status) ? "risk-card" : "selected"}`}>
+                  <div>
+                    <strong>{appeal.applicant_label ?? appeal.application_id} · appeal</strong>
+                    <span>{appeal.amount_applied}/{appeal.final_award_amount} {appeal.currency} · {appeal.status.replaceAll("_", " ")}</span>
+                    <small>Due {appeal.due_on ?? "not set"} · {appeal.resolution_notes ?? appeal.requested_outcome ?? appeal.appeal_reason}</small>
                   </div>
                 </article>
               ))}

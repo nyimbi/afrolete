@@ -55,8 +55,10 @@ from app.models.organization import (
     MemberSubscriptionPaymentPlan,
     MemberSubscriptionPlan,
     Membership,
+    OrganizationFinancialAidAppeal,
     OrganizationFinancialAidApplication,
     OrganizationFinancialAidProgram,
+    OrganizationFinancialAidRenewal,
     OrganizationAwardCategory,
     OrganizationAwardNomination,
     OrganizationAwardProgram,
@@ -125,8 +127,14 @@ from app.schemas.organization import (
     OrganizationExternalReportStatusUpdate,
     OrganizationExternalReportSummaryRead,
     OrganizationFinancialAidApplicationCreate,
+    OrganizationFinancialAidAppealCreate,
+    OrganizationFinancialAidAppealRead,
+    OrganizationFinancialAidAppealReview,
     OrganizationFinancialAidApplicationRead,
     OrganizationFinancialAidApplicationReview,
+    OrganizationFinancialAidRenewalCreate,
+    OrganizationFinancialAidRenewalRead,
+    OrganizationFinancialAidRenewalReview,
     OrganizationFinancialAidSummaryRead,
     OrganizationFinancialAidProgramCreate,
     OrganizationFinancialAidProgramRead,
@@ -5021,6 +5029,71 @@ def organization_financial_aid_application_read(
     )
 
 
+def organization_financial_aid_renewal_read(
+    renewal: OrganizationFinancialAidRenewal,
+    program: OrganizationFinancialAidProgram,
+    applicant_label: str | None,
+) -> OrganizationFinancialAidRenewalRead:
+    return OrganizationFinancialAidRenewalRead(
+        id=renewal.id,
+        organization_id=renewal.organization_id,
+        program_id=renewal.program_id,
+        program_name=program.name,
+        application_id=renewal.application_id,
+        applicant_label=applicant_label,
+        member_subscription_id=renewal.member_subscription_id,
+        requested_by_person_id=renewal.requested_by_person_id,
+        reviewed_by_person_id=renewal.reviewed_by_person_id,
+        renewal_period_start=renewal.renewal_period_start,
+        renewal_period_end=renewal.renewal_period_end,
+        requested_amount=renewal.requested_amount,
+        recommended_amount=renewal.recommended_amount,
+        approved_amount=renewal.approved_amount,
+        amount_applied=renewal.amount_applied,
+        currency=renewal.currency,
+        academic_status=renewal.academic_status,
+        attendance_percent=renewal.attendance_percent,
+        compliance_notes=renewal.compliance_notes,
+        renewal_score=renewal.renewal_score,
+        committee_recommendation=renewal.committee_recommendation,
+        status=renewal.status,
+        submitted_on=renewal.submitted_on,
+        decided_on=renewal.decided_on,
+        decision_reason=renewal.decision_reason,
+        notes=renewal.notes,
+    )
+
+
+def organization_financial_aid_appeal_read(
+    appeal: OrganizationFinancialAidAppeal,
+    program: OrganizationFinancialAidProgram,
+    applicant_label: str | None,
+) -> OrganizationFinancialAidAppealRead:
+    return OrganizationFinancialAidAppealRead(
+        id=appeal.id,
+        organization_id=appeal.organization_id,
+        program_id=appeal.program_id,
+        program_name=program.name,
+        application_id=appeal.application_id,
+        applicant_label=applicant_label,
+        submitted_by_person_id=appeal.submitted_by_person_id,
+        resolved_by_person_id=appeal.resolved_by_person_id,
+        appeal_reason=appeal.appeal_reason,
+        requested_outcome=appeal.requested_outcome,
+        supporting_evidence_ref=appeal.supporting_evidence_ref,
+        status=appeal.status,
+        submitted_on=appeal.submitted_on,
+        due_on=appeal.due_on,
+        resolved_on=appeal.resolved_on,
+        resolution_notes=appeal.resolution_notes,
+        amount_adjustment=appeal.amount_adjustment,
+        final_award_amount=appeal.final_award_amount,
+        amount_applied=appeal.amount_applied,
+        currency=appeal.currency,
+        committee_notes=appeal.committee_notes,
+    )
+
+
 async def create_organization_financial_aid_program(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -5158,6 +5231,253 @@ async def list_organization_financial_aid_applications(
     ]
 
 
+async def create_organization_financial_aid_renewal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationFinancialAidRenewalCreate,
+    authz: AuthorizationService,
+) -> OrganizationFinancialAidRenewalRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    application, program = await financial_aid_application_bundle(db, payload.application_id, organization_id)
+    if application.status not in {"awarded", "approved", "conditionally_approved"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Only awarded aid can be renewed")
+    if payload.renewal_period_end < payload.renewal_period_start:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="renewal_period_end must be on or after renewal_period_start")
+    requested_amount = (payload.requested_amount or application.amount_awarded).quantize(Decimal("0.01"))
+    renewal_score = financial_aid_renewal_score(payload)
+    recommended_amount = requested_amount if renewal_score >= program.minimum_score else Decimal("0.00")
+    renewal = OrganizationFinancialAidRenewal(
+        organization_id=organization_id,
+        program_id=program.id,
+        application_id=application.id,
+        member_subscription_id=application.member_subscription_id,
+        requested_by_person_id=identity.person_id,
+        renewal_period_start=payload.renewal_period_start,
+        renewal_period_end=payload.renewal_period_end,
+        requested_amount=requested_amount,
+        recommended_amount=recommended_amount,
+        approved_amount=Decimal("0.00"),
+        amount_applied=Decimal("0.00"),
+        currency=application.currency,
+        academic_status=payload.academic_status,
+        attendance_percent=payload.attendance_percent,
+        compliance_notes=payload.compliance_notes,
+        renewal_score=renewal_score,
+        committee_recommendation=financial_aid_renewal_recommendation(renewal_score, program),
+        status="recommended" if recommended_amount > 0 else "submitted",
+        submitted_on=payload.submitted_on or date.today(),
+        notes=payload.notes,
+    )
+    db.add(renewal)
+    await db.commit()
+    await db.refresh(renewal)
+    return organization_financial_aid_renewal_read(
+        renewal,
+        program,
+        await financial_aid_applicant_label(db, application),
+    )
+
+
+async def list_organization_financial_aid_renewals(
+    db: AsyncSession,
+    organization_id: UUID,
+    application_id: UUID | None = None,
+) -> list[OrganizationFinancialAidRenewalRead]:
+    statement = (
+        select(OrganizationFinancialAidRenewal, OrganizationFinancialAidProgram, OrganizationFinancialAidApplication)
+        .join(OrganizationFinancialAidProgram, OrganizationFinancialAidProgram.id == OrganizationFinancialAidRenewal.program_id)
+        .join(OrganizationFinancialAidApplication, OrganizationFinancialAidApplication.id == OrganizationFinancialAidRenewal.application_id)
+        .where(OrganizationFinancialAidRenewal.organization_id == organization_id)
+        .order_by(OrganizationFinancialAidRenewal.status, OrganizationFinancialAidRenewal.renewal_period_start.desc())
+    )
+    if application_id is not None:
+        statement = statement.where(OrganizationFinancialAidRenewal.application_id == application_id)
+    rows = (await db.execute(statement)).all()
+    return [
+        organization_financial_aid_renewal_read(
+            renewal,
+            program,
+            await financial_aid_applicant_label(db, application),
+        )
+        for renewal, program, application in rows
+    ]
+
+
+async def review_organization_financial_aid_renewal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    renewal_id: UUID,
+    payload: OrganizationFinancialAidRenewalReview,
+    authz: AuthorizationService,
+) -> OrganizationFinancialAidRenewalRead:
+    renewal = await db.get(OrganizationFinancialAidRenewal, renewal_id)
+    if renewal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial aid renewal not found")
+    application, program = await financial_aid_application_bundle(db, renewal.application_id, renewal.organization_id)
+    await ensure_manage_organization(db, identity, renewal.organization_id, authz)
+    approved_amount = (payload.approved_amount or renewal.recommended_amount).quantize(Decimal("0.01"))
+    if payload.status == "renewed" and approved_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Renewed aid requires an amount")
+    if approved_amount > renewal.requested_amount:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Renewal exceeds requested amount")
+    previously_renewed = renewal.approved_amount if renewal.status == "renewed" else Decimal("0.00")
+    budget_delta = approved_amount - previously_renewed if payload.status == "renewed" else -previously_renewed
+    if program.annual_budget > 0 and (program.budget_awarded + budget_delta) > program.annual_budget:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Renewal exceeds program budget")
+
+    if previously_renewed:
+        program.budget_awarded = max(Decimal("0.00"), program.budget_awarded - previously_renewed).quantize(Decimal("0.01"))
+        program.awards_made = max(0, program.awards_made - 1)
+    renewal.status = payload.status
+    renewal.reviewed_by_person_id = identity.person_id
+    renewal.decided_on = payload.decided_on or date.today()
+    renewal.decision_reason = payload.decision_reason
+    renewal.notes = payload.notes if payload.notes is not None else renewal.notes
+    if payload.status == "renewed":
+        renewal.approved_amount = approved_amount
+        program.budget_awarded = (program.budget_awarded + approved_amount).quantize(Decimal("0.01"))
+        program.awards_made += 1
+        if payload.apply_to_member_dues and renewal.member_subscription_id is not None:
+            renewal.amount_applied = await apply_member_dues_non_cash_relief(
+                db,
+                renewal.organization_id,
+                renewal.member_subscription_id,
+                approved_amount,
+                identity.person_id,
+                f"Financial aid renewal {renewal.id}: {payload.decision_reason or renewal.committee_recommendation}",
+            )
+    elif payload.status in {"denied", "blocked", "cancelled"}:
+        renewal.approved_amount = Decimal("0.00")
+        renewal.amount_applied = Decimal("0.00")
+    await db.commit()
+    await db.refresh(renewal)
+    await db.refresh(program)
+    return organization_financial_aid_renewal_read(
+        renewal,
+        program,
+        await financial_aid_applicant_label(db, application),
+    )
+
+
+async def create_organization_financial_aid_appeal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationFinancialAidAppealCreate,
+    authz: AuthorizationService,
+) -> OrganizationFinancialAidAppealRead:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    application, program = await financial_aid_application_bundle(db, payload.application_id, organization_id)
+    submitted_on = payload.submitted_on or date.today()
+    appeal = OrganizationFinancialAidAppeal(
+        organization_id=organization_id,
+        program_id=program.id,
+        application_id=application.id,
+        submitted_by_person_id=identity.person_id,
+        appeal_reason=payload.appeal_reason,
+        requested_outcome=payload.requested_outcome,
+        supporting_evidence_ref=payload.supporting_evidence_ref,
+        status="pending",
+        submitted_on=submitted_on,
+        due_on=payload.due_on or submitted_on + timedelta(days=14),
+        amount_adjustment=Decimal("0.00"),
+        final_award_amount=application.amount_awarded,
+        amount_applied=Decimal("0.00"),
+        currency=application.currency,
+    )
+    db.add(appeal)
+    await db.commit()
+    await db.refresh(appeal)
+    return organization_financial_aid_appeal_read(
+        appeal,
+        program,
+        await financial_aid_applicant_label(db, application),
+    )
+
+
+async def list_organization_financial_aid_appeals(
+    db: AsyncSession,
+    organization_id: UUID,
+    application_id: UUID | None = None,
+) -> list[OrganizationFinancialAidAppealRead]:
+    statement = (
+        select(OrganizationFinancialAidAppeal, OrganizationFinancialAidProgram, OrganizationFinancialAidApplication)
+        .join(OrganizationFinancialAidProgram, OrganizationFinancialAidProgram.id == OrganizationFinancialAidAppeal.program_id)
+        .join(OrganizationFinancialAidApplication, OrganizationFinancialAidApplication.id == OrganizationFinancialAidAppeal.application_id)
+        .where(OrganizationFinancialAidAppeal.organization_id == organization_id)
+        .order_by(OrganizationFinancialAidAppeal.status, OrganizationFinancialAidAppeal.due_on.asc().nulls_last())
+    )
+    if application_id is not None:
+        statement = statement.where(OrganizationFinancialAidAppeal.application_id == application_id)
+    rows = (await db.execute(statement)).all()
+    return [
+        organization_financial_aid_appeal_read(
+            appeal,
+            program,
+            await financial_aid_applicant_label(db, application),
+        )
+        for appeal, program, application in rows
+    ]
+
+
+async def review_organization_financial_aid_appeal(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    appeal_id: UUID,
+    payload: OrganizationFinancialAidAppealReview,
+    authz: AuthorizationService,
+) -> OrganizationFinancialAidAppealRead:
+    appeal = await db.get(OrganizationFinancialAidAppeal, appeal_id)
+    if appeal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial aid appeal not found")
+    application, program = await financial_aid_application_bundle(db, appeal.application_id, appeal.organization_id)
+    await ensure_manage_organization(db, identity, appeal.organization_id, authz)
+    amount_adjustment = (payload.amount_adjustment or Decimal("0.00")).quantize(Decimal("0.01"))
+    final_award_amount = (payload.final_award_amount or application.amount_awarded + amount_adjustment).quantize(Decimal("0.01"))
+    if payload.status in {"modified", "overturned"}:
+        if final_award_amount <= 0:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Appeal award must be positive")
+        if final_award_amount > application.amount_requested:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Appeal award exceeds requested amount")
+        delta = final_award_amount - application.amount_awarded
+        if program.annual_budget > 0 and (program.budget_awarded + delta) > program.annual_budget:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Appeal award exceeds program budget")
+        program.budget_awarded = (program.budget_awarded + delta).quantize(Decimal("0.01"))
+        if application.status not in {"approved", "conditionally_approved", "awarded"}:
+            program.awards_made += 1
+        application.amount_awarded = final_award_amount
+        application.status = "approved"
+        if payload.apply_to_member_dues and application.member_subscription_id is not None and delta > 0:
+            appeal.amount_applied = await apply_member_dues_non_cash_relief(
+                db,
+                application.organization_id,
+                application.member_subscription_id,
+                delta,
+                identity.person_id,
+                f"Financial aid appeal {appeal.id}: {payload.resolution_notes or payload.status}",
+            )
+            application.amount_applied = (application.amount_applied + appeal.amount_applied).quantize(Decimal("0.01"))
+            if appeal.amount_applied > 0:
+                application.status = "awarded"
+    appeal.status = payload.status
+    appeal.resolved_by_person_id = identity.person_id
+    appeal.resolved_on = payload.resolved_on or date.today()
+    appeal.resolution_notes = payload.resolution_notes
+    appeal.amount_adjustment = amount_adjustment
+    appeal.final_award_amount = final_award_amount
+    appeal.committee_notes = payload.committee_notes
+    await db.commit()
+    await db.refresh(appeal)
+    await db.refresh(program)
+    await db.refresh(application)
+    return organization_financial_aid_appeal_read(
+        appeal,
+        program,
+        await financial_aid_applicant_label(db, application),
+    )
+
+
 async def organization_financial_aid_summary(
     db: AsyncSession,
     organization_id: UUID,
@@ -5176,6 +5496,17 @@ async def organization_financial_aid_summary(
         application_statement = application_statement.where(OrganizationFinancialAidApplication.program_id == program_id)
     programs = list((await db.scalars(program_statement)).all())
     applications = list((await db.scalars(application_statement)).all())
+    renewal_statement = select(OrganizationFinancialAidRenewal).where(
+        OrganizationFinancialAidRenewal.organization_id == organization_id
+    )
+    appeal_statement = select(OrganizationFinancialAidAppeal).where(
+        OrganizationFinancialAidAppeal.organization_id == organization_id
+    )
+    if program_id is not None:
+        renewal_statement = renewal_statement.where(OrganizationFinancialAidRenewal.program_id == program_id)
+        appeal_statement = appeal_statement.where(OrganizationFinancialAidAppeal.program_id == program_id)
+    renewals = list((await db.scalars(renewal_statement)).all())
+    appeals = list((await db.scalars(appeal_statement)).all())
     status_counts: dict[str, int] = {}
     total_requested = Decimal("0.00")
     total_awarded = Decimal("0.00")
@@ -5222,6 +5553,8 @@ async def organization_financial_aid_summary(
     donor_report_summary = financial_aid_donor_report_lines(programs, applications, total_awarded, total_applied)
     next_actions = financial_aid_next_actions(
         applications=applications,
+        renewals=renewals,
+        appeals=appeals,
         budget_remaining=budget_remaining,
         awards_remaining=awards_remaining,
         compliance_watch_count=compliance_watch_count,
@@ -5237,6 +5570,12 @@ async def organization_financial_aid_summary(
         awarded_count=status_counts.get("awarded", 0) + status_counts.get("approved", 0) + status_counts.get("conditionally_approved", 0),
         denied_count=status_counts.get("denied", 0),
         waitlisted_count=status_counts.get("waitlisted", 0),
+        renewal_count=len(renewals),
+        pending_renewal_count=len([item for item in renewals if item.status in {"submitted", "recommended"}]),
+        renewed_count=len([item for item in renewals if item.status == "renewed"]),
+        appeal_count=len(appeals),
+        pending_appeal_count=len([item for item in appeals if item.status in {"pending", "in_review"}]),
+        resolved_appeal_count=len([item for item in appeals if item.status not in {"pending", "in_review"}]),
         total_requested=total_requested.quantize(Decimal("0.01")),
         total_awarded=total_awarded.quantize(Decimal("0.01")),
         total_applied=total_applied.quantize(Decimal("0.01")),
@@ -5320,8 +5659,28 @@ async def apply_financial_aid_to_member_dues(
 ) -> Decimal:
     if application.member_subscription_id is None or amount <= 0:
         return Decimal("0.00")
-    subscription = await db.get(MemberSubscription, application.member_subscription_id)
-    if subscription is None:
+    return await apply_member_dues_non_cash_relief(
+        db,
+        application.organization_id,
+        application.member_subscription_id,
+        amount,
+        approver_person_id,
+        f"Financial aid award {application.id}: {application.decision_reason or application.committee_recommendation}",
+    )
+
+
+async def apply_member_dues_non_cash_relief(
+    db: AsyncSession,
+    organization_id: UUID,
+    member_subscription_id: UUID,
+    amount: Decimal,
+    approver_person_id: UUID | None,
+    reason: str,
+) -> Decimal:
+    if amount <= 0:
+        return Decimal("0.00")
+    subscription = await db.get(MemberSubscription, member_subscription_id)
+    if subscription is None or subscription.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
     remaining = min(amount, member_subscription_open_amount(subscription)).quantize(Decimal("0.01"))
     applied = Decimal("0.00")
@@ -5345,7 +5704,7 @@ async def apply_financial_aid_to_member_dues(
         charge.waived_by_person_id = approver_person_id
         charge.waiver_reason = append_member_dues_note(
             charge.waiver_reason,
-            f"Financial aid award {application.id}: {application.decision_reason or application.committee_recommendation}",
+            reason,
         )
         charge.status = "waived" if charge.balance_amount <= 0 else "partial"
         remaining = (remaining - relief).quantize(Decimal("0.01"))
@@ -5355,6 +5714,20 @@ async def apply_financial_aid_to_member_dues(
         subscription.balance_amount = Decimal("0.00")
         subscription.status = "active"
     return applied
+
+
+async def financial_aid_application_bundle(
+    db: AsyncSession,
+    application_id: UUID,
+    organization_id: UUID,
+) -> tuple[OrganizationFinancialAidApplication, OrganizationFinancialAidProgram]:
+    application = await db.get(OrganizationFinancialAidApplication, application_id)
+    if application is None or application.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial aid application not found")
+    program = await db.get(OrganizationFinancialAidProgram, application.program_id)
+    if program is None or program.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Financial aid program not found")
+    return application, program
 
 
 async def financial_aid_applicant_label(
@@ -5387,6 +5760,37 @@ def financial_aid_eligibility_score(payload: OrganizationFinancialAidApplication
     if payload.personal_statement:
         score += 4
     return min(score, 100)
+
+
+def financial_aid_renewal_score(payload: OrganizationFinancialAidRenewalCreate) -> int:
+    score = 35
+    if payload.attendance_percent is not None:
+        if payload.attendance_percent >= Decimal("90"):
+            score += 30
+        elif payload.attendance_percent >= Decimal("75"):
+            score += 20
+        elif payload.attendance_percent >= Decimal("60"):
+            score += 10
+    if payload.academic_status in {"good_standing", "eligible", "honors", "excellent"}:
+        score += 20
+    elif payload.academic_status in {"probation", "watch"}:
+        score += 5
+    if payload.compliance_notes and "block" not in payload.compliance_notes.lower():
+        score += 10
+    if payload.compliance_notes and "excellent" in payload.compliance_notes.lower():
+        score += 5
+    return min(score, 100)
+
+
+def financial_aid_renewal_recommendation(
+    score: int,
+    program: OrganizationFinancialAidProgram,
+) -> str:
+    if score >= max(program.minimum_score, 75):
+        return "Recommended for renewal; attendance, academic, and compliance signals support continued aid."
+    if score >= program.minimum_score:
+        return "Eligible for committee renewal review; confirm documentation and any conditions."
+    return "Renewal requires committee review or remediation before continued aid."
 
 
 def financial_aid_recommendation(
@@ -5422,6 +5826,8 @@ def financial_aid_donor_report_lines(
 def financial_aid_next_actions(
     *,
     applications: list[OrganizationFinancialAidApplication],
+    renewals: list[OrganizationFinancialAidRenewal],
+    appeals: list[OrganizationFinancialAidAppeal],
     budget_remaining: Decimal,
     awards_remaining: int | None,
     compliance_watch_count: int,
@@ -5431,6 +5837,12 @@ def financial_aid_next_actions(
     submitted_count = len([item for item in applications if item.status == "submitted"])
     if submitted_count:
         actions.append(f"Review {submitted_count} submitted financial aid application(s).")
+    pending_renewals = len([item for item in renewals if item.status in {"submitted", "recommended"}])
+    if pending_renewals:
+        actions.append(f"Decide {pending_renewals} financial aid renewal(s).")
+    pending_appeals = len([item for item in appeals if item.status in {"pending", "in_review"}])
+    if pending_appeals:
+        actions.append(f"Resolve {pending_appeals} financial aid appeal(s).")
     if compliance_watch_count:
         actions.append(f"Follow up on {compliance_watch_count} award(s) with unapplied or conditional aid.")
     if renewal_review_count:

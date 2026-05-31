@@ -1364,6 +1364,99 @@ class OrganizationFinancialAidApplicationRead(BaseModel):
     notes: str | None
 
 
+class OrganizationFinancialAidRenewalCreate(BaseModel):
+    application_id: UUID
+    renewal_period_start: date
+    renewal_period_end: date
+    requested_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    academic_status: str | None = Field(default=None, max_length=80)
+    attendance_percent: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
+    compliance_notes: str | None = Field(default=None, max_length=4000)
+    submitted_on: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationFinancialAidRenewalReview(BaseModel):
+    status: str = Field(pattern="^(recommended|renewed|denied|blocked|cancelled)$")
+    approved_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    decided_on: date | None = None
+    decision_reason: str | None = Field(default=None, max_length=4000)
+    apply_to_member_dues: bool = True
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationFinancialAidRenewalRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    program_id: UUID
+    program_name: str
+    application_id: UUID
+    applicant_label: str | None = None
+    member_subscription_id: UUID | None
+    requested_by_person_id: UUID | None
+    reviewed_by_person_id: UUID | None
+    renewal_period_start: date
+    renewal_period_end: date
+    requested_amount: Decimal
+    recommended_amount: Decimal
+    approved_amount: Decimal
+    amount_applied: Decimal
+    currency: str
+    academic_status: str | None
+    attendance_percent: Decimal | None
+    compliance_notes: str | None
+    renewal_score: int
+    committee_recommendation: str
+    status: str
+    submitted_on: date | None
+    decided_on: date | None
+    decision_reason: str | None
+    notes: str | None
+
+
+class OrganizationFinancialAidAppealCreate(BaseModel):
+    application_id: UUID
+    appeal_reason: str = Field(min_length=5, max_length=8000)
+    requested_outcome: str | None = Field(default=None, max_length=4000)
+    supporting_evidence_ref: str | None = Field(default=None, max_length=500)
+    submitted_on: date | None = None
+    due_on: date | None = None
+
+
+class OrganizationFinancialAidAppealReview(BaseModel):
+    status: str = Field(pattern="^(in_review|upheld|modified|overturned|denied|cancelled)$")
+    amount_adjustment: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    final_award_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    resolved_on: date | None = None
+    resolution_notes: str | None = Field(default=None, max_length=8000)
+    committee_notes: str | None = Field(default=None, max_length=8000)
+    apply_to_member_dues: bool = True
+
+
+class OrganizationFinancialAidAppealRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    program_id: UUID
+    program_name: str
+    application_id: UUID
+    applicant_label: str | None = None
+    submitted_by_person_id: UUID | None
+    resolved_by_person_id: UUID | None
+    appeal_reason: str
+    requested_outcome: str | None
+    supporting_evidence_ref: str | None
+    status: str
+    submitted_on: date | None
+    due_on: date | None
+    resolved_on: date | None
+    resolution_notes: str | None
+    amount_adjustment: Decimal
+    final_award_amount: Decimal
+    amount_applied: Decimal
+    currency: str
+    committee_notes: str | None
+
+
 class OrganizationFinancialAidSummaryRead(BaseModel):
     organization_id: UUID
     program_id: UUID | None
@@ -1374,6 +1467,12 @@ class OrganizationFinancialAidSummaryRead(BaseModel):
     awarded_count: int
     denied_count: int
     waitlisted_count: int
+    renewal_count: int
+    pending_renewal_count: int
+    renewed_count: int
+    appeal_count: int
+    pending_appeal_count: int
+    resolved_appeal_count: int
     total_requested: Decimal
     total_awarded: Decimal
     total_applied: Decimal

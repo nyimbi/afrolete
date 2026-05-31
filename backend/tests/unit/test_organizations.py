@@ -674,7 +674,7 @@ def test_financial_aid_awards_apply_to_club_member_dues(client, identity_headers
             "fund_source": "Donor access fund",
             "annual_budget": "2000.00",
             "currency": "KES",
-            "awards_available": 2,
+            "awards_available": 3,
             "minimum_score": 60,
             "application_opens_on": "2026-01-01",
             "application_deadline_on": "2026-03-31",
@@ -759,8 +759,8 @@ def test_financial_aid_awards_apply_to_club_member_dues(client, identity_headers
     assert summary["total_applied"] == "400.00"
     assert summary["annual_budget_total"] == "2000.00"
     assert summary["budget_remaining"] == "1600.00"
-    assert summary["awards_available_total"] == 2
-    assert summary["awards_remaining"] == 1
+    assert summary["awards_available_total"] == 3
+    assert summary["awards_remaining"] == 2
     assert summary["average_eligibility_score"] == "100.00"
     assert summary["award_utilization_percent"] == "20.00"
     assert summary["applied_award_percent"] == "100.00"
@@ -782,6 +782,125 @@ def test_financial_aid_awards_apply_to_club_member_dues(client, identity_headers
         headers=identity_headers,
     ).json()
     assert subscriptions[0]["balance_amount"] == "600.00"
+
+    renewal_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-renewals",
+        headers=identity_headers,
+        json={
+            "application_id": application["id"],
+            "renewal_period_start": "2027-01-01",
+            "renewal_period_end": "2027-12-31",
+            "requested_amount": "350.00",
+            "academic_status": "good_standing",
+            "attendance_percent": "92.00",
+            "compliance_notes": "Excellent attendance and documentation current.",
+        },
+    )
+    assert renewal_response.status_code == 201
+    renewal = renewal_response.json()
+    assert renewal["status"] == "recommended"
+    assert renewal["renewal_score"] >= 60
+    assert renewal["recommended_amount"] == "350.00"
+
+    renewal_review_response = client.patch(
+        f"/api/v1/organizations/financial-aid-renewals/{renewal['id']}/review",
+        headers=identity_headers,
+        json={
+            "status": "renewed",
+            "approved_amount": "350.00",
+            "decision_reason": "Renewal criteria satisfied.",
+            "apply_to_member_dues": True,
+        },
+    )
+    assert renewal_review_response.status_code == 200
+    renewed = renewal_review_response.json()
+    assert renewed["status"] == "renewed"
+    assert renewed["amount_applied"] == "350.00"
+
+    second_application_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-applications",
+        headers=identity_headers,
+        json={
+            "program_id": program["id"],
+            "member_subscription_id": subscription["id"],
+            "household_income": "32000.00",
+            "household_size": 3,
+            "government_assistance": False,
+            "financial_need_summary": "Updated hardship documents arrived after review.",
+            "amount_requested": "200.00",
+            "currency": "KES",
+        },
+    )
+    assert second_application_response.status_code == 201
+    second_application = second_application_response.json()
+    denial_response = client.patch(
+        f"/api/v1/organizations/financial-aid-applications/{second_application['id']}/review",
+        headers=identity_headers,
+        json={
+            "status": "denied",
+            "amount_awarded": "0.00",
+            "review_score": 40,
+            "decision_reason": "Initial documentation was incomplete.",
+            "apply_to_member_dues": False,
+        },
+    )
+    assert denial_response.status_code == 200
+    assert denial_response.json()["status"] == "denied"
+
+    appeal_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-appeals",
+        headers=identity_headers,
+        json={
+            "application_id": second_application["id"],
+            "appeal_reason": "Family provided new hardship evidence.",
+            "requested_outcome": "Modify the decision and award partial dues relief.",
+            "supporting_evidence_ref": "hardship-letter-2026",
+            "submitted_on": "2026-07-01",
+        },
+    )
+    assert appeal_response.status_code == 201
+    appeal = appeal_response.json()
+    assert appeal["status"] == "pending"
+    assert appeal["due_on"] == "2026-07-15"
+
+    appeal_review_response = client.patch(
+        f"/api/v1/organizations/financial-aid-appeals/{appeal['id']}/review",
+        headers=identity_headers,
+        json={
+            "status": "modified",
+            "amount_adjustment": "100.00",
+            "resolution_notes": "Committee accepted the updated evidence.",
+            "committee_notes": "Modified award approved by aid committee.",
+            "apply_to_member_dues": True,
+        },
+    )
+    assert appeal_review_response.status_code == 200
+    resolved_appeal = appeal_review_response.json()
+    assert resolved_appeal["status"] == "modified"
+    assert resolved_appeal["final_award_amount"] == "100.00"
+    assert resolved_appeal["amount_applied"] == "100.00"
+
+    final_subscriptions = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+    ).json()
+    assert final_subscriptions[0]["balance_amount"] == "150.00"
+
+    final_summary = client.get(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-summary",
+        headers=identity_headers,
+        params={"program_id": program["id"], "as_of": "2027-01-15"},
+    ).json()
+    assert final_summary["application_count"] == 2
+    assert final_summary["renewal_count"] == 1
+    assert final_summary["pending_renewal_count"] == 0
+    assert final_summary["renewed_count"] == 1
+    assert final_summary["appeal_count"] == 1
+    assert final_summary["pending_appeal_count"] == 0
+    assert final_summary["resolved_appeal_count"] == 1
+    assert final_summary["total_awarded"] == "500.00"
+    assert final_summary["total_applied"] == "500.00"
+    assert final_summary["budget_remaining"] == "1150.00"
 
 
 def test_organization_market_profiles_localize_payments_tax_and_reporting(client, identity_headers) -> None:
