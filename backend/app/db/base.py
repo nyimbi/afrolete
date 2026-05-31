@@ -68,6 +68,9 @@ from app.models.billing import (  # noqa: F401,E402
 )
 from app.models.commercial import (  # noqa: F401,E402
     Donation,
+    DonorInteraction,
+    DonorProfile,
+    DonorStewardshipPlan,
     FinanceInvoice,
     FinancePayment,
     FinancialBudget,

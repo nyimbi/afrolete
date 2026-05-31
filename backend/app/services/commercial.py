@@ -20,6 +20,9 @@ from app.models.commercial import (
     CommercialPaymentSession,
     CommercialSettlementPayout,
     Donation,
+    DonorInteraction,
+    DonorProfile,
+    DonorStewardshipPlan,
     FinanceInvoice,
     FinancePayment,
     FinancialBudget,
@@ -71,6 +74,13 @@ from app.schemas.commercial import (
     CommercialSettlementPayoutRead,
     CommercialTaxFilingRead,
     DonationCreate,
+    DonorDashboardRead,
+    DonorInteractionCreate,
+    DonorInteractionRead,
+    DonorProfileCreate,
+    DonorProfileRead,
+    DonorStewardshipPlanCreate,
+    DonorStewardshipPlanRead,
     FinanceInvoiceCreate,
     FinancePaymentCreate,
     FinancialBudgetCreate,
@@ -741,14 +751,212 @@ async def list_campaigns(db: AsyncSession, organization_id: UUID) -> list[Fundra
 async def record_donation(db: AsyncSession, identity: CurrentIdentity, payload: DonationCreate, authz: AuthorizationService) -> Donation:
     await ensure_manage_commercial(authz, identity, payload.organization_id)
     campaign = await get_campaign_for_organization(db, payload.campaign_id, payload.organization_id)
-    donation = Donation(**payload.model_dump())
+    donor = await resolve_donor_profile_for_donation(db, payload)
+    db.add(donor)
+    await db.flush()
+    donation_payload = payload.model_dump()
+    donation_payload["donor_profile_id"] = donor.id
+    donation = Donation(**donation_payload)
     campaign.raised_amount += payload.amount
+    donor.lifetime_giving += payload.amount
+    donor.last_gift_amount = payload.amount
+    donor.last_gift_on = date.today()
+    if payload.donor_email and not donor.email:
+        donor.email = payload.donor_email.lower()
     if campaign.raised_amount >= campaign.goal_amount:
         campaign.status = CommercialStatus.COMPLETED
     db.add(donation)
     await db.commit()
     await db.refresh(donation)
     return donation
+
+async def create_donor_profile(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: DonorProfileCreate,
+    authz: AuthorizationService,
+) -> DonorProfileRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    donor = DonorProfile(
+        organization_id=payload.organization_id,
+        name=payload.name,
+        email=payload.email.lower() if payload.email else None,
+        phone=payload.phone,
+        donor_type=payload.donor_type,
+        segment=payload.segment,
+        preferred_channel=payload.preferred_channel,
+        giving_capacity=payload.giving_capacity,
+        next_ask_on=payload.next_ask_on,
+        tags_json=commercial_json_dumps_list(payload.tags),
+        notes=payload.notes,
+        status=payload.status,
+    )
+    db.add(donor)
+    await db.commit()
+    await db.refresh(donor)
+    return await donor_profile_read(db, donor)
+
+
+async def list_donor_profiles(db: AsyncSession, organization_id: UUID) -> list[DonorProfileRead]:
+    donors = (
+        await db.scalars(
+            select(DonorProfile)
+            .where(DonorProfile.organization_id == organization_id)
+            .order_by(DonorProfile.lifetime_giving.desc(), DonorProfile.updated_at.desc())
+        )
+    ).all()
+    return [await donor_profile_read(db, donor) for donor in donors]
+
+
+async def create_donor_interaction(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: DonorInteractionCreate,
+    authz: AuthorizationService,
+) -> DonorInteractionRead:
+    donor = await get_donor_profile_for_organization(db, payload.donor_profile_id, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    if payload.campaign_id is not None:
+        await get_campaign_for_organization(db, payload.campaign_id, payload.organization_id)
+    occurred_at = payload.occurred_at or datetime.now(UTC)
+    interaction = DonorInteraction(
+        organization_id=payload.organization_id,
+        donor_profile_id=donor.id,
+        campaign_id=payload.campaign_id,
+        occurred_at=occurred_at,
+        interaction_type=payload.interaction_type,
+        channel=payload.channel,
+        subject=payload.subject,
+        summary=payload.summary,
+        sentiment=payload.sentiment,
+        outcome=payload.outcome,
+        owner_name=payload.owner_name,
+        next_follow_up_on=payload.next_follow_up_on,
+        status=payload.status,
+    )
+    if payload.next_follow_up_on:
+        donor.next_ask_on = payload.next_follow_up_on
+    db.add(interaction)
+    await db.commit()
+    await db.refresh(interaction)
+    return await donor_interaction_read(db, interaction)
+
+
+async def list_donor_interactions(
+    db: AsyncSession,
+    organization_id: UUID,
+    donor_profile_id: UUID | None = None,
+) -> list[DonorInteractionRead]:
+    query = select(DonorInteraction).where(DonorInteraction.organization_id == organization_id)
+    if donor_profile_id is not None:
+        query = query.where(DonorInteraction.donor_profile_id == donor_profile_id)
+    interactions = (
+        await db.scalars(query.order_by(DonorInteraction.occurred_at.desc(), DonorInteraction.created_at.desc()))
+    ).all()
+    return [await donor_interaction_read(db, interaction) for interaction in interactions]
+
+
+async def create_donor_stewardship_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: DonorStewardshipPlanCreate,
+    authz: AuthorizationService,
+) -> DonorStewardshipPlanRead:
+    donor = await get_donor_profile_for_organization(db, payload.donor_profile_id, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    plan = DonorStewardshipPlan(
+        organization_id=payload.organization_id,
+        donor_profile_id=donor.id,
+        name=payload.name,
+        stage=payload.stage,
+        priority=payload.priority,
+        target_amount=payload.target_amount,
+        due_on=payload.due_on,
+        next_step=payload.next_step,
+        recognition_level=payload.recognition_level,
+        impact_story_needed=payload.impact_story_needed,
+        owner_name=payload.owner_name,
+        status=payload.status,
+    )
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    return await donor_stewardship_plan_read(db, plan)
+
+
+async def list_donor_stewardship_plans(
+    db: AsyncSession,
+    organization_id: UUID,
+    donor_profile_id: UUID | None = None,
+) -> list[DonorStewardshipPlanRead]:
+    query = select(DonorStewardshipPlan).where(DonorStewardshipPlan.organization_id == organization_id)
+    if donor_profile_id is not None:
+        query = query.where(DonorStewardshipPlan.donor_profile_id == donor_profile_id)
+    plans = (
+        await db.scalars(query.order_by(DonorStewardshipPlan.due_on, DonorStewardshipPlan.priority.desc()))
+    ).all()
+    return [await donor_stewardship_plan_read(db, plan) for plan in plans]
+
+
+async def complete_donor_stewardship_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    plan_id: UUID,
+    organization_id: UUID,
+    authz: AuthorizationService,
+) -> DonorStewardshipPlanRead:
+    plan = await get_donor_stewardship_plan_for_organization(db, plan_id, organization_id)
+    await ensure_manage_commercial(authz, identity, organization_id)
+    plan.status = "completed"
+    plan.completed_on = date.today()
+    await db.commit()
+    await db.refresh(plan)
+    return await donor_stewardship_plan_read(db, plan)
+
+
+async def donor_dashboard(db: AsyncSession, organization_id: UUID) -> DonorDashboardRead:
+    donors = list(
+        (await db.scalars(select(DonorProfile).where(DonorProfile.organization_id == organization_id))).all()
+    )
+    interactions = list(
+        (await db.scalars(select(DonorInteraction).where(DonorInteraction.organization_id == organization_id))).all()
+    )
+    plans = list(
+        (await db.scalars(select(DonorStewardshipPlan).where(DonorStewardshipPlan.organization_id == organization_id))).all()
+    )
+    today = date.today()
+    lifetime = sum((donor.lifetime_giving for donor in donors), Decimal("0")).quantize(Decimal("0.01"))
+    gift_count = int(
+        await db.scalar(select(func.count(Donation.id)).where(Donation.organization_id == organization_id)) or 0
+    )
+    average_gift = (lifetime / Decimal(gift_count)).quantize(Decimal("0.01")) if gift_count else Decimal("0.00")
+    top_donor = max(donors, key=lambda donor: donor.lifetime_giving, default=None)
+    active_plans = [plan for plan in plans if plan.status == "active"]
+    overdue_plans = [plan for plan in active_plans if plan.due_on and plan.due_on < today]
+    follow_up_due = [
+        interaction
+        for interaction in interactions
+        if interaction.next_follow_up_on and interaction.next_follow_up_on <= today and interaction.status != "completed"
+    ]
+    major_donors = [donor for donor in donors if donor.lifetime_giving >= Decimal("1000")]
+    return DonorDashboardRead(
+        organization_id=organization_id,
+        donor_count=len(donors),
+        active_donor_count=sum(1 for donor in donors if donor.status == "active"),
+        major_donor_count=len(major_donors),
+        lifetime_giving=lifetime,
+        average_gift=average_gift,
+        interaction_count=len(interactions),
+        follow_up_due_count=len(follow_up_due),
+        active_plan_count=len(active_plans),
+        overdue_plan_count=len(overdue_plans),
+        impact_story_needed_count=sum(1 for plan in active_plans if plan.impact_story_needed),
+        top_donor_name=top_donor.name if top_donor else None,
+        top_donor_lifetime_giving=top_donor.lifetime_giving if top_donor else Decimal("0.00"),
+        stewardship_health=donor_stewardship_health(donors, active_plans, overdue_plans, follow_up_due),
+        recommendations=donor_dashboard_recommendations(donors, active_plans, overdue_plans, follow_up_due),
+    )
 
 
 async def create_grant_opportunity(
@@ -2079,6 +2287,181 @@ def commercial_json_loads_list(value: str | None) -> list[str]:
     return [str(item) for item in parsed if str(item).strip()]
 
 
+async def resolve_donor_profile_for_donation(
+    db: AsyncSession,
+    payload: DonationCreate,
+) -> DonorProfile:
+    if payload.donor_profile_id is not None:
+        return await get_donor_profile_for_organization(db, payload.donor_profile_id, payload.organization_id)
+    donor: DonorProfile | None = None
+    if payload.donor_email:
+        donor = await db.scalar(
+            select(DonorProfile).where(
+                DonorProfile.organization_id == payload.organization_id,
+                func.lower(DonorProfile.email) == payload.donor_email.lower(),
+            )
+        )
+    if donor is None:
+        donor = await db.scalar(
+            select(DonorProfile).where(
+                DonorProfile.organization_id == payload.organization_id,
+                DonorProfile.email.is_(None),
+                func.lower(DonorProfile.name) == payload.donor_name.lower(),
+            )
+        )
+    if donor is not None:
+        return donor
+    return DonorProfile(
+        organization_id=payload.organization_id,
+        name=payload.donor_name,
+        email=payload.donor_email.lower() if payload.donor_email else None,
+        donor_type="individual",
+        segment="new",
+        preferred_channel="email" if payload.donor_email else "manual",
+        tags_json=commercial_json_dumps_list(["auto-created-from-donation"]),
+        notes="Auto-created from donation intake.",
+    )
+
+
+async def donor_profile_read(db: AsyncSession, donor: DonorProfile) -> DonorProfileRead:
+    donation_count = await db.scalar(
+        select(func.count(Donation.id)).where(Donation.donor_profile_id == donor.id)
+    )
+    interaction_count = await db.scalar(
+        select(func.count(DonorInteraction.id)).where(DonorInteraction.donor_profile_id == donor.id)
+    )
+    active_plan_count = await db.scalar(
+        select(func.count(DonorStewardshipPlan.id)).where(
+            DonorStewardshipPlan.donor_profile_id == donor.id,
+            DonorStewardshipPlan.status == "active",
+        )
+    )
+    return DonorProfileRead(
+        id=donor.id,
+        organization_id=donor.organization_id,
+        name=donor.name,
+        email=donor.email,
+        phone=donor.phone,
+        donor_type=donor.donor_type,
+        segment=donor.segment,
+        preferred_channel=donor.preferred_channel,
+        giving_capacity=donor.giving_capacity,
+        next_ask_on=donor.next_ask_on,
+        tags=commercial_json_loads_list(donor.tags_json),
+        notes=donor.notes,
+        status=donor.status,
+        lifetime_giving=donor.lifetime_giving,
+        last_gift_amount=donor.last_gift_amount,
+        last_gift_on=donor.last_gift_on,
+        donation_count=int(donation_count or 0),
+        interaction_count=int(interaction_count or 0),
+        active_plan_count=int(active_plan_count or 0),
+    )
+
+
+async def donor_interaction_read(db: AsyncSession, interaction: DonorInteraction) -> DonorInteractionRead:
+    donor = await db.get(DonorProfile, interaction.donor_profile_id)
+    campaign = await db.get(FundraisingCampaign, interaction.campaign_id) if interaction.campaign_id else None
+    return DonorInteractionRead(
+        id=interaction.id,
+        organization_id=interaction.organization_id,
+        donor_profile_id=interaction.donor_profile_id,
+        campaign_id=interaction.campaign_id,
+        occurred_at=interaction.occurred_at,
+        interaction_type=interaction.interaction_type,
+        channel=interaction.channel,
+        subject=interaction.subject,
+        summary=interaction.summary,
+        sentiment=interaction.sentiment,
+        outcome=interaction.outcome,
+        owner_name=interaction.owner_name,
+        next_follow_up_on=interaction.next_follow_up_on,
+        status=interaction.status,
+        donor_name=donor.name if donor else None,
+        donor_email=donor.email if donor else None,
+        campaign_name=campaign.name if campaign else None,
+    )
+
+
+async def donor_stewardship_plan_read(db: AsyncSession, plan: DonorStewardshipPlan) -> DonorStewardshipPlanRead:
+    donor = await db.get(DonorProfile, plan.donor_profile_id)
+    today = date.today()
+    return DonorStewardshipPlanRead(
+        id=plan.id,
+        organization_id=plan.organization_id,
+        donor_profile_id=plan.donor_profile_id,
+        name=plan.name,
+        stage=plan.stage,
+        priority=plan.priority,
+        target_amount=plan.target_amount,
+        due_on=plan.due_on,
+        next_step=plan.next_step,
+        recognition_level=plan.recognition_level,
+        impact_story_needed=plan.impact_story_needed,
+        owner_name=plan.owner_name,
+        status=plan.status,
+        donor_name=donor.name if donor else None,
+        donor_email=donor.email if donor else None,
+        completed_on=plan.completed_on,
+        overdue=bool(plan.status == "active" and plan.due_on and plan.due_on < today),
+    )
+
+
+def donation_read(donation: Donation, donor: DonorProfile | None = None) -> dict[str, Any]:
+    data = {
+        "id": donation.id,
+        "organization_id": donation.organization_id,
+        "campaign_id": donation.campaign_id,
+        "donor_profile_id": donation.donor_profile_id,
+        "donor_name": donation.donor_name,
+        "donor_email": donation.donor_email,
+        "amount": donation.amount,
+        "currency": donation.currency,
+        "external_reference": donation.external_reference,
+        "message": donation.message,
+        "status": donation.status,
+        "donor_lifetime_giving": donor.lifetime_giving if donor else None,
+    }
+    return data
+
+
+def donor_stewardship_health(
+    donors: list[DonorProfile],
+    active_plans: list[DonorStewardshipPlan],
+    overdue_plans: list[DonorStewardshipPlan],
+    follow_up_due: list[DonorInteraction],
+) -> str:
+    if not donors:
+        return "no_donor_pipeline"
+    if overdue_plans or len(follow_up_due) > max(2, len(donors) // 2):
+        return "needs_attention"
+    if len(active_plans) >= max(1, len(donors) // 3):
+        return "active_stewardship"
+    return "building"
+
+
+def donor_dashboard_recommendations(
+    donors: list[DonorProfile],
+    active_plans: list[DonorStewardshipPlan],
+    overdue_plans: list[DonorStewardshipPlan],
+    follow_up_due: list[DonorInteraction],
+) -> list[str]:
+    recommendations: list[str] = []
+    if not donors:
+        recommendations.append("Create donor profiles from campaign gifts and supporter relationships.")
+    if overdue_plans:
+        recommendations.append(f"Resolve {len(overdue_plans)} overdue donor stewardship plan(s).")
+    if follow_up_due:
+        recommendations.append(f"Follow up with {len(follow_up_due)} donor touchpoint(s) due now.")
+    if active_plans and not any(plan.impact_story_needed for plan in active_plans):
+        recommendations.append("Attach an impact story to at least one active stewardship plan for donor reporting.")
+    if not active_plans and donors:
+        recommendations.append("Create stewardship plans for top donors before the next campaign ask.")
+    if not recommendations:
+        recommendations.append("Donor stewardship is current; keep cultivation notes and impact evidence fresh.")
+    return recommendations
+
+
 async def get_commercial_invoice_hosted_checkout(
     db: AsyncSession,
     session_id: str,
@@ -3137,6 +3520,24 @@ async def get_campaign_for_organization(db: AsyncSession, campaign_id: UUID, org
     if campaign is None or campaign.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
     return campaign
+
+
+async def get_donor_profile_for_organization(db: AsyncSession, donor_profile_id: UUID, organization_id: UUID) -> DonorProfile:
+    donor = await db.get(DonorProfile, donor_profile_id)
+    if donor is None or donor.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Donor profile not found")
+    return donor
+
+
+async def get_donor_stewardship_plan_for_organization(
+    db: AsyncSession,
+    plan_id: UUID,
+    organization_id: UUID,
+) -> DonorStewardshipPlan:
+    plan = await db.get(DonorStewardshipPlan, plan_id)
+    if plan is None or plan.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Donor stewardship plan not found")
+    return plan
 
 
 async def get_grant_opportunity_for_organization(

@@ -151,6 +151,113 @@ def test_financial_budget_planning_tracks_variance_cash_and_scenarios(client, id
     assert summary["scenarios"][0]["name"] == "New training facility conservative"
 
 
+def test_donor_crm_tracks_lifetime_giving_touchpoints_and_stewardship(client, identity_headers) -> None:
+    organization, team, _ = create_commercial_context(client, identity_headers)
+
+    campaign = client.post(
+        "/api/v1/commercial/campaigns",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "team_id": team["id"],
+            "name": "Facility access fund",
+            "purpose": "Subsidize training access and equipment",
+            "goal_amount": "10000.00",
+            "currency": "KES",
+        },
+    ).json()
+
+    donation_response = client.post(
+        "/api/v1/commercial/donations",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "campaign_id": campaign["id"],
+            "donor_name": "Community Donor",
+            "donor_email": "donor@example.com",
+            "amount": "1250.00",
+            "currency": "KES",
+            "external_reference": "MPESA-DONOR-1",
+            "message": "For the facility project.",
+        },
+    )
+    assert donation_response.status_code == 201
+    donation = donation_response.json()
+    assert donation["donor_profile_id"]
+
+    donors_response = client.get(
+        f"/api/v1/commercial/donors?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert donors_response.status_code == 200
+    donor = donors_response.json()[0]
+    assert donor["email"] == "donor@example.com"
+    assert donor["lifetime_giving"] == "1250.00"
+    assert donor["donation_count"] == 1
+
+    interaction_response = client.post(
+        "/api/v1/commercial/donor-interactions",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "donor_profile_id": donor["id"],
+            "campaign_id": campaign["id"],
+            "interaction_type": "impact_update",
+            "channel": "email",
+            "subject": "Facility access impact story",
+            "summary": "Shared photos and scholarship participation metrics.",
+            "sentiment": "positive",
+            "outcome": "ready_for_visit",
+            "owner_name": "Fundraising Lead",
+            "next_follow_up_on": "2026-07-15",
+            "status": "follow_up_due",
+        },
+    )
+    assert interaction_response.status_code == 201
+    assert interaction_response.json()["campaign_name"] == "Facility access fund"
+
+    plan_response = client.post(
+        "/api/v1/commercial/donor-stewardship-plans",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "donor_profile_id": donor["id"],
+            "name": "Facility campaign stewardship",
+            "stage": "cultivation",
+            "priority": "high",
+            "target_amount": "2500.00",
+            "due_on": "2026-07-30",
+            "next_step": "Invite donor to visit the facility project.",
+            "recognition_level": "Founding supporter",
+            "impact_story_needed": True,
+            "owner_name": "Fundraising Lead",
+        },
+    )
+    assert plan_response.status_code == 201
+    plan = plan_response.json()
+    assert plan["donor_name"] == "Community Donor"
+    assert plan["impact_story_needed"] is True
+
+    dashboard_response = client.get(
+        f"/api/v1/commercial/donor-dashboard?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert dashboard_response.status_code == 200
+    dashboard = dashboard_response.json()
+    assert dashboard["donor_count"] == 1
+    assert dashboard["major_donor_count"] == 1
+    assert dashboard["lifetime_giving"] == "1250.00"
+    assert dashboard["active_plan_count"] == 1
+    assert dashboard["impact_story_needed_count"] == 1
+
+    complete_response = client.patch(
+        f"/api/v1/commercial/donor-stewardship-plans/{plan['id']}/complete?organization_id={organization['id']}",
+        headers=identity_headers,
+    )
+    assert complete_response.status_code == 200
+    assert complete_response.json()["status"] == "completed"
+
+
 def test_commercial_finance_settlement_refund_tax_accounting_and_sponsor_dashboard(
     client,
     identity_headers,

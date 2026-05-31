@@ -4245,6 +4245,7 @@ export type DonationRead = {
   id: UUID;
   organization_id: UUID;
   campaign_id: UUID;
+  donor_profile_id: UUID | null;
   donor_name: string;
   donor_email: string | null;
   amount: string;
@@ -4252,6 +4253,87 @@ export type DonationRead = {
   external_reference: string | null;
   message: string | null;
   status: CommercialStatus;
+  donor_lifetime_giving: string | null;
+};
+
+export type DonorProfileRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  donor_type: string;
+  segment: string;
+  preferred_channel: string;
+  giving_capacity: string | null;
+  lifetime_giving: string;
+  last_gift_amount: string | null;
+  last_gift_on: string | null;
+  next_ask_on: string | null;
+  tags: string[];
+  notes: string | null;
+  status: string;
+  donation_count: number;
+  interaction_count: number;
+  active_plan_count: number;
+};
+
+export type DonorInteractionRead = {
+  id: UUID;
+  organization_id: UUID;
+  donor_profile_id: UUID;
+  campaign_id: UUID | null;
+  occurred_at: string;
+  interaction_type: string;
+  channel: string;
+  subject: string;
+  summary: string;
+  sentiment: string;
+  outcome: string | null;
+  owner_name: string | null;
+  next_follow_up_on: string | null;
+  status: string;
+  donor_name: string | null;
+  donor_email: string | null;
+  campaign_name: string | null;
+};
+
+export type DonorStewardshipPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  donor_profile_id: UUID;
+  name: string;
+  stage: string;
+  priority: string;
+  target_amount: string | null;
+  due_on: string | null;
+  next_step: string;
+  recognition_level: string | null;
+  impact_story_needed: boolean;
+  owner_name: string | null;
+  status: string;
+  donor_name: string | null;
+  donor_email: string | null;
+  completed_on: string | null;
+  overdue: boolean;
+};
+
+export type DonorDashboardRead = {
+  organization_id: UUID;
+  donor_count: number;
+  active_donor_count: number;
+  major_donor_count: number;
+  lifetime_giving: string;
+  average_gift: string;
+  interaction_count: number;
+  follow_up_due_count: number;
+  active_plan_count: number;
+  overdue_plan_count: number;
+  impact_story_needed_count: number;
+  top_donor_name: string | null;
+  top_donor_lifetime_giving: string;
+  stewardship_health: string;
+  recommendations: string[];
 };
 
 export type GrantOpportunityRead = {

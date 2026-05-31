@@ -169,6 +169,10 @@ import type {
   ConsentCaptureChannel,
   ConsentRequestRead,
   DonationRead,
+  DonorDashboardRead,
+  DonorInteractionRead,
+  DonorProfileRead,
+  DonorStewardshipPlanRead,
   DeveloperApiKeyProvisionedRead,
   DeveloperApiKeyRead,
   DeveloperOAuthAuthorizationRead,
@@ -2324,6 +2328,10 @@ export default function HomePage() {
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreementRead[]>([]);
   const [campaigns, setCampaigns] = useState<FundraisingCampaignRead[]>([]);
   const [donations, setDonations] = useState<DonationRead[]>([]);
+  const [donorProfiles, setDonorProfiles] = useState<DonorProfileRead[]>([]);
+  const [donorInteractions, setDonorInteractions] = useState<DonorInteractionRead[]>([]);
+  const [donorStewardshipPlans, setDonorStewardshipPlans] = useState<DonorStewardshipPlanRead[]>([]);
+  const [donorDashboard, setDonorDashboard] = useState<DonorDashboardRead | null>(null);
   const [grantOpportunities, setGrantOpportunities] = useState<GrantOpportunityRead[]>([]);
   const [grantApplications, setGrantApplications] = useState<GrantApplicationRead[]>([]);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
@@ -2499,6 +2507,7 @@ export default function HomePage() {
   const [selectedSupplierOrderId, setSelectedSupplierOrderId] = useState("");
   const [selectedSponsorId, setSelectedSponsorId] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [selectedDonorProfileId, setSelectedDonorProfileId] = useState("");
   const [selectedGrantOpportunityId, setSelectedGrantOpportunityId] = useState("");
   const [selectedGrantApplicationId, setSelectedGrantApplicationId] = useState("");
   const [selectedMerchandiseProductId, setSelectedMerchandiseProductId] = useState("");
@@ -3713,7 +3722,25 @@ export default function HomePage() {
     donor_name: "Community Donor",
     donor_email: "donor@example.com",
     donation_amount: 250,
-    message: "Supporting the next generation."
+    message: "Supporting the next generation.",
+    donor_phone: "+254700000111",
+    donor_type: "individual",
+    donor_segment: "major_prospect",
+    donor_capacity: "2500.00",
+    donor_tags: "football family, facility campaign",
+    interaction_subject: "Impact story follow-up",
+    interaction_summary: "Donor wants a short update on training access before the next campaign ask.",
+    interaction_channel: "email",
+    interaction_sentiment: "positive",
+    next_follow_up_on: "2026-07-15",
+    stewardship_name: "Facility campaign stewardship",
+    stewardship_stage: "cultivation",
+    stewardship_priority: "high",
+    stewardship_target_amount: "2500.00",
+    stewardship_due_on: "2026-07-30",
+    stewardship_next_step: "Send a player impact story and invite donor to facility walk-through.",
+    recognition_level: "Founding supporter",
+    impact_story_needed: true
   });
   const [grantForm, setGrantForm] = useState({
     funder_name: "Youth Sport Foundation",
@@ -5533,6 +5560,11 @@ export default function HomePage() {
       sponsorInteractionData,
       sponsorStewardshipDashboardData,
       campaignData,
+      donationData,
+      donorProfileData,
+      donorInteractionData,
+      donorStewardshipPlanData,
+      donorDashboardData,
       grantOpportunityData,
       grantApplicationData,
       grantReportData,
@@ -5569,6 +5601,11 @@ export default function HomePage() {
       apiRequest<SponsorInteractionRead[]>(`/commercial/sponsor-interactions?organization_id=${organizationId}`),
       apiRequest<SponsorStewardshipDashboardRead>(`/commercial/sponsor-stewardship-dashboard?organization_id=${organizationId}`),
       apiRequest<FundraisingCampaignRead[]>(`/commercial/campaigns?organization_id=${organizationId}`),
+      apiRequest<DonationRead[]>(`/commercial/donations?organization_id=${organizationId}`),
+      apiRequest<DonorProfileRead[]>(`/commercial/donors?organization_id=${organizationId}`),
+      apiRequest<DonorInteractionRead[]>(`/commercial/donor-interactions?organization_id=${organizationId}`),
+      apiRequest<DonorStewardshipPlanRead[]>(`/commercial/donor-stewardship-plans?organization_id=${organizationId}`),
+      apiRequest<DonorDashboardRead>(`/commercial/donor-dashboard?organization_id=${organizationId}`),
       apiRequest<GrantOpportunityRead[]>(`/commercial/grants/opportunities?organization_id=${organizationId}`),
       apiRequest<GrantApplicationRead[]>(`/commercial/grants/applications?organization_id=${organizationId}`),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
@@ -5605,6 +5642,11 @@ export default function HomePage() {
     setSponsorInteractions(sponsorInteractionData);
     setSponsorStewardshipDashboard(sponsorStewardshipDashboardData);
     setCampaigns(campaignData);
+    setDonations(donationData);
+    setDonorProfiles(donorProfileData);
+    setDonorInteractions(donorInteractionData);
+    setDonorStewardshipPlans(donorStewardshipPlanData);
+    setDonorDashboard(donorDashboardData);
     setGrantOpportunities(grantOpportunityData);
     setGrantApplications(grantApplicationData);
     setGrantReports(grantReportData);
@@ -5629,6 +5671,9 @@ export default function HomePage() {
     );
     setSelectedCampaignId((current) =>
       campaignData.some((campaign) => campaign.id === current) ? current : campaignData[0]?.id ?? ""
+    );
+    setSelectedDonorProfileId((current) =>
+      donorProfileData.some((donor) => donor.id === current) ? current : donorProfileData[0]?.id ?? ""
     );
     setSelectedGrantOpportunityId((current) =>
       grantOpportunityData.some((opportunity) => opportunity.id === current)
@@ -6251,6 +6296,10 @@ export default function HomePage() {
       setSponsorships([]);
       setCampaigns([]);
       setDonations([]);
+      setDonorProfiles([]);
+      setDonorInteractions([]);
+      setDonorStewardshipPlans([]);
+      setDonorDashboard(null);
       setGrantOpportunities([]);
       setGrantApplications([]);
       setGrantReports([]);
@@ -6293,6 +6342,7 @@ export default function HomePage() {
       setSponsorMilestones([]);
       setSponsorInteractions([]);
       setSponsorStewardshipDashboard(null);
+      setSelectedDonorProfileId("");
       setSelectedGrantOpportunityId("");
       setSelectedGrantApplicationId("");
       setSelectedMerchandiseProductId("");
@@ -19968,6 +20018,111 @@ export default function HomePage() {
     );
   };
 
+  const createDonorStewardshipWorkflow = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    runAction(
+      "create-donor-stewardship",
+      async () => {
+        const donor = await apiRequest<DonorProfileRead>("/commercial/donors", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            name: campaignForm.donor_name,
+            email: campaignForm.donor_email,
+            phone: campaignForm.donor_phone,
+            donor_type: campaignForm.donor_type,
+            segment: campaignForm.donor_segment,
+            preferred_channel: campaignForm.interaction_channel,
+            giving_capacity: campaignForm.donor_capacity,
+            next_ask_on: campaignForm.next_follow_up_on,
+            tags: parseCommaList(campaignForm.donor_tags),
+            notes: campaignForm.message,
+            status: "active"
+          }
+        });
+        const interaction = await apiRequest<DonorInteractionRead>("/commercial/donor-interactions", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            donor_profile_id: donor.id,
+            campaign_id: selectedCampaignId || null,
+            interaction_type: "stewardship",
+            channel: campaignForm.interaction_channel,
+            subject: campaignForm.interaction_subject,
+            summary: campaignForm.interaction_summary,
+            sentiment: campaignForm.interaction_sentiment,
+            outcome: "cultivation_next_step",
+            owner_name: "Fundraising Lead",
+            next_follow_up_on: campaignForm.next_follow_up_on,
+            status: "follow_up_due"
+          }
+        });
+        const plan = await apiRequest<DonorStewardshipPlanRead>("/commercial/donor-stewardship-plans", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            donor_profile_id: donor.id,
+            name: campaignForm.stewardship_name,
+            stage: campaignForm.stewardship_stage,
+            priority: campaignForm.stewardship_priority,
+            target_amount: campaignForm.stewardship_target_amount,
+            due_on: campaignForm.stewardship_due_on,
+            next_step: campaignForm.stewardship_next_step,
+            recognition_level: campaignForm.recognition_level,
+            impact_story_needed: campaignForm.impact_story_needed,
+            owner_name: "Fundraising Lead",
+            status: "active"
+          }
+        });
+        const dashboard = await apiRequest<DonorDashboardRead>(`/commercial/donor-dashboard?organization_id=${selectedOrganizationId}`);
+        return { donor, interaction, plan, dashboard };
+      },
+      ({ donor, interaction, plan, dashboard }) => {
+        setDonorProfiles((current) => [donor, ...current.filter((item) => item.id !== donor.id)]);
+        setDonorInteractions((current) => [interaction, ...current.filter((item) => item.id !== interaction.id)]);
+        setDonorStewardshipPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        setDonorDashboard(dashboard);
+        setSelectedDonorProfileId(donor.id);
+        addLog(`${donor.name} donor stewardship opened`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
+  const completeSelectedDonorStewardshipPlan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization first", "bad");
+      return;
+    }
+    const plan = donorStewardshipPlans.find((item) => item.status === "active") ?? donorStewardshipPlans[0];
+    if (!plan) {
+      addLog("Create a donor stewardship plan first", "bad");
+      return;
+    }
+    runAction(
+      `complete-donor-stewardship-${plan.id}`,
+      () =>
+        apiRequest<DonorStewardshipPlanRead>(
+          `/commercial/donor-stewardship-plans/${plan.id}/complete?organization_id=${selectedOrganizationId}`,
+          { method: "PATCH", identity }
+        ),
+      (updated) => {
+        setDonorStewardshipPlans((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        addLog(`${updated.donor_name ?? "Donor"} stewardship completed`, "good");
+        void loadCommercial(selectedOrganizationId);
+      }
+    );
+  };
+
   const createGrantPipeline = () => {
     if (!selectedOrganizationId) {
       addLog("Select an organization first", "bad");
@@ -26830,6 +26985,8 @@ export default function HomePage() {
                 <button type="button" onClick={recordSponsorDigitalSignagePlayback} disabled={busyAction !== null}>Log play</button>
                 <button type="button" onClick={createSponsorStewardshipWorkflow} disabled={busyAction !== null}>Steward</button>
                 <button type="button" onClick={createCampaignAndDonation} disabled={busyAction !== null}>Donate</button>
+                <button type="button" onClick={createDonorStewardshipWorkflow} disabled={busyAction !== null}>Donor CRM</button>
+                <button type="button" onClick={completeSelectedDonorStewardshipPlan} disabled={busyAction !== null}>Complete donor</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
                 <button type="button" onClick={createMerchandiseProductAndOrder} disabled={busyAction !== null}>Store</button>
@@ -26961,8 +27118,100 @@ export default function HomePage() {
                 <input value={campaignForm.donor_name} onChange={(event) => setCampaignForm({ ...campaignForm, donor_name: event.target.value })} />
               </label>
               <label>
+                Donor email
+                <input value={campaignForm.donor_email} onChange={(event) => setCampaignForm({ ...campaignForm, donor_email: event.target.value })} />
+              </label>
+              <label>
                 Amount
                 <input type="number" min="1" value={campaignForm.donation_amount} onChange={(event) => setCampaignForm({ ...campaignForm, donation_amount: Number(event.target.value) })} />
+              </label>
+              <label>
+                Donor phone
+                <input value={campaignForm.donor_phone} onChange={(event) => setCampaignForm({ ...campaignForm, donor_phone: event.target.value })} />
+              </label>
+              <label>
+                Donor type
+                <select value={campaignForm.donor_type} onChange={(event) => setCampaignForm({ ...campaignForm, donor_type: event.target.value })}>
+                  <option value="individual">Individual</option>
+                  <option value="family">Family</option>
+                  <option value="corporate">Corporate</option>
+                  <option value="foundation">Foundation</option>
+                  <option value="alumni">Alumni</option>
+                  <option value="major_gift">Major gift</option>
+                  <option value="in_kind">In-kind</option>
+                </select>
+              </label>
+              <label>
+                Segment
+                <input value={campaignForm.donor_segment} onChange={(event) => setCampaignForm({ ...campaignForm, donor_segment: event.target.value })} />
+              </label>
+              <label>
+                Capacity
+                <input value={campaignForm.donor_capacity} onChange={(event) => setCampaignForm({ ...campaignForm, donor_capacity: event.target.value })} />
+              </label>
+              <label>
+                Next follow-up
+                <input type="date" value={campaignForm.next_follow_up_on} onChange={(event) => setCampaignForm({ ...campaignForm, next_follow_up_on: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Donor tags
+                <input value={campaignForm.donor_tags} onChange={(event) => setCampaignForm({ ...campaignForm, donor_tags: event.target.value })} />
+              </label>
+              <label>
+                CRM subject
+                <input value={campaignForm.interaction_subject} onChange={(event) => setCampaignForm({ ...campaignForm, interaction_subject: event.target.value })} />
+              </label>
+              <label>
+                Channel
+                <input value={campaignForm.interaction_channel} onChange={(event) => setCampaignForm({ ...campaignForm, interaction_channel: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                CRM summary
+                <input value={campaignForm.interaction_summary} onChange={(event) => setCampaignForm({ ...campaignForm, interaction_summary: event.target.value })} />
+              </label>
+              <label>
+                Stewardship plan
+                <input value={campaignForm.stewardship_name} onChange={(event) => setCampaignForm({ ...campaignForm, stewardship_name: event.target.value })} />
+              </label>
+              <label>
+                Stage
+                <select value={campaignForm.stewardship_stage} onChange={(event) => setCampaignForm({ ...campaignForm, stewardship_stage: event.target.value })}>
+                  <option value="identification">Identification</option>
+                  <option value="cultivation">Cultivation</option>
+                  <option value="solicitation">Solicitation</option>
+                  <option value="recognition">Recognition</option>
+                  <option value="stewardship">Stewardship</option>
+                  <option value="renewal">Renewal</option>
+                </select>
+              </label>
+              <label>
+                Priority
+                <select value={campaignForm.stewardship_priority} onChange={(event) => setCampaignForm({ ...campaignForm, stewardship_priority: event.target.value })}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label>
+                Target ask
+                <input value={campaignForm.stewardship_target_amount} onChange={(event) => setCampaignForm({ ...campaignForm, stewardship_target_amount: event.target.value })} />
+              </label>
+              <label>
+                Steward due
+                <input type="date" value={campaignForm.stewardship_due_on} onChange={(event) => setCampaignForm({ ...campaignForm, stewardship_due_on: event.target.value })} />
+              </label>
+              <label>
+                Recognition
+                <input value={campaignForm.recognition_level} onChange={(event) => setCampaignForm({ ...campaignForm, recognition_level: event.target.value })} />
+              </label>
+              <label>
+                Impact story
+                <input type="checkbox" checked={campaignForm.impact_story_needed} onChange={(event) => setCampaignForm({ ...campaignForm, impact_story_needed: event.target.checked })} />
+              </label>
+              <label className="wide-field">
+                Next donor step
+                <input value={campaignForm.stewardship_next_step} onChange={(event) => setCampaignForm({ ...campaignForm, stewardship_next_step: event.target.value })} />
               </label>
               <label>
                 Funder
@@ -27040,6 +27289,56 @@ export default function HomePage() {
               </label>
             </div>
             <div className="task-list">
+              {donorDashboard ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Donor CRM · {donorDashboard.stewardship_health.replaceAll("_", " ")}</strong>
+                    <span>
+                      {donorDashboard.donor_count} donors · {donorDashboard.lifetime_giving} lifetime · {donorDashboard.follow_up_due_count} follow-ups due
+                    </span>
+                    <span>{donorDashboard.recommendations[0] ?? "Donor stewardship ready"}</span>
+                  </div>
+                </article>
+              ) : null}
+              {donorStewardshipPlans.slice(0, 3).map((plan) => (
+                <article key={plan.id} className={`task-card ${plan.overdue ? "risk-card" : ""}`}>
+                  <div>
+                    <strong>{plan.donor_name ?? "Donor"} · {plan.stage} · {plan.priority}</strong>
+                    <span>{plan.target_amount ?? "open ask"} target · due {plan.due_on ?? "open"} · {plan.status}</span>
+                    <small>{plan.impact_story_needed ? "Impact story needed" : plan.recognition_level ?? plan.next_step}</small>
+                  </div>
+                </article>
+              ))}
+              {donorProfiles.slice(0, 3).map((donor) => (
+                <button
+                  type="button"
+                  key={donor.id}
+                  className={`task-card ${donor.id === selectedDonorProfileId ? "selected" : ""}`}
+                  onClick={() => setSelectedDonorProfileId(donor.id)}
+                >
+                  <div>
+                    <strong>{donor.name}</strong>
+                    <span>{donor.lifetime_giving} lifetime · {donor.segment} · {donor.active_plan_count} active plans</span>
+                    <small>{donor.email ?? donor.preferred_channel}</small>
+                  </div>
+                </button>
+              ))}
+              {donorInteractions.slice(0, 2).map((interaction) => (
+                <article key={interaction.id} className="task-card">
+                  <div>
+                    <strong>{interaction.subject}</strong>
+                    <span>{interaction.donor_name ?? "Donor"} · {interaction.sentiment} · follow {interaction.next_follow_up_on ?? "none"}</span>
+                  </div>
+                </article>
+              ))}
+              {donations.slice(0, 2).map((donation) => (
+                <article key={donation.id} className="task-card">
+                  <div>
+                    <strong>{donation.donor_name} · {donation.amount}</strong>
+                    <span>{donation.donor_lifetime_giving ?? "new donor"} lifetime · {donation.status}</span>
+                  </div>
+                </article>
+              ))}
               {merchandiseDashboard ? (
                 <article className="task-card">
                   <div>

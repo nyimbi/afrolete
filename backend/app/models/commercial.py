@@ -224,6 +224,7 @@ class Donation(IdMixin, TimestampMixin, Base):
 
     organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
     campaign_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("fundraising_campaigns.id"), index=True)
+    donor_profile_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("donor_profiles.id"), index=True)
     donor_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
     donor_email: Mapped[str | None] = mapped_column(String(320), index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
@@ -236,6 +237,63 @@ class Donation(IdMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+
+
+class DonorProfile(IdMixin, TimestampMixin, Base):
+    __tablename__ = "donor_profiles"
+    __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_donor_profiles_org_email"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    email: Mapped[str | None] = mapped_column(String(320), index=True)
+    phone: Mapped[str | None] = mapped_column(String(80), index=True)
+    donor_type: Mapped[str] = mapped_column(String(80), default="individual", nullable=False, index=True)
+    segment: Mapped[str] = mapped_column(String(80), default="community", nullable=False, index=True)
+    preferred_channel: Mapped[str] = mapped_column(String(80), default="email", nullable=False, index=True)
+    giving_capacity: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    lifetime_giving: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    last_gift_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    last_gift_on: Mapped[date | None] = mapped_column(index=True)
+    next_ask_on: Mapped[date | None] = mapped_column(index=True)
+    tags_json: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+
+
+class DonorInteraction(IdMixin, TimestampMixin, Base):
+    __tablename__ = "donor_interactions"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    donor_profile_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("donor_profiles.id"), index=True)
+    campaign_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("fundraising_campaigns.id"), index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    interaction_type: Mapped[str] = mapped_column(String(80), default="email", nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(80), default="email", nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    sentiment: Mapped[str] = mapped_column(String(40), default="neutral", nullable=False, index=True)
+    outcome: Mapped[str | None] = mapped_column(String(120), index=True)
+    owner_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    next_follow_up_on: Mapped[date | None] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(40), default="logged", nullable=False, index=True)
+
+
+class DonorStewardshipPlan(IdMixin, TimestampMixin, Base):
+    __tablename__ = "donor_stewardship_plans"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    donor_profile_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("donor_profiles.id"), index=True)
+    name: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(String(80), default="cultivation", nullable=False, index=True)
+    priority: Mapped[str] = mapped_column(String(40), default="medium", nullable=False, index=True)
+    target_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    due_on: Mapped[date | None] = mapped_column(index=True)
+    completed_on: Mapped[date | None] = mapped_column(index=True)
+    next_step: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    recognition_level: Mapped[str | None] = mapped_column(String(120), index=True)
+    impact_story_needed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    owner_name: Mapped[str | None] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
 
 
 class GrantOpportunity(IdMixin, TimestampMixin, Base):

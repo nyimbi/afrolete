@@ -24,6 +24,13 @@ from app.schemas.commercial import (
     CommercialTaxFilingRead,
     DonationCreate,
     DonationRead,
+    DonorDashboardRead,
+    DonorInteractionCreate,
+    DonorInteractionRead,
+    DonorProfileCreate,
+    DonorProfileRead,
+    DonorStewardshipPlanCreate,
+    DonorStewardshipPlanRead,
     FinanceInvoiceCreate,
     FinanceInvoiceRead,
     FinancePaymentCreate,
@@ -102,6 +109,9 @@ from app.services.commercial import (
     check_in_ticket,
     commercial_summary,
     create_campaign,
+    create_donor_interaction,
+    create_donor_profile,
+    create_donor_stewardship_plan,
     create_grant_application,
     create_grant_opportunity,
     create_grant_report,
@@ -124,6 +134,8 @@ from app.services.commercial import (
     create_ticket_product,
     create_ticket_resale_listing,
     deliver_commercial_tax_filing,
+    complete_donor_stewardship_plan,
+    donor_dashboard,
     execute_payment_settlement_payout,
     get_commercial_invoice_hosted_checkout,
     ingest_commercial_invoice_payment_webhook,
@@ -131,6 +143,10 @@ from app.services.commercial import (
     financial_budget_summary,
     list_commercial_settlement_payouts,
     list_campaigns,
+    list_donations,
+    list_donor_interactions,
+    list_donor_profiles,
+    list_donor_stewardship_plans,
     list_financial_budget_lines,
     list_financial_budgets,
     list_financial_forecast_scenarios,
@@ -544,6 +560,89 @@ async def record_donation_route(
     authz: AuthorizationService = Depends(get_authorization_service),
 ) -> DonationRead:
     return donation_read(await record_donation(db, identity, payload, authz))
+
+
+@router.get("/donations", response_model=list[DonationRead])
+async def list_donations_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[DonationRead]:
+    return [donation_read(donation) for donation in await list_donations(db, organization_id)]
+
+
+@router.post("/donors", response_model=DonorProfileRead, status_code=status.HTTP_201_CREATED)
+async def create_donor_profile_route(
+    payload: DonorProfileCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DonorProfileRead:
+    return await create_donor_profile(db, identity, payload, authz)
+
+
+@router.get("/donors", response_model=list[DonorProfileRead])
+async def list_donor_profiles_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> list[DonorProfileRead]:
+    return await list_donor_profiles(db, organization_id)
+
+
+@router.post("/donor-interactions", response_model=DonorInteractionRead, status_code=status.HTTP_201_CREATED)
+async def create_donor_interaction_route(
+    payload: DonorInteractionCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DonorInteractionRead:
+    return await create_donor_interaction(db, identity, payload, authz)
+
+
+@router.get("/donor-interactions", response_model=list[DonorInteractionRead])
+async def list_donor_interactions_route(
+    organization_id: UUID = Query(),
+    donor_profile_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[DonorInteractionRead]:
+    return await list_donor_interactions(db, organization_id, donor_profile_id)
+
+
+@router.post("/donor-stewardship-plans", response_model=DonorStewardshipPlanRead, status_code=status.HTTP_201_CREATED)
+async def create_donor_stewardship_plan_route(
+    payload: DonorStewardshipPlanCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DonorStewardshipPlanRead:
+    return await create_donor_stewardship_plan(db, identity, payload, authz)
+
+
+@router.get("/donor-stewardship-plans", response_model=list[DonorStewardshipPlanRead])
+async def list_donor_stewardship_plans_route(
+    organization_id: UUID = Query(),
+    donor_profile_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[DonorStewardshipPlanRead]:
+    return await list_donor_stewardship_plans(db, organization_id, donor_profile_id)
+
+
+@router.patch("/donor-stewardship-plans/{plan_id}/complete", response_model=DonorStewardshipPlanRead)
+async def complete_donor_stewardship_plan_route(
+    plan_id: UUID,
+    organization_id: UUID = Query(),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> DonorStewardshipPlanRead:
+    return await complete_donor_stewardship_plan(db, identity, plan_id, organization_id, authz)
+
+
+@router.get("/donor-dashboard", response_model=DonorDashboardRead)
+async def donor_dashboard_route(
+    organization_id: UUID = Query(),
+    db: AsyncSession = Depends(get_db),
+) -> DonorDashboardRead:
+    return await donor_dashboard(db, organization_id)
 
 
 @router.post("/grants/opportunities", response_model=GrantOpportunityRead, status_code=status.HTTP_201_CREATED)

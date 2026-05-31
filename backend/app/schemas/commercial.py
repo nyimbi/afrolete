@@ -369,6 +369,7 @@ class FundraisingCampaignRead(FundraisingCampaignCreate):
 class DonationCreate(BaseModel):
     organization_id: UUID
     campaign_id: UUID
+    donor_profile_id: UUID | None = None
     donor_name: str = Field(min_length=2, max_length=180)
     donor_email: str | None = Field(default=None, max_length=320)
     amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
@@ -380,6 +381,97 @@ class DonationCreate(BaseModel):
 class DonationRead(DonationCreate):
     id: UUID
     status: CommercialStatus
+    donor_lifetime_giving: Decimal | None = None
+
+
+class DonorProfileCreate(BaseModel):
+    organization_id: UUID
+    name: str = Field(min_length=2, max_length=180)
+    email: str | None = Field(default=None, max_length=320)
+    phone: str | None = Field(default=None, max_length=80)
+    donor_type: str = Field(default="individual", pattern="^(individual|family|corporate|foundation|alumni|major_gift|in_kind)$")
+    segment: str = Field(default="community", max_length=80)
+    preferred_channel: str = Field(default="email", max_length=80)
+    giving_capacity: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    next_ask_on: date | None = None
+    tags: list[str] = Field(default_factory=list, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+    status: str = Field(default="active", pattern="^(active|watch|paused|archived)$")
+
+
+class DonorProfileRead(DonorProfileCreate):
+    id: UUID
+    lifetime_giving: Decimal
+    last_gift_amount: Decimal | None
+    last_gift_on: date | None
+    donation_count: int = 0
+    interaction_count: int = 0
+    active_plan_count: int = 0
+
+
+class DonorInteractionCreate(BaseModel):
+    organization_id: UUID
+    donor_profile_id: UUID
+    campaign_id: UUID | None = None
+    occurred_at: datetime | None = None
+    interaction_type: str = Field(default="email", max_length=80)
+    channel: str = Field(default="email", max_length=80)
+    subject: str = Field(min_length=2, max_length=220)
+    summary: str = Field(min_length=2, max_length=4000)
+    sentiment: str = Field(default="neutral", pattern="^(positive|neutral|concern|negative)$")
+    outcome: str | None = Field(default=None, max_length=120)
+    owner_name: str | None = Field(default=None, max_length=180)
+    next_follow_up_on: date | None = None
+    status: str = Field(default="logged", pattern="^(logged|follow_up_due|completed|archived)$")
+
+
+class DonorInteractionRead(DonorInteractionCreate):
+    id: UUID
+    donor_name: str | None = None
+    donor_email: str | None = None
+    campaign_name: str | None = None
+    occurred_at: datetime
+
+
+class DonorStewardshipPlanCreate(BaseModel):
+    organization_id: UUID
+    donor_profile_id: UUID
+    name: str = Field(min_length=2, max_length=220)
+    stage: str = Field(default="cultivation", pattern="^(identification|cultivation|solicitation|recognition|stewardship|renewal)$")
+    priority: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    target_amount: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    due_on: date | None = None
+    next_step: str = Field(default="", max_length=4000)
+    recognition_level: str | None = Field(default=None, max_length=120)
+    impact_story_needed: bool = False
+    owner_name: str | None = Field(default=None, max_length=180)
+    status: str = Field(default="active", pattern="^(active|completed|paused|archived)$")
+
+
+class DonorStewardshipPlanRead(DonorStewardshipPlanCreate):
+    id: UUID
+    donor_name: str | None = None
+    donor_email: str | None = None
+    completed_on: date | None = None
+    overdue: bool = False
+
+
+class DonorDashboardRead(BaseModel):
+    organization_id: UUID
+    donor_count: int
+    active_donor_count: int
+    major_donor_count: int
+    lifetime_giving: Decimal
+    average_gift: Decimal
+    interaction_count: int
+    follow_up_due_count: int
+    active_plan_count: int
+    overdue_plan_count: int
+    impact_story_needed_count: int
+    top_donor_name: str | None
+    top_donor_lifetime_giving: Decimal
+    stewardship_health: str
+    recommendations: list[str]
 
 
 class GrantOpportunityCreate(BaseModel):
