@@ -16,7 +16,11 @@ from app.schemas.organization import (
     CommitteeRead,
     FamilyRegistrationInquiryRead,
     MemberAdd,
+    MemberSubscriptionCheckoutLinkRead,
+    MemberSubscriptionCheckoutSettlementCreate,
+    MemberSubscriptionCheckoutSettlementRead,
     MemberSubscriptionCreate,
+    MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionPaymentCreate,
     MemberSubscriptionPaymentRead,
     MemberSubscriptionPlanCreate,
@@ -129,6 +133,7 @@ from app.services.organizations import (
     create_recovery_plan,
     add_organization_group_member,
     create_member_subscription,
+    create_member_subscription_checkout_link,
     create_member_subscription_plan,
     create_organization_group,
     create_organization_market_profile,
@@ -140,6 +145,7 @@ from app.services.organizations import (
     create_organization,
     registration_launch_command_center,
     get_public_registration_account_readiness,
+    get_member_subscription_hosted_checkout,
     get_registration_payment_hosted_checkout,
     get_organization_for_identity,
     get_public_registration_inquiry,
@@ -188,6 +194,7 @@ from app.services.organizations import (
     update_organization_external_report_status,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
+    settle_member_subscription_checkout,
     settle_registration_payment_checkout,
     upload_public_registration_document,
     update_public_registration_packet,
@@ -1913,6 +1920,53 @@ async def record_member_subscription_payment_route(
         subscription_balance_amount=subscription.balance_amount,
         subscription_status=subscription.status,
     )
+
+
+@router.post(
+    "/member-subscriptions/{subscription_id}/checkout-link",
+    response_model=MemberSubscriptionCheckoutLinkRead,
+)
+async def create_member_subscription_checkout_link_route(
+    subscription_id: UUID,
+    provider: str = Query(default="mpesa", min_length=2, max_length=80),
+    checkout_base_url: str = Query(default="/pay/sessions", min_length=1, max_length=800),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionCheckoutLinkRead:
+    return await create_member_subscription_checkout_link(
+        db,
+        identity,
+        subscription_id,
+        provider,
+        checkout_base_url,
+        authz,
+    )
+
+
+@router.get(
+    "/member-subscription-checkout-sessions/{session_id}",
+    response_model=MemberSubscriptionHostedCheckoutRead,
+)
+async def get_member_subscription_checkout_session_route(
+    session_id: str,
+    subscription_id: UUID = Query(),
+    provider: str = Query(default="mpesa", min_length=2, max_length=80),
+    db: AsyncSession = Depends(get_db),
+) -> MemberSubscriptionHostedCheckoutRead:
+    return await get_member_subscription_hosted_checkout(db, session_id, subscription_id, provider)
+
+
+@router.post(
+    "/member-subscription-checkout-sessions/{session_id}/settle",
+    response_model=MemberSubscriptionCheckoutSettlementRead,
+)
+async def settle_member_subscription_checkout_route(
+    session_id: str,
+    payload: MemberSubscriptionCheckoutSettlementCreate,
+    db: AsyncSession = Depends(get_db),
+) -> MemberSubscriptionCheckoutSettlementRead:
+    return await settle_member_subscription_checkout(db, session_id, payload)
 
 
 @router.post(

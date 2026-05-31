@@ -78,7 +78,11 @@ from app.schemas.organization import (
     CommitteeMemberAdd,
     FamilyRegistrationInquiryRead,
     MemberAdd,
+    MemberSubscriptionCheckoutLinkRead,
+    MemberSubscriptionCheckoutSettlementCreate,
+    MemberSubscriptionCheckoutSettlementRead,
     MemberSubscriptionCreate,
+    MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionPaymentCreate,
     MemberSubscriptionPlanCreate,
     OrganizationAwardCategoryCreate,
@@ -4744,6 +4748,219 @@ async def record_member_subscription_payment(
     await db.refresh(payment)
     await db.refresh(subscription)
     return payment, subscription
+
+
+async def create_member_subscription_checkout_link(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    provider: str,
+    checkout_base_url: str,
+    authz: AuthorizationService,
+) -> MemberSubscriptionCheckoutLinkRead:
+    subscription, plan, subject_label = await get_member_subscription_checkout_subject(db, subscription_id)
+    await ensure_manage_organization(db, identity, subscription.organization_id, authz)
+    normalized_provider = normalize_payment_provider(provider)
+    session_id = member_subscription_checkout_session_id(subscription, normalized_provider)
+    return MemberSubscriptionCheckoutLinkRead(
+        subscription_id=subscription.id,
+        provider=normalized_provider,
+        session_id=session_id,
+        checkout_url=member_subscription_checkout_session_url(
+            checkout_base_url,
+            session_id,
+            subscription,
+            normalized_provider,
+        ),
+        hosted_checkout=member_subscription_hosted_checkout_read(
+            subscription,
+            plan,
+            subject_label,
+            normalized_provider,
+            session_id,
+        ),
+    )
+
+
+async def get_member_subscription_hosted_checkout(
+    db: AsyncSession,
+    session_id: str,
+    subscription_id: UUID,
+    provider: str,
+) -> MemberSubscriptionHostedCheckoutRead:
+    subscription, plan, subject_label = await get_member_subscription_checkout_subject(db, subscription_id)
+    normalized_provider = normalize_payment_provider(provider)
+    expected_session_id = member_subscription_checkout_session_id(subscription, normalized_provider)
+    if session_id != expected_session_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues checkout session not found")
+    return member_subscription_hosted_checkout_read(
+        subscription,
+        plan,
+        subject_label,
+        normalized_provider,
+        session_id,
+    )
+
+
+async def settle_member_subscription_checkout(
+    db: AsyncSession,
+    session_id: str,
+    payload: MemberSubscriptionCheckoutSettlementCreate,
+) -> MemberSubscriptionCheckoutSettlementRead:
+    subscription, plan, _subject_label = await get_member_subscription_checkout_subject(db, payload.subscription_id)
+    normalized_provider = normalize_payment_provider(payload.provider)
+    expected_session_id = member_subscription_checkout_session_id(subscription, normalized_provider)
+    if session_id != expected_session_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues checkout session not found")
+    currency = (payload.currency or plan.currency or "KES").upper()
+    if currency != plan.currency.upper():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Currency mismatch")
+    open_amount = member_subscription_open_amount(subscription)
+    if open_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Member dues subscription is already paid")
+    amount = (payload.amount or open_amount).quantize(Decimal("0.01"))
+    if amount <= 0 or amount > open_amount:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Payment exceeds dues balance")
+
+    payment_id: UUID | None = None
+    accepted = payload.status == "succeeded"
+    payment = MemberSubscriptionPayment(
+        organization_id=subscription.organization_id,
+        subscription_id=subscription.id,
+        amount=amount,
+        currency=currency,
+        provider=normalized_provider,
+        method=payload.method,
+        external_payment_id=payload.external_payment_id or f"{normalized_provider}:{session_id}",
+        received_at=datetime.now(UTC),
+        status=payload.status,
+        raw_reference=payload.raw_reference,
+        notes=f"Hosted member dues checkout {session_id}",
+    )
+    db.add(payment)
+    if accepted:
+        subscription.balance_amount = member_subscription_open_amount(subscription) - amount
+        if subscription.balance_amount <= 0:
+            subscription.balance_amount = Decimal("0.00")
+            if subscription.status == "past_due":
+                subscription.status = "active"
+    elif payload.status == "pending" and subscription.status == "active":
+        subscription.notes = append_member_dues_note(subscription.notes, f"Pending hosted dues payment {session_id}.")
+    await db.commit()
+    await db.refresh(payment)
+    await db.refresh(subscription)
+    payment_id = payment.id
+    return MemberSubscriptionCheckoutSettlementRead(
+        subscription_id=subscription.id,
+        provider=normalized_provider,
+        accepted=accepted,
+        payment_id=payment_id,
+        subscription_status=subscription.status,
+        amount_paid=(plan.amount - member_subscription_open_amount(subscription)).quantize(Decimal("0.01")),
+        open_amount=member_subscription_open_amount(subscription),
+        session_status=member_subscription_checkout_session_status(subscription),
+        message=(
+            "Member dues payment recorded for the club."
+            if accepted
+            else f"Member dues payment marked {payload.status}."
+        ),
+    )
+
+
+async def get_member_subscription_checkout_subject(
+    db: AsyncSession,
+    subscription_id: UUID,
+) -> tuple[MemberSubscription, MemberSubscriptionPlan, str | None]:
+    subscription = await db.get(MemberSubscription, subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+    plan = await db.get(MemberSubscriptionPlan, subscription.plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription plan not found")
+    return (
+        subscription,
+        plan,
+        await member_subject_label(db, subscription.subject_type, subscription.subject_id),
+    )
+
+
+def member_subscription_checkout_session_id(subscription: MemberSubscription, provider: str) -> str:
+    token = sha256(
+        (
+            f"member-dues:{subscription.id}:{subscription.organization_id}:"
+            f"{subscription.current_period_end}:{provider.casefold()}"
+        ).encode()
+    ).hexdigest()
+    provider_token = re.sub(r"[^a-z0-9]+", "-", provider.lower()).strip("-")[:24] or "processor"
+    return f"mdues_{provider_token}_{token[:24]}"
+
+
+def member_subscription_checkout_session_url(
+    base_url: str,
+    session_id: str,
+    subscription: MemberSubscription,
+    provider: str,
+) -> str:
+    return (
+        f"{base_url.rstrip('/')}/{session_id}"
+        f"?kind=member_dues&subscription_id={subscription.id}&provider={quote(provider, safe='')}"
+    )
+
+
+def member_subscription_open_amount(subscription: MemberSubscription) -> Decimal:
+    return max(subscription.balance_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+
+
+def member_subscription_checkout_session_status(subscription: MemberSubscription) -> str:
+    return "paid" if member_subscription_open_amount(subscription) <= 0 else "ready"
+
+
+def member_subscription_hosted_checkout_read(
+    subscription: MemberSubscription,
+    plan: MemberSubscriptionPlan,
+    subject_label: str | None,
+    provider: str,
+    session_id: str,
+) -> MemberSubscriptionHostedCheckoutRead:
+    open_amount = member_subscription_open_amount(subscription)
+    paid_amount = max(plan.amount - open_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+    display_subject = subject_label or f"{subscription.subject_type.value}:{subscription.subject_id}"
+    title = f"{plan.name} for {display_subject}"
+    return MemberSubscriptionHostedCheckoutRead(
+        subscription_id=subscription.id,
+        organization_id=subscription.organization_id,
+        plan_id=plan.id,
+        plan_name=plan.name,
+        subject_label=subject_label,
+        dues_reference=subscription.external_reference or f"DUES-{str(subscription.id).split('-')[0].upper()}",
+        title=title,
+        memo=subscription.notes or plan.description or plan.benefits,
+        due_on=subscription.next_due_on,
+        amount_due=plan.amount.quantize(Decimal("0.01")),
+        amount_paid=paid_amount,
+        open_amount=open_amount,
+        currency=plan.currency.upper(),
+        status=subscription.status,
+        provider=provider,
+        session_id=session_id,
+        session_status=member_subscription_checkout_session_status(subscription),
+        client_reference=f"member-dues:{subscription.id}",
+        payment_methods=["mobile_money", "mpesa_stk", "bank_transfer", "cash_office"],
+        settlement_endpoint=f"/api/v1/organizations/member-subscription-checkout-sessions/{session_id}/settle",
+        checkout_summary=(
+            f"{title} has {open_amount} {plan.currency.upper()} outstanding for the club."
+            if open_amount > 0
+            else f"{title} is fully paid."
+        ),
+    )
+
+
+def normalize_payment_provider(provider: str) -> str:
+    return provider.strip().lower() or "mpesa"
+
+
+def append_member_dues_note(existing: str | None, note: str) -> str:
+    return f"{existing}\n{note}" if existing else note
 
 
 async def create_organization_market_profile(

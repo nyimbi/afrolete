@@ -1195,6 +1195,61 @@ class MemberSubscriptionPaymentRead(BaseModel):
     subscription_status: str
 
 
+class MemberSubscriptionHostedCheckoutRead(BaseModel):
+    subscription_id: UUID
+    organization_id: UUID
+    plan_id: UUID
+    plan_name: str
+    subject_label: str | None
+    dues_reference: str
+    title: str
+    memo: str | None
+    due_on: date | None
+    amount_due: Decimal
+    amount_paid: Decimal
+    open_amount: Decimal
+    currency: str
+    status: str
+    provider: str
+    session_id: str
+    session_status: str
+    client_reference: str
+    payment_methods: list[str]
+    settlement_endpoint: str
+    checkout_summary: str
+
+
+class MemberSubscriptionCheckoutLinkRead(BaseModel):
+    subscription_id: UUID
+    provider: str
+    session_id: str
+    checkout_url: str
+    hosted_checkout: MemberSubscriptionHostedCheckoutRead
+
+
+class MemberSubscriptionCheckoutSettlementCreate(BaseModel):
+    subscription_id: UUID
+    provider: str = Field(default="mpesa", min_length=2, max_length=80)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    method: str = Field(default="hosted_payment_page", min_length=2, max_length=80)
+    external_payment_id: str | None = Field(default=None, max_length=240)
+    status: str = Field(default="succeeded", pattern="^(succeeded|pending|failed|cancelled)$")
+    raw_reference: str | None = Field(default=None, max_length=2000)
+
+
+class MemberSubscriptionCheckoutSettlementRead(BaseModel):
+    subscription_id: UUID
+    provider: str
+    accepted: bool
+    payment_id: UUID | None
+    subscription_status: str
+    amount_paid: Decimal
+    open_amount: Decimal
+    session_status: str
+    message: str
+
+
 class OrganizationMarketProfileCreate(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     country_code: str = Field(min_length=2, max_length=2)

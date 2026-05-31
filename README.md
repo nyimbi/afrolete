@@ -181,8 +181,9 @@ Major capability areas include:
   packages, award payments, expenditures, compliance obligations, milestones,
   auto-generated funder reports, grant portfolio utilization/impact/ROI
   analytics, financial budgeting, forecasting, management financial statements,
-  club-managed member dues with M-Pesa/mobile-money collection support, and
-  venue digital-signage sponsor rotations with playback telemetry.
+  club-managed member dues with M-Pesa/mobile-money collection support,
+  hosted dues payment links, and venue digital-signage sponsor rotations with
+  playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
   AI insights, export jobs, and government/federation reporting registers tied
@@ -199,7 +200,8 @@ Major capability areas include:
   enforcement, metering, recurring invoices, dunning, late fees, payment
   retries, checkout links, signed tax filing packages, provider webhooks, and
   billing summaries. Member dues are a separate club-managed receivables
-  workflow, not AfroLete platform hosting.
+  workflow with its own payment links and M-Pesa/manual/provider settlements,
+  not AfroLete platform hosting.
 - Offline/PWA operation: installable frontend shell, service worker caching,
   encrypted travel-manifest cache, signed offline artifacts, offline mutation
   outbox, and replay controls.

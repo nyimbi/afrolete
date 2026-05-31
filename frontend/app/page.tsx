@@ -358,6 +358,7 @@ import type {
   MessageDeliveryStatus,
   MessageRecipientRead,
   MembershipRead,
+  MemberSubscriptionCheckoutLinkRead,
   MemberSubscriptionPaymentRead,
   MemberSubscriptionPlanRead,
   MemberSubscriptionRead,
@@ -1874,6 +1875,7 @@ export default function HomePage() {
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
+  const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
   const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
   const [marketProfileSummary, setMarketProfileSummary] = useState<OrganizationMarketProfileSummaryRead | null>(null);
   const [externalReports, setExternalReports] = useState<OrganizationExternalReportRead[]>([]);
@@ -6015,6 +6017,7 @@ export default function HomePage() {
       setMemberSubscriptionPlans([]);
       setMemberSubscriptions([]);
       setMemberSubscriptionPayment(null);
+      setMemberDuesCheckoutLink(null);
       setSelectedMemberSubscriptionId("");
       setMarketProfiles([]);
       setMarketProfileSummary(null);
@@ -7278,6 +7281,34 @@ export default function HomePage() {
           )
         );
         addLog(`Recorded ${payment.provider.toUpperCase()} dues payment`, "good");
+      }
+    );
+  };
+
+  const createMemberDuesCheckoutLink = () => {
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!subscriptionId) {
+      addLog("Select a member dues account before creating a payment link", "bad");
+      return;
+    }
+    const checkoutBaseUrl =
+      typeof window === "undefined" ? "/pay/sessions" : `${window.location.origin}/pay/sessions`;
+    runAction(
+      "create-member-dues-checkout-link",
+      () =>
+        apiRequest<MemberSubscriptionCheckoutLinkRead>(
+          `/organizations/member-subscriptions/${subscriptionId}/checkout-link?provider=${encodeURIComponent(memberDuesPaymentForm.provider || "mpesa")}&checkout_base_url=${encodeURIComponent(checkoutBaseUrl)}`,
+          {
+            method: "POST",
+            identity
+          }
+        ),
+      (link) => {
+        setMemberDuesCheckoutLink(link);
+        addLog(`Member dues payment link ready: ${link.hosted_checkout.open_amount} ${link.hosted_checkout.currency}`, "good");
+        if (typeof window !== "undefined") {
+          window.open(link.checkout_url, "_blank", "noopener,noreferrer");
+        }
       }
     );
   };
@@ -23953,6 +23984,7 @@ export default function HomePage() {
             <div className="event-toolbar">
               <button type="button" onClick={createMemberDuesSubscription} disabled={busyAction !== null}>Assign selected member</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
+              <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
             </div>
             <div className="form-grid">
               <label>
@@ -23998,6 +24030,15 @@ export default function HomePage() {
                     <strong>{memberSubscriptionPayment.provider.toUpperCase()} payment recorded</strong>
                     <span>{memberSubscriptionPayment.amount} {memberSubscriptionPayment.currency} · balance {memberSubscriptionPayment.subscription_balance_amount}</span>
                     <small>{memberSubscriptionPayment.external_payment_id ?? memberSubscriptionPayment.method}</small>
+                  </div>
+                </article>
+              ) : null}
+              {memberDuesCheckoutLink ? (
+                <article className="task-card">
+                  <div>
+                    <strong>Member dues payment link</strong>
+                    <span>{memberDuesCheckoutLink.hosted_checkout.open_amount} {memberDuesCheckoutLink.hosted_checkout.currency} · {memberDuesCheckoutLink.provider}</span>
+                    <small>{memberDuesCheckoutLink.checkout_url}</small>
                   </div>
                 </article>
               ) : null}

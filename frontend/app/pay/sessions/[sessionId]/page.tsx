@@ -11,6 +11,8 @@ import type {
   EventTravelFeeHostedCheckoutRead,
   FacilityHireCheckoutSettlementRead,
   FacilityHireHostedCheckoutRead,
+  MemberSubscriptionCheckoutSettlementRead,
+  MemberSubscriptionHostedCheckoutRead,
   RegistrationPaymentHostedCheckoutRead,
   RegistrationPaymentSettlementRead,
   SaaSInvoiceCheckoutSettlementRead,
@@ -22,14 +24,16 @@ type HostedCheckoutRead =
   | CommercialInvoiceHostedCheckoutRead
   | SaaSInvoiceHostedCheckoutRead
   | RegistrationPaymentHostedCheckoutRead
-  | FacilityHireHostedCheckoutRead;
+  | FacilityHireHostedCheckoutRead
+  | MemberSubscriptionHostedCheckoutRead;
 type HostedCheckoutSettlementRead =
   | EventTravelFeeCheckoutSettlementRead
   | CommercialInvoiceCheckoutSettlementRead
   | SaaSInvoiceCheckoutSettlementRead
   | RegistrationPaymentSettlementRead
-  | FacilityHireCheckoutSettlementRead;
-type CheckoutKind = "travel" | "commercial" | "saas" | "registration" | "facility";
+  | FacilityHireCheckoutSettlementRead
+  | MemberSubscriptionCheckoutSettlementRead;
+type CheckoutKind = "travel" | "commercial" | "saas" | "registration" | "facility" | "member_dues";
 
 export default function HostedPaymentPage() {
   return (
@@ -45,11 +49,12 @@ function HostedPaymentExperience() {
   const invoiceId = searchParams.get("invoice_id") ?? "";
   const bookingId = searchParams.get("booking_id") ?? "";
   const inquiryId = searchParams.get("inquiry_id") ?? "";
+  const subscriptionId = searchParams.get("subscription_id") ?? "";
   const site = searchParams.get("site") ?? "";
   const provider = searchParams.get("provider") ?? "manual_gateway";
   const requestedKind = searchParams.get("kind");
   const checkoutKind: CheckoutKind =
-    requestedKind === "commercial" || requestedKind === "saas" || requestedKind === "registration" || requestedKind === "facility"
+    requestedKind === "commercial" || requestedKind === "saas" || requestedKind === "registration" || requestedKind === "facility" || requestedKind === "member_dues"
       ? requestedKind
       : "travel";
   const [checkout, setCheckout] = useState<HostedCheckoutRead | null>(null);
@@ -61,9 +66,15 @@ function HostedPaymentExperience() {
 
   useEffect(() => {
     let cancelled = false;
-    const missingContext = checkoutKind === "registration" ? !inquiryId || !site : !invoiceId || (checkoutKind === "facility" && !bookingId);
+    const missingContext = checkoutKind === "registration" ? !inquiryId || !site : checkoutKind === "member_dues" ? !subscriptionId : !invoiceId || (checkoutKind === "facility" && !bookingId);
     if (!params.sessionId || missingContext) {
-      setError(checkoutKind === "registration" ? "Payment session link is missing registration context." : "Payment session link is missing invoice context.");
+      setError(
+        checkoutKind === "registration"
+          ? "Payment session link is missing registration context."
+          : checkoutKind === "member_dues"
+            ? "Payment session link is missing member dues context."
+            : "Payment session link is missing invoice context."
+      );
       return;
     }
     const checkoutPath =
@@ -73,6 +84,8 @@ function HostedPaymentExperience() {
           ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
           : checkoutKind === "saas"
             ? `/billing/invoice-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`
+            : checkoutKind === "member_dues"
+              ? `/organizations/member-subscription-checkout-sessions/${encodeURIComponent(params.sessionId)}?subscription_id=${encodeURIComponent(subscriptionId)}&provider=${encodeURIComponent(provider)}`
             : checkoutKind === "facility"
               ? `/assets/facility-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&booking_id=${encodeURIComponent(bookingId)}&provider=${encodeURIComponent(provider)}`
               : `/events/travel-fee-checkout-sessions/${encodeURIComponent(params.sessionId)}?invoice_id=${encodeURIComponent(invoiceId)}&provider=${encodeURIComponent(provider)}`;
@@ -93,7 +106,7 @@ function HostedPaymentExperience() {
     return () => {
       cancelled = true;
     };
-  }, [bookingId, checkoutKind, inquiryId, invoiceId, params.sessionId, provider, site]);
+  }, [bookingId, checkoutKind, inquiryId, invoiceId, params.sessionId, provider, site, subscriptionId]);
 
   const displayAmount = useMemo(() => {
     if (!checkout) {
@@ -120,6 +133,8 @@ function HostedPaymentExperience() {
             ? `/commercial/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
             : checkoutKind === "saas"
               ? `/billing/invoice-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
+              : checkoutKind === "member_dues"
+                ? `/organizations/member-subscription-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
               : checkoutKind === "facility"
                 ? `/assets/facility-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`
                 : `/events/travel-fee-checkout-sessions/${encodeURIComponent(checkout.session_id)}/settle`;
@@ -130,6 +145,8 @@ function HostedPaymentExperience() {
           body: {
             ...(checkoutKind === "registration"
               ? { inquiry_id: (checkout as RegistrationPaymentHostedCheckoutRead).inquiry_id }
+              : checkoutKind === "member_dues"
+                ? { subscription_id: (checkout as MemberSubscriptionHostedCheckoutRead).subscription_id }
               : checkoutKind === "facility"
                 ? {
                     invoice_id: checkoutInvoiceId,
@@ -151,7 +168,7 @@ function HostedPaymentExperience() {
         ...checkout,
         amount_paid: result.amount_paid,
         open_amount: result.open_amount,
-        status: "invoice_status" in result ? result.invoice_status : result.payment_status,
+        status: "invoice_status" in result ? result.invoice_status : "payment_status" in result ? result.payment_status : result.subscription_status,
         session_status: result.session_status
       });
     } catch (caught) {
@@ -205,6 +222,8 @@ function HostedPaymentExperience() {
                   ? "Secure club hosting invoice portal"
                   : checkoutKind === "registration"
                     ? "Secure registration fee portal"
+                    : checkoutKind === "member_dues"
+                      ? "Secure club dues portal"
                     : checkoutKind === "facility"
                       ? "Secure facility booking portal"
                     : "Secure travel fee portal"}
@@ -222,10 +241,12 @@ function HostedPaymentExperience() {
               <p>{checkout.memo ?? checkout.checkout_summary}</p>
               <dl>
                 <div>
-                  <dt>{checkoutKind === "registration" ? "Registration" : "Invoice"}</dt>
+                  <dt>{checkoutKind === "registration" ? "Registration" : checkoutKind === "member_dues" ? "Member dues" : "Invoice"}</dt>
                   <dd>
                     {checkoutKind === "registration"
                       ? (checkout as RegistrationPaymentHostedCheckoutRead).registration_reference
+                      : checkoutKind === "member_dues"
+                        ? (checkout as MemberSubscriptionHostedCheckoutRead).dues_reference
                       : (checkout as CommercialInvoiceHostedCheckoutRead | EventTravelFeeHostedCheckoutRead | SaaSInvoiceHostedCheckoutRead | FacilityHireHostedCheckoutRead).invoice_number}
                   </dd>
                 </div>

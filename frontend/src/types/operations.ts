@@ -1049,6 +1049,50 @@ export type MemberSubscriptionPaymentRead = {
   subscription_status: string;
 };
 
+export type MemberSubscriptionHostedCheckoutRead = {
+  subscription_id: UUID;
+  organization_id: UUID;
+  plan_id: UUID;
+  plan_name: string;
+  subject_label: string | null;
+  dues_reference: string;
+  title: string;
+  memo: string | null;
+  due_on: string | null;
+  amount_due: string;
+  amount_paid: string;
+  open_amount: string;
+  currency: string;
+  status: string;
+  provider: string;
+  session_id: string;
+  session_status: string;
+  client_reference: string;
+  payment_methods: string[];
+  settlement_endpoint: string;
+  checkout_summary: string;
+};
+
+export type MemberSubscriptionCheckoutLinkRead = {
+  subscription_id: UUID;
+  provider: string;
+  session_id: string;
+  checkout_url: string;
+  hosted_checkout: MemberSubscriptionHostedCheckoutRead;
+};
+
+export type MemberSubscriptionCheckoutSettlementRead = {
+  subscription_id: UUID;
+  provider: string;
+  accepted: boolean;
+  payment_id: UUID | null;
+  subscription_status: string;
+  amount_paid: string;
+  open_amount: string;
+  session_status: string;
+  message: string;
+};
+
 export type OrganizationMarketProfileRead = {
   id: UUID;
   organization_id: UUID;

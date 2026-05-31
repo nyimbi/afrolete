@@ -181,12 +181,50 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert payment["subscription_balance_amount"] == "500.00"
     assert payment["subscription_status"] == "active"
 
+    checkout_response = client.post(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/checkout-link",
+        headers=identity_headers,
+        params={"provider": "mpesa", "checkout_base_url": "/pay/sessions"},
+    )
+    assert checkout_response.status_code == 200
+    checkout = checkout_response.json()
+    assert checkout["hosted_checkout"]["open_amount"] == "500.00"
+    assert checkout["hosted_checkout"]["dues_reference"] == "club-dues-2026-06"
+    assert "kind=member_dues" in checkout["checkout_url"]
+
+    public_checkout_response = client.get(
+        f"/api/v1/organizations/member-subscription-checkout-sessions/{checkout['session_id']}",
+        params={"subscription_id": subscription["id"], "provider": "mpesa"},
+    )
+    assert public_checkout_response.status_code == 200
+    public_checkout = public_checkout_response.json()
+    assert public_checkout["title"] == "Senior player monthly dues for Member Dues"
+    assert public_checkout["payment_methods"][0] == "mobile_money"
+
+    settlement_response = client.post(
+        f"/api/v1/organizations/member-subscription-checkout-sessions/{checkout['session_id']}/settle",
+        json={
+            "subscription_id": subscription["id"],
+            "provider": "mpesa",
+            "amount": "500.00",
+            "currency": "KES",
+            "method": "mpesa_stk",
+            "external_payment_id": "MPESA-DEF-456",
+            "raw_reference": "Hosted M-Pesa confirmation.",
+        },
+    )
+    assert settlement_response.status_code == 200
+    settlement = settlement_response.json()
+    assert settlement["accepted"] is True
+    assert settlement["open_amount"] == "0.00"
+    assert settlement["session_status"] == "paid"
+
     subscriptions_response = client.get(
         f"/api/v1/organizations/{organization['id']}/member-subscriptions",
         headers=identity_headers,
     )
     assert subscriptions_response.status_code == 200
-    assert subscriptions_response.json()[0]["balance_amount"] == "500.00"
+    assert subscriptions_response.json()[0]["balance_amount"] == "0.00"
 
 
 def test_organization_market_profiles_localize_payments_tax_and_reporting(client, identity_headers) -> None:
