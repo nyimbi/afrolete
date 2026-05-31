@@ -495,6 +495,58 @@ class GrantOpportunityRead(GrantOpportunityCreate):
     id: UUID
 
 
+class GrantOpportunityDiscoveryRunCreate(BaseModel):
+    organization_id: UUID
+    profile_name: str = Field(default="default", min_length=2, max_length=160)
+    focus_terms: list[str] = Field(default_factory=list, max_length=40)
+    excluded_terms: list[str] = Field(default_factory=list, max_length=40)
+    minimum_score: Decimal = Field(default=Decimal("0"), ge=0, le=100, max_digits=5, decimal_places=2)
+    limit: int = Field(default=25, ge=1, le=100)
+
+
+class GrantOpportunityMatchUpdate(BaseModel):
+    alert_status: str | None = Field(default=None, pattern="^(new|reviewed|dismissed|snoozed|applied)$")
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class GrantOpportunityMatchRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    grant_opportunity_id: UUID
+    profile_name: str
+    funder_name: str | None = None
+    program_name: str | None = None
+    category: str | None = None
+    impact_area: str | None = None
+    award_ceiling: Decimal | None = None
+    currency: str | None = None
+    due_on: date | None = None
+    opportunity_status: str | None = None
+    match_score: Decimal
+    fit_band: str
+    success_probability: Decimal
+    matched_terms: list[str]
+    missing_terms: list[str]
+    focus_terms: list[str]
+    excluded_terms: list[str]
+    alert_status: str
+    recommended_action: str
+    generated_at: datetime
+    notes: str | None = None
+
+
+class GrantOpportunityDiscoveryRunRead(BaseModel):
+    organization_id: UUID
+    profile_name: str
+    generated_count: int
+    reviewed_count: int
+    alert_count: int
+    high_fit_count: int
+    average_score: Decimal
+    matches: list[GrantOpportunityMatchRead]
+    recommendations: list[str]
+
+
 class GrantApplicationCreate(BaseModel):
     organization_id: UUID
     grant_opportunity_id: UUID

@@ -43,6 +43,92 @@ def create_commercial_context(client, identity_headers):
     return organization, team, event
 
 
+def test_grant_opportunity_discovery_scores_alerts_and_reviews_matches(client, identity_headers) -> None:
+    organization, _, _ = create_commercial_context(client, identity_headers)
+
+    youth_opportunity_response = client.post(
+        "/api/v1/commercial/grants/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "funder_name": "Youth Sport Foundation",
+            "program_name": "Girls Football Scholarship and Safeguarding Grant",
+            "category": "youth_development",
+            "impact_area": "Scholarship access, safeguarding, coach education, and inclusive football",
+            "award_ceiling": "50000.00",
+            "matching_required": "2500.00",
+            "currency": "KES",
+            "due_on": "2026-08-15",
+            "eligibility_summary": "Registered youth clubs serving girls and underserved athletes.",
+            "requirements": "Safeguarding policy, coach certification plan, budget, and impact metrics.",
+            "status": "open",
+        },
+    )
+    assert youth_opportunity_response.status_code == 201
+    youth_opportunity = youth_opportunity_response.json()
+
+    client.post(
+        "/api/v1/commercial/grants/opportunities",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "funder_name": "Elite Professional Fund",
+            "program_name": "Professional Stadium Hospitality Grant",
+            "category": "professional_facilities",
+            "impact_area": "Premium seating and hospitality",
+            "award_ceiling": "100000.00",
+            "matching_required": "60000.00",
+            "currency": "KES",
+            "due_on": "2026-08-20",
+            "eligibility_summary": "Professional clubs with stadium hospitality operations.",
+            "requirements": "Commercial hospitality plan and professional league status.",
+            "status": "open",
+        },
+    )
+
+    discovery_response = client.post(
+        "/api/v1/commercial/grants/discovery-runs",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "profile_name": "youth access",
+            "focus_terms": ["youth", "scholarship", "safeguarding", "coach", "football"],
+            "excluded_terms": ["professional", "hospitality"],
+            "minimum_score": "50.00",
+            "limit": 10,
+        },
+    )
+    assert discovery_response.status_code == 200
+    discovery = discovery_response.json()
+    assert discovery["generated_count"] == 1
+    assert discovery["alert_count"] == 1
+    assert discovery["high_fit_count"] == 1
+    assert discovery["matches"][0]["grant_opportunity_id"] == youth_opportunity["id"]
+    assert discovery["matches"][0]["fit_band"] == "high"
+    assert "safeguarding" in discovery["matches"][0]["matched_terms"]
+    assert discovery["matches"][0]["success_probability"] >= "60.00"
+    assert "Prioritize" in discovery["matches"][0]["recommended_action"]
+
+    matches_response = client.get(
+        f"/api/v1/commercial/grants/opportunity-matches?organization_id={organization['id']}&profile_name=youth%20access",
+        headers=identity_headers,
+    )
+    assert matches_response.status_code == 200
+    matches = matches_response.json()
+    assert len(matches) == 1
+    assert matches[0]["alert_status"] == "new"
+
+    review_response = client.patch(
+        f"/api/v1/commercial/grants/opportunity-matches/{matches[0]['id']}",
+        headers=identity_headers,
+        json={"alert_status": "reviewed", "notes": "Assign treasurer to eligibility review."},
+    )
+    assert review_response.status_code == 200
+    reviewed = review_response.json()
+    assert reviewed["alert_status"] == "reviewed"
+    assert reviewed["notes"] == "Assign treasurer to eligibility review."
+
+
 def test_financial_budget_planning_tracks_variance_cash_and_scenarios(client, identity_headers) -> None:
     organization, _, _ = create_commercial_context(client, identity_headers)
 

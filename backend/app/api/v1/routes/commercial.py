@@ -55,6 +55,10 @@ from app.schemas.commercial import (
     GrantAwardRecordRead,
     GrantAwardSummaryRead,
     GrantDashboardRead,
+    GrantOpportunityDiscoveryRunCreate,
+    GrantOpportunityDiscoveryRunRead,
+    GrantOpportunityMatchRead,
+    GrantOpportunityMatchUpdate,
     GrantOpportunityCreate,
     GrantOpportunityRead,
     GrantPortfolioSummaryRead,
@@ -153,6 +157,7 @@ from app.services.commercial import (
     complete_donor_stewardship_plan,
     decide_grant_application_approval,
     donor_dashboard,
+    discover_grant_opportunities,
     execute_payment_settlement_payout,
     generate_financial_statement_package,
     generate_grant_report,
@@ -173,12 +178,14 @@ from app.services.commercial import (
     list_grant_application_approvals,
     list_grant_applications,
     list_grant_award_records,
+    list_grant_opportunity_matches,
     list_grant_opportunities,
     list_grant_reports,
     list_grant_submission_packages,
     grant_application_approval_counts,
     grant_award_summary,
     grant_portfolio_summary,
+    update_grant_opportunity_match,
     update_grant_submission_package,
     list_invoices,
     list_commercial_payment_sessions,
@@ -696,6 +703,36 @@ async def list_grant_opportunities_route(
         grant_opportunity_read(opportunity)
         for opportunity in await list_grant_opportunities(db, organization_id)
     ]
+
+
+@router.post("/grants/discovery-runs", response_model=GrantOpportunityDiscoveryRunRead)
+async def discover_grant_opportunities_route(
+    payload: GrantOpportunityDiscoveryRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantOpportunityDiscoveryRunRead:
+    return await discover_grant_opportunities(db, identity, payload, authz)
+
+
+@router.get("/grants/opportunity-matches", response_model=list[GrantOpportunityMatchRead])
+async def list_grant_opportunity_matches_route(
+    organization_id: UUID = Query(),
+    profile_name: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[GrantOpportunityMatchRead]:
+    return await list_grant_opportunity_matches(db, organization_id, profile_name)
+
+
+@router.patch("/grants/opportunity-matches/{match_id}", response_model=GrantOpportunityMatchRead)
+async def update_grant_opportunity_match_route(
+    match_id: UUID,
+    payload: GrantOpportunityMatchUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> GrantOpportunityMatchRead:
+    return await update_grant_opportunity_match(db, identity, match_id, payload, authz)
 
 
 @router.post("/grants/applications", response_model=GrantApplicationRead, status_code=status.HTTP_201_CREATED)

@@ -177,10 +177,11 @@ Major capability areas include:
   carpooling, driver ratings, backup drivers, and route-risk guidance.
 - Finance, sponsorship, fundraising, ticketing, invoices, payments, refunds,
   tax, accounting, payouts, sponsor portals, public support showcases,
-  donor CRM and stewardship, grant application internal approvals, submission
-  packages, award payments, expenditures, compliance obligations, milestones,
-  auto-generated funder reports, grant portfolio utilization/impact/ROI
-  analytics, financial budgeting, forecasting, management financial statements,
+  donor CRM and stewardship, grant opportunity discovery/matching/alerts,
+  grant application internal approvals, submission packages, award payments,
+  expenditures, compliance obligations, milestones, auto-generated funder
+  reports, grant portfolio utilization/impact/ROI analytics, financial
+  budgeting, forecasting, management financial statements,
   club-managed member dues with M-Pesa/mobile-money collection support,
   hosted dues payment links, and venue digital-signage sponsor rotations with
   playback telemetry.

@@ -34,6 +34,7 @@ from app.models.commercial import (
     GrantApplication,
     GrantAwardRecord,
     GrantOpportunity,
+    GrantOpportunityMatch,
     GrantReport,
     GrantSubmissionPackage,
     MerchandiseOrder,
@@ -106,6 +107,10 @@ from app.schemas.commercial import (
     GrantAwardRecordRead,
     GrantAwardSummaryRead,
     GrantDashboardRead,
+    GrantOpportunityDiscoveryRunCreate,
+    GrantOpportunityDiscoveryRunRead,
+    GrantOpportunityMatchRead,
+    GrantOpportunityMatchUpdate,
     GrantOpportunityCreate,
     GrantPortfolioFunderRead,
     GrantPortfolioSummaryRead,
@@ -1003,6 +1008,104 @@ async def list_grant_opportunities(db: AsyncSession, organization_id: UUID) -> l
             )
         ).all()
     )
+
+
+async def discover_grant_opportunities(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: GrantOpportunityDiscoveryRunCreate,
+    authz: AuthorizationService,
+) -> GrantOpportunityDiscoveryRunRead:
+    await get_organization(db, payload.organization_id)
+    await ensure_manage_commercial(authz, identity, payload.organization_id)
+    focus_terms = normalize_discovery_terms(payload.focus_terms)
+    excluded_terms = normalize_discovery_terms(payload.excluded_terms)
+    profile_name = payload.profile_name.strip() or "default"
+    opportunities = await list_grant_opportunities(db, payload.organization_id)
+    existing_matches = await grant_opportunity_matches_by_key(db, payload.organization_id, profile_name)
+    generated_at = datetime.now(UTC)
+    scored: list[tuple[GrantOpportunity, Decimal, str, Decimal, list[str], list[str], str]] = []
+    for opportunity in opportunities:
+        score, fit_band, probability, matched_terms, missing_terms, action = score_grant_opportunity_match(
+            opportunity,
+            focus_terms,
+            excluded_terms,
+        )
+        if score < payload.minimum_score:
+            continue
+        scored.append((opportunity, score, fit_band, probability, matched_terms, missing_terms, action))
+
+    scored.sort(key=lambda item: (-item[1], item[0].due_on or date.max, item[0].program_name))
+    selected = scored[: payload.limit]
+    output_rows: list[tuple[GrantOpportunityMatch, GrantOpportunity]] = []
+    for opportunity, score, fit_band, probability, matched_terms, missing_terms, action in selected:
+        key = opportunity.id
+        match = existing_matches.get(key)
+        if match is None:
+            match = GrantOpportunityMatch(
+                organization_id=payload.organization_id,
+                grant_opportunity_id=opportunity.id,
+                profile_name=profile_name,
+                alert_status="new",
+            )
+            db.add(match)
+        match.match_score = score
+        match.fit_band = fit_band
+        match.success_probability = probability
+        match.matched_terms_json = commercial_json_dumps_list(matched_terms)
+        match.missing_terms_json = commercial_json_dumps_list(missing_terms)
+        match.focus_terms_json = commercial_json_dumps_list(focus_terms)
+        match.excluded_terms_json = commercial_json_dumps_list(excluded_terms)
+        match.recommended_action = action
+        match.generated_at = generated_at
+        output_rows.append((match, opportunity))
+
+    await db.commit()
+    for match, _opportunity in output_rows:
+        await db.refresh(match)
+    rows = await list_grant_opportunity_match_rows(db, payload.organization_id, profile_name=profile_name)
+    visible_rows = rows[: payload.limit]
+    return grant_discovery_run_read(
+        payload.organization_id,
+        profile_name,
+        visible_rows,
+    )
+
+
+async def list_grant_opportunity_matches(
+    db: AsyncSession,
+    organization_id: UUID,
+    profile_name: str | None = None,
+) -> list[GrantOpportunityMatchRead]:
+    rows = await list_grant_opportunity_match_rows(db, organization_id, profile_name=profile_name)
+    return [grant_opportunity_match_read(match, opportunity) for match, opportunity in rows]
+
+
+async def update_grant_opportunity_match(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    match_id: UUID,
+    payload: GrantOpportunityMatchUpdate,
+    authz: AuthorizationService,
+) -> GrantOpportunityMatchRead:
+    row = (
+        await db.execute(
+            select(GrantOpportunityMatch, GrantOpportunity)
+            .join(GrantOpportunity, GrantOpportunity.id == GrantOpportunityMatch.grant_opportunity_id)
+            .where(GrantOpportunityMatch.id == match_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grant opportunity match not found")
+    match, opportunity = row
+    await ensure_manage_commercial(authz, identity, match.organization_id)
+    if payload.alert_status is not None:
+        match.alert_status = payload.alert_status
+    if payload.notes is not None:
+        match.notes = payload.notes
+    await db.commit()
+    await db.refresh(match)
+    return grant_opportunity_match_read(match, opportunity)
 
 
 async def create_grant_application(
@@ -3158,6 +3261,211 @@ def normalize_text_list(values: list[str] | None) -> list[str]:
         if text and text not in normalized:
             normalized.append(text)
     return normalized
+
+
+def normalize_discovery_terms(values: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for value in normalize_text_list(values):
+        term = " ".join(value.casefold().split())
+        if term and term not in normalized:
+            normalized.append(term)
+    return normalized
+
+
+async def grant_opportunity_matches_by_key(
+    db: AsyncSession,
+    organization_id: UUID,
+    profile_name: str,
+) -> dict[UUID, GrantOpportunityMatch]:
+    matches = list(
+        (
+            await db.scalars(
+                select(GrantOpportunityMatch)
+                .where(GrantOpportunityMatch.organization_id == organization_id)
+                .where(GrantOpportunityMatch.profile_name == profile_name)
+            )
+        ).all()
+    )
+    return {match.grant_opportunity_id: match for match in matches}
+
+
+async def list_grant_opportunity_match_rows(
+    db: AsyncSession,
+    organization_id: UUID,
+    profile_name: str | None = None,
+) -> list[tuple[GrantOpportunityMatch, GrantOpportunity]]:
+    statement = (
+        select(GrantOpportunityMatch, GrantOpportunity)
+        .join(GrantOpportunity, GrantOpportunity.id == GrantOpportunityMatch.grant_opportunity_id)
+        .where(GrantOpportunityMatch.organization_id == organization_id)
+        .order_by(
+            GrantOpportunityMatch.match_score.desc(),
+            GrantOpportunity.due_on.asc().nulls_last(),
+            GrantOpportunityMatch.generated_at.desc(),
+        )
+    )
+    if profile_name:
+        statement = statement.where(GrantOpportunityMatch.profile_name == profile_name)
+    rows = (await db.execute(statement)).all()
+    return [(match, opportunity) for match, opportunity in rows]
+
+
+def score_grant_opportunity_match(
+    opportunity: GrantOpportunity,
+    focus_terms: list[str],
+    excluded_terms: list[str],
+) -> tuple[Decimal, str, Decimal, list[str], list[str], str]:
+    searchable_text = grant_opportunity_searchable_text(opportunity)
+    matched_terms = [term for term in focus_terms if term in searchable_text]
+    missing_terms = [term for term in focus_terms if term not in searchable_text]
+    excluded_hits = [term for term in excluded_terms if term in searchable_text]
+    score = Decimal("35.00")
+    if focus_terms:
+        score += Decimal("45.00") * Decimal(len(matched_terms)) / Decimal(len(focus_terms))
+    else:
+        score += Decimal("20.00")
+    if opportunity.status in {"open", "active"}:
+        score += Decimal("10.00")
+    if opportunity.due_on is None:
+        score += Decimal("5.00")
+    else:
+        days_until_due = (opportunity.due_on - date.today()).days
+        if 14 <= days_until_due <= 180:
+            score += Decimal("10.00")
+        elif 0 <= days_until_due < 14:
+            score += Decimal("2.00")
+        elif days_until_due < 0:
+            score -= Decimal("25.00")
+    if opportunity.matching_required > Decimal("0"):
+        match_ratio = opportunity.matching_required / max(opportunity.award_ceiling, Decimal("1"))
+        if match_ratio <= Decimal("0.15"):
+            score += Decimal("5.00")
+        elif match_ratio >= Decimal("0.40"):
+            score -= Decimal("8.00")
+    if excluded_hits:
+        score -= Decimal(12 * len(excluded_hits))
+    score = max(Decimal("0.00"), min(Decimal("100.00"), score)).quantize(Decimal("0.01"))
+    if score >= Decimal("80"):
+        fit_band = "high"
+    elif score >= Decimal("60"):
+        fit_band = "medium"
+    else:
+        fit_band = "low"
+    probability = min(Decimal("95.00"), max(Decimal("5.00"), (score * Decimal("0.78")))).quantize(Decimal("0.01"))
+    return (
+        score,
+        fit_band,
+        probability,
+        matched_terms,
+        missing_terms,
+        grant_match_recommended_action(opportunity, score, missing_terms, excluded_hits),
+    )
+
+
+def grant_opportunity_searchable_text(opportunity: GrantOpportunity) -> str:
+    parts = [
+        opportunity.funder_name,
+        opportunity.program_name,
+        opportunity.category,
+        opportunity.impact_area,
+        opportunity.eligibility_summary or "",
+        opportunity.requirements or "",
+    ]
+    return " ".join(parts).casefold()
+
+
+def grant_match_recommended_action(
+    opportunity: GrantOpportunity,
+    score: Decimal,
+    missing_terms: list[str],
+    excluded_hits: list[str],
+) -> str:
+    if excluded_hits:
+        return f"Review carefully: excluded terms appeared in the opportunity ({', '.join(excluded_hits)})."
+    if score >= Decimal("80"):
+        return "Prioritize this grant: assign an owner, confirm eligibility, and start an application package."
+    if opportunity.due_on is not None and (opportunity.due_on - date.today()).days < 21:
+        return "Deadline is close: run a fast eligibility check before committing staff time."
+    if missing_terms:
+        return f"Moderate fit: verify whether missing focus areas are still eligible ({', '.join(missing_terms[:3])})."
+    return "Keep on watchlist and compare against higher scoring opportunities."
+
+
+def grant_opportunity_match_read(
+    match: GrantOpportunityMatch,
+    opportunity: GrantOpportunity,
+) -> GrantOpportunityMatchRead:
+    return GrantOpportunityMatchRead(
+        id=match.id,
+        organization_id=match.organization_id,
+        grant_opportunity_id=match.grant_opportunity_id,
+        profile_name=match.profile_name,
+        funder_name=opportunity.funder_name,
+        program_name=opportunity.program_name,
+        category=opportunity.category,
+        impact_area=opportunity.impact_area,
+        award_ceiling=opportunity.award_ceiling,
+        currency=opportunity.currency,
+        due_on=opportunity.due_on,
+        opportunity_status=opportunity.status,
+        match_score=match.match_score,
+        fit_band=match.fit_band,
+        success_probability=match.success_probability,
+        matched_terms=commercial_json_loads_list(match.matched_terms_json),
+        missing_terms=commercial_json_loads_list(match.missing_terms_json),
+        focus_terms=commercial_json_loads_list(match.focus_terms_json),
+        excluded_terms=commercial_json_loads_list(match.excluded_terms_json),
+        alert_status=match.alert_status,
+        recommended_action=match.recommended_action,
+        generated_at=match.generated_at,
+        notes=match.notes,
+    )
+
+
+def grant_discovery_run_read(
+    organization_id: UUID,
+    profile_name: str,
+    rows: list[tuple[GrantOpportunityMatch, GrantOpportunity]],
+) -> GrantOpportunityDiscoveryRunRead:
+    matches = [grant_opportunity_match_read(match, opportunity) for match, opportunity in rows]
+    generated_count = len(matches)
+    score_total = sum((match.match_score for match, _opportunity in rows), Decimal("0.00"))
+    average_score = (
+        (score_total / Decimal(generated_count)).quantize(Decimal("0.01"))
+        if generated_count
+        else Decimal("0.00")
+    )
+    high_fit_count = sum(1 for match, _opportunity in rows if match.fit_band == "high")
+    alert_count = sum(1 for match, _opportunity in rows if match.alert_status == "new")
+    return GrantOpportunityDiscoveryRunRead(
+        organization_id=organization_id,
+        profile_name=profile_name,
+        generated_count=generated_count,
+        reviewed_count=sum(1 for match, _opportunity in rows if match.alert_status in {"reviewed", "applied"}),
+        alert_count=alert_count,
+        high_fit_count=high_fit_count,
+        average_score=average_score,
+        matches=matches,
+        recommendations=grant_discovery_recommendations(generated_count, high_fit_count, alert_count, average_score),
+    )
+
+
+def grant_discovery_recommendations(
+    generated_count: int,
+    high_fit_count: int,
+    alert_count: int,
+    average_score: Decimal,
+) -> list[str]:
+    recommendations: list[str] = []
+    if high_fit_count:
+        recommendations.append("Assign owners to high-fit opportunities and start eligibility checks this week.")
+    if alert_count:
+        recommendations.append("Review new grant alerts and dismiss stale or misaligned opportunities.")
+    if generated_count and average_score < Decimal("55"):
+        recommendations.append("Broaden focus terms or add more suitable grant opportunities to the database.")
+    if not generated_count:
+        recommendations.append("Add grant opportunities or lower the minimum score to start discovery.")
+    return recommendations
 
 
 def grant_submission_json_loads(value: str | None) -> list[str]:

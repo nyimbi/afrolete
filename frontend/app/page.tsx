@@ -305,6 +305,8 @@ import type {
   GrantAwardRecordRead,
   GrantAwardSummaryRead,
   GrantDashboardRead,
+  GrantOpportunityDiscoveryRunRead,
+  GrantOpportunityMatchRead,
   GrantOpportunityRead,
   GrantPortfolioSummaryRead,
   GrantReportRead,
@@ -2347,6 +2349,8 @@ export default function HomePage() {
   const [grantAwardRecords, setGrantAwardRecords] = useState<GrantAwardRecordRead[]>([]);
   const [grantAwardSummary, setGrantAwardSummary] = useState<GrantAwardSummaryRead | null>(null);
   const [grantPortfolioSummary, setGrantPortfolioSummary] = useState<GrantPortfolioSummaryRead | null>(null);
+  const [grantOpportunityMatches, setGrantOpportunityMatches] = useState<GrantOpportunityMatchRead[]>([]);
+  const [grantDiscoveryRun, setGrantDiscoveryRun] = useState<GrantOpportunityDiscoveryRunRead | null>(null);
   const [grantReports, setGrantReports] = useState<GrantReportRead[]>([]);
   const [grantDashboard, setGrantDashboard] = useState<GrantDashboardRead | null>(null);
   const [merchandiseProducts, setMerchandiseProducts] = useState<MerchandiseProductRead[]>([]);
@@ -3800,7 +3804,11 @@ export default function HomePage() {
     report_type: "quarterly",
     report_due_on: "2026-09-30",
     report_status: "draft",
-    metrics_summary: "Athlete access, coach certification, attendance, and retention."
+    metrics_summary: "Athlete access, coach certification, attendance, and retention.",
+    discovery_profile_name: "youth access",
+    discovery_focus_terms: "youth, scholarship, safeguarding, coach, football",
+    discovery_excluded_terms: "professional, hospitality",
+    discovery_minimum_score: "50.00"
   });
   const [merchandiseForm, setMerchandiseForm] = useState({
     name: "Home jersey",
@@ -5617,6 +5625,7 @@ export default function HomePage() {
       grantAwardRecordData,
       grantAwardSummaryData,
       grantPortfolioSummaryData,
+      grantOpportunityMatchData,
       grantReportData,
       grantDashboardData,
       merchandiseProductData,
@@ -5666,6 +5675,7 @@ export default function HomePage() {
         ? apiRequest<GrantAwardSummaryRead>(`/commercial/grants/award-summary?organization_id=${organizationId}&grant_application_id=${selectedGrantApplicationId}`)
         : Promise.resolve(null),
       apiRequest<GrantPortfolioSummaryRead>(`/commercial/grants/portfolio-summary?organization_id=${organizationId}`),
+      apiRequest<GrantOpportunityMatchRead[]>(`/commercial/grants/opportunity-matches?organization_id=${organizationId}`),
       apiRequest<GrantReportRead[]>(`/commercial/grants/reports?organization_id=${organizationId}`),
       apiRequest<GrantDashboardRead>(`/commercial/grants/dashboard?organization_id=${organizationId}`),
       apiRequest<MerchandiseProductRead[]>(`/commercial/merchandise/products?organization_id=${organizationId}`),
@@ -5713,6 +5723,7 @@ export default function HomePage() {
     setGrantAwardRecords(grantAwardRecordData);
     setGrantAwardSummary(grantAwardSummaryData);
     setGrantPortfolioSummary(grantPortfolioSummaryData);
+    setGrantOpportunityMatches(grantOpportunityMatchData);
     setGrantReports(grantReportData);
     setGrantDashboard(grantDashboardData);
     setMerchandiseProducts(merchandiseProductData);
@@ -6374,6 +6385,8 @@ export default function HomePage() {
       setGrantAwardRecords([]);
       setGrantAwardSummary(null);
       setGrantPortfolioSummary(null);
+      setGrantOpportunityMatches([]);
+      setGrantDiscoveryRun(null);
       setGrantReports([]);
       setGrantDashboard(null);
       setMerchandiseProducts([]);
@@ -20286,6 +20299,59 @@ export default function HomePage() {
     );
   };
 
+  const runGrantDiscovery = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running grant discovery", "bad");
+      return;
+    }
+    runAction(
+      "run-grant-discovery",
+      () =>
+        apiRequest<GrantOpportunityDiscoveryRunRead>("/commercial/grants/discovery-runs", {
+          method: "POST",
+          identity,
+          body: {
+            organization_id: selectedOrganizationId,
+            profile_name: grantForm.discovery_profile_name,
+            focus_terms: parseCommaList(grantForm.discovery_focus_terms),
+            excluded_terms: parseCommaList(grantForm.discovery_excluded_terms),
+            minimum_score: grantForm.discovery_minimum_score,
+            limit: 10
+          }
+        }),
+      (run) => {
+        setGrantDiscoveryRun(run);
+        setGrantOpportunityMatches(run.matches);
+        addLog(`Grant discovery found ${run.generated_count} match(es)`, run.generated_count ? "good" : "bad");
+      }
+    );
+  };
+
+  const reviewGrantOpportunityMatch = (match: GrantOpportunityMatchRead, alertStatus: "reviewed" | "dismissed" | "applied") => {
+    runAction(
+      `grant-match-${match.id}-${alertStatus}`,
+      () =>
+        apiRequest<GrantOpportunityMatchRead>(`/commercial/grants/opportunity-matches/${match.id}`, {
+          method: "PATCH",
+          identity,
+          body: {
+            alert_status: alertStatus,
+            notes: alertStatus === "applied" ? "Selected for application planning." : match.notes
+          }
+        }),
+      (updated) => {
+        setGrantOpportunityMatches((current) => [
+          updated,
+          ...current.filter((item) => item.id !== updated.id)
+        ]);
+        if (updated.alert_status === "applied") {
+          setSelectedGrantOpportunityId(updated.grant_opportunity_id);
+        }
+        addLog(`${updated.program_name ?? "Grant match"} ${updated.alert_status}`, updated.alert_status === "dismissed" ? "bad" : "good");
+      }
+    );
+  };
+
   const createGrantReport = () => {
     if (!selectedOrganizationId || !selectedGrantApplicationId) {
       addLog("Create or select a grant application first", "bad");
@@ -27324,6 +27390,7 @@ export default function HomePage() {
                 <button type="button" onClick={createDonorStewardshipWorkflow} disabled={busyAction !== null}>Donor CRM</button>
                 <button type="button" onClick={completeSelectedDonorStewardshipPlan} disabled={busyAction !== null}>Complete donor</button>
                 <button type="button" onClick={createGrantPipeline} disabled={busyAction !== null}>Grant</button>
+                <button type="button" onClick={runGrantDiscovery} disabled={busyAction !== null}>Discover grants</button>
                 <button type="button" onClick={createGrantReport} disabled={busyAction !== null}>Report</button>
                 <button type="button" onClick={generateGrantReport} disabled={busyAction !== null}>Draft report</button>
                 <button type="button" onClick={requestGrantApplicationApproval} disabled={busyAction !== null}>Approve grant</button>
@@ -27590,6 +27657,22 @@ export default function HomePage() {
                 </select>
               </label>
               <label>
+                Discovery profile
+                <input value={grantForm.discovery_profile_name} onChange={(event) => setGrantForm({ ...grantForm, discovery_profile_name: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Focus terms
+                <input value={grantForm.discovery_focus_terms} onChange={(event) => setGrantForm({ ...grantForm, discovery_focus_terms: event.target.value })} />
+              </label>
+              <label className="wide-field">
+                Excluded terms
+                <input value={grantForm.discovery_excluded_terms} onChange={(event) => setGrantForm({ ...grantForm, discovery_excluded_terms: event.target.value })} />
+              </label>
+              <label>
+                Minimum score
+                <input value={grantForm.discovery_minimum_score} onChange={(event) => setGrantForm({ ...grantForm, discovery_minimum_score: event.target.value })} />
+              </label>
+              <label>
                 Approval level
                 <input value={grantForm.approval_level} onChange={(event) => setGrantForm({ ...grantForm, approval_level: event.target.value })} />
               </label>
@@ -27801,6 +27884,34 @@ export default function HomePage() {
                   </div>
                 </article>
               ) : null}
+              {grantDiscoveryRun ? (
+                <article className={`task-card ${grantDiscoveryRun.high_fit_count ? "selected" : ""}`}>
+                  <div>
+                    <strong>Grant discovery · {grantDiscoveryRun.generated_count} matches</strong>
+                    <span>
+                      {grantDiscoveryRun.high_fit_count} high fit · {grantDiscoveryRun.alert_count} alerts · average {grantDiscoveryRun.average_score}
+                    </span>
+                    <small>{grantDiscoveryRun.recommendations[0] ?? "No grant discovery recommendations yet"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {grantOpportunityMatches.slice(0, 4).map((match) => (
+                <article key={match.id} className={`task-card ${match.fit_band === "high" ? "selected" : ""}`}>
+                  <div>
+                    <strong>{match.program_name ?? "Grant match"} · {match.match_score}%</strong>
+                    <span>
+                      {match.funder_name ?? "Funder"} · {match.fit_band} fit · success {match.success_probability}% · {match.alert_status}
+                    </span>
+                    <small>{match.recommended_action}</small>
+                    <small>{match.matched_terms.length ? `Matched ${match.matched_terms.join(", ")}` : "No matched focus terms"}</small>
+                  </div>
+                  <div className="mini-actions">
+                    <button type="button" onClick={() => reviewGrantOpportunityMatch(match, "reviewed")}>Review</button>
+                    <button type="button" onClick={() => reviewGrantOpportunityMatch(match, "applied")}>Apply</button>
+                    <button type="button" onClick={() => reviewGrantOpportunityMatch(match, "dismissed")}>Dismiss</button>
+                  </div>
+                </article>
+              ))}
               {grantApplicationApprovals.slice(0, 3).map((approval) => (
                 <article key={approval.id} className="task-card">
                   <div>

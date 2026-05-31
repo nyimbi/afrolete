@@ -315,6 +315,33 @@ class GrantOpportunity(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="open", nullable=False, index=True)
 
 
+class GrantOpportunityMatch(IdMixin, TimestampMixin, Base):
+    __tablename__ = "grant_opportunity_matches"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "grant_opportunity_id",
+            "profile_name",
+            name="uq_grant_opportunity_matches_profile",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    grant_opportunity_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("grant_opportunities.id"), index=True)
+    profile_name: Mapped[str] = mapped_column(String(160), default="default", nullable=False, index=True)
+    match_score: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, index=True)
+    fit_band: Mapped[str] = mapped_column(String(40), default="medium", nullable=False, index=True)
+    success_probability: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0"), nullable=False)
+    matched_terms_json: Mapped[str | None] = mapped_column(Text)
+    missing_terms_json: Mapped[str | None] = mapped_column(Text)
+    focus_terms_json: Mapped[str | None] = mapped_column(Text)
+    excluded_terms_json: Mapped[str | None] = mapped_column(Text)
+    alert_status: Mapped[str] = mapped_column(String(40), default="new", nullable=False, index=True)
+    recommended_action: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class GrantApplication(IdMixin, TimestampMixin, Base):
     __tablename__ = "grant_applications"
 

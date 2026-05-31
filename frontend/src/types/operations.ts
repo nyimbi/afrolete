@@ -4398,6 +4398,44 @@ export type GrantOpportunityRead = {
   status: string;
 };
 
+export type GrantOpportunityMatchRead = {
+  id: UUID;
+  organization_id: UUID;
+  grant_opportunity_id: UUID;
+  profile_name: string;
+  funder_name: string | null;
+  program_name: string | null;
+  category: string | null;
+  impact_area: string | null;
+  award_ceiling: string | null;
+  currency: string | null;
+  due_on: string | null;
+  opportunity_status: string | null;
+  match_score: string;
+  fit_band: string;
+  success_probability: string;
+  matched_terms: string[];
+  missing_terms: string[];
+  focus_terms: string[];
+  excluded_terms: string[];
+  alert_status: string;
+  recommended_action: string;
+  generated_at: string;
+  notes: string | null;
+};
+
+export type GrantOpportunityDiscoveryRunRead = {
+  organization_id: UUID;
+  profile_name: string;
+  generated_count: number;
+  reviewed_count: number;
+  alert_count: number;
+  high_fit_count: number;
+  average_score: string;
+  matches: GrantOpportunityMatchRead[];
+  recommendations: string[];
+};
+
 export type GrantApplicationRead = {
   id: UUID;
   organization_id: UUID;
