@@ -372,6 +372,7 @@ import type {
   MemberSubscriptionChargeWaiverRead,
   MemberSubscriptionCheckoutLinkRead,
   MemberSubscriptionPaymentRead,
+  MemberSubscriptionPaymentPlanRead,
   MemberSubscriptionPlanRead,
   MemberSubscriptionRead,
   MemberSubscriptionReceivablesSummaryRead,
@@ -1892,6 +1893,7 @@ export default function HomePage() {
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionCharges, setMemberSubscriptionCharges] = useState<MemberSubscriptionChargeRead[]>([]);
+  const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
   const [memberDuesReceivablesSummary, setMemberDuesReceivablesSummary] =
     useState<MemberSubscriptionReceivablesSummaryRead | null>(null);
   const [memberDuesChargeRun, setMemberDuesChargeRun] = useState<MemberSubscriptionChargeRunRead | null>(null);
@@ -2575,6 +2577,7 @@ export default function HomePage() {
   const [selectedUsageMeterId, setSelectedUsageMeterId] = useState("");
   const [selectedSaasInvoiceId, setSelectedSaasInvoiceId] = useState("");
   const [selectedMemberSubscriptionId, setSelectedMemberSubscriptionId] = useState("");
+  const [selectedMemberDuesPaymentPlanId, setSelectedMemberDuesPaymentPlanId] = useState("");
   const [selectedDataMigrationProjectId, setSelectedDataMigrationProjectId] = useState("");
   const [selectedRecoveryPlanId, setSelectedRecoveryPlanId] = useState("");
   const [selectedComplianceDocumentId, setSelectedComplianceDocumentId] = useState("");
@@ -2710,6 +2713,17 @@ export default function HomePage() {
     provider: "mpesa",
     method: "stk_push",
     external_payment_id: "MPESA-DEMO-001"
+  });
+  const [memberDuesPaymentPlanForm, setMemberDuesPaymentPlanForm] = useState({
+    name: "Hardship installment plan",
+    plan_type: "installment",
+    principal_amount: "500.00",
+    installment_amount: "250.00",
+    installment_count: 2,
+    installment_frequency: "monthly",
+    starts_on: "2026-06-20",
+    next_due_on: "2026-06-20",
+    notes: "Club-approved payment plan for outstanding member dues."
   });
   const [marketProfileForm, setMarketProfileForm] = useState({
     name: "Kenya operating market",
@@ -4390,10 +4404,13 @@ export default function HomePage() {
   }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
-    const [plans, subscriptions, charges, summary] = await Promise.all([
+    const [plans, subscriptions, charges, paymentPlans, summary] = await Promise.all([
       apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
       apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
+      apiRequest<MemberSubscriptionPaymentPlanRead[]>(
+        `/organizations/${organizationId}/member-subscription-payment-plans`
+      ),
       apiRequest<MemberSubscriptionReceivablesSummaryRead>(
         `/organizations/${organizationId}/member-subscription-charges/summary`
       )
@@ -4401,9 +4418,13 @@ export default function HomePage() {
     setMemberSubscriptionPlans(plans);
     setMemberSubscriptions(subscriptions);
     setMemberSubscriptionCharges(charges);
+    setMemberDuesPaymentPlans(paymentPlans);
     setMemberDuesReceivablesSummary(summary);
     setSelectedMemberSubscriptionId((current) =>
       subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
+    );
+    setSelectedMemberDuesPaymentPlanId((current) =>
+      paymentPlans.some((paymentPlan) => paymentPlan.id === current) ? current : paymentPlans[0]?.id ?? ""
     );
   }, []);
 
@@ -6107,6 +6128,7 @@ export default function HomePage() {
       setMemberSubscriptionPlans([]);
       setMemberSubscriptions([]);
       setMemberSubscriptionCharges([]);
+      setMemberDuesPaymentPlans([]);
       setMemberDuesReceivablesSummary(null);
       setMemberDuesChargeRun(null);
       setMemberSubscriptionPayment(null);
@@ -6115,6 +6137,7 @@ export default function HomePage() {
       setMemberDuesCheckoutLink(null);
       setMemberDuesReminderRun(null);
       setSelectedMemberSubscriptionId("");
+      setSelectedMemberDuesPaymentPlanId("");
       setMarketProfiles([]);
       setMarketProfileSummary(null);
       setExternalReports([]);
@@ -7409,6 +7432,58 @@ export default function HomePage() {
     );
   };
 
+  const createMemberDuesPaymentPlan = () => {
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!subscriptionId) {
+      addLog("Select a member dues account before creating a payment plan", "bad");
+      return;
+    }
+    runAction(
+      "create-member-dues-payment-plan",
+      () =>
+        apiRequest<MemberSubscriptionPaymentPlanRead>(
+          `/organizations/member-subscriptions/${subscriptionId}/payment-plans`,
+          {
+            method: "POST",
+            identity,
+            body: memberDuesPaymentPlanForm
+          }
+        ),
+      (paymentPlan) => {
+        setMemberDuesPaymentPlans((current) => [
+          paymentPlan,
+          ...current.filter((item) => item.id !== paymentPlan.id)
+        ]);
+        setSelectedMemberDuesPaymentPlanId(paymentPlan.id);
+        addLog(`${paymentPlan.name} payment plan approved`, "good");
+      }
+    );
+  };
+
+  const updateMemberDuesPaymentPlanStatus = (paymentPlan: MemberSubscriptionPaymentPlanRead, status: "active" | "cancelled") => {
+    runAction(
+      `update-member-dues-payment-plan-${paymentPlan.id}-${status}`,
+      () =>
+        apiRequest<MemberSubscriptionPaymentPlanRead>(
+          `/organizations/member-subscription-payment-plans/${paymentPlan.id}`,
+          {
+            method: "PATCH",
+            identity,
+            body: {
+              status,
+              notes: `Payment plan ${status} from operations console.`
+            }
+          }
+        ),
+      (updatedPlan) => {
+        setMemberDuesPaymentPlans((current) =>
+          current.map((item) => (item.id === updatedPlan.id ? updatedPlan : item))
+        );
+        addLog(`${updatedPlan.name} payment plan ${status}`, "good");
+      }
+    );
+  };
+
   const recordMemberDuesPayment = () => {
     const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
     if (!subscriptionId) {
@@ -7423,10 +7498,13 @@ export default function HomePage() {
           {
             method: "POST",
             identity,
-            body: memberDuesPaymentForm
+            body: {
+              ...memberDuesPaymentForm,
+              payment_plan_id: selectedMemberDuesPaymentPlanId || null
+            }
           }
         ),
-      (payment) => {
+      async (payment) => {
         setMemberSubscriptionPayment(payment);
         setMemberSubscriptions((current) =>
           current.map((subscription) =>
@@ -7439,6 +7517,9 @@ export default function HomePage() {
               : subscription
           )
         );
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
         addLog(`Recorded ${payment.provider.toUpperCase()} dues payment`, "good");
       }
     );
@@ -24567,6 +24648,7 @@ export default function HomePage() {
               <button type="button" onClick={createMemberDuesSubscription} disabled={busyAction !== null}>Assign selected member</button>
               <button type="button" onClick={runMemberDuesCharges} disabled={busyAction !== null}>Bill cycle</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
+              <button type="button" onClick={createMemberDuesPaymentPlan} disabled={busyAction !== null}>Payment plan</button>
               <button type="button" onClick={loadMemberDuesStatement} disabled={busyAction !== null}>Statement</button>
               <button type="button" onClick={() => downloadMemberDuesStatement("txt")} disabled={busyAction !== null}>Download</button>
               <button type="button" onClick={sendMemberDuesStatement} disabled={busyAction !== null}>Send</button>
@@ -24592,6 +24674,22 @@ export default function HomePage() {
               <label>
                 Receipt
                 <input value={memberDuesPaymentForm.external_payment_id} onChange={(event) => setMemberDuesPaymentForm({ ...memberDuesPaymentForm, external_payment_id: event.target.value })} />
+              </label>
+              <label>
+                Plan amount
+                <input value={memberDuesPaymentPlanForm.principal_amount} onChange={(event) => setMemberDuesPaymentPlanForm({ ...memberDuesPaymentPlanForm, principal_amount: event.target.value })} />
+              </label>
+              <label>
+                Installment
+                <input value={memberDuesPaymentPlanForm.installment_amount} onChange={(event) => setMemberDuesPaymentPlanForm({ ...memberDuesPaymentPlanForm, installment_amount: event.target.value })} />
+              </label>
+              <label>
+                Installments
+                <input type="number" min="1" max="60" value={memberDuesPaymentPlanForm.installment_count} onChange={(event) => setMemberDuesPaymentPlanForm({ ...memberDuesPaymentPlanForm, installment_count: Number(event.target.value) })} />
+              </label>
+              <label>
+                First due
+                <input type="date" value={memberDuesPaymentPlanForm.next_due_on} onChange={(event) => setMemberDuesPaymentPlanForm({ ...memberDuesPaymentPlanForm, next_due_on: event.target.value, starts_on: event.target.value })} />
               </label>
             </div>
             <div className="task-list">
@@ -24634,6 +24732,25 @@ export default function HomePage() {
                     <small>{subscription.dues_reminder_count} reminder(s) · last {subscription.dues_last_reminded_at ? new Date(subscription.dues_last_reminded_at).toLocaleString() : "not sent"}</small>
                   </div>
                   <button type="button" onClick={() => setSelectedMemberSubscriptionId(subscription.id)}>Select</button>
+                </article>
+              ))}
+              {memberDuesPaymentPlans.slice(0, 5).map((paymentPlan) => (
+                <article key={paymentPlan.id} className={`task-card ${paymentPlan.id === selectedMemberDuesPaymentPlanId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{paymentPlan.subject_label ?? paymentPlan.subscription_id} · {paymentPlan.name}</strong>
+                    <span>{paymentPlan.remaining_amount} {paymentPlan.currency} remaining · {paymentPlan.status.replaceAll("_", " ")}</span>
+                    <small>
+                      {paymentPlan.amount_paid} paid · {paymentPlan.paid_installment_count}/{paymentPlan.installment_count} installments · next {paymentPlan.next_due_on ?? "none"}
+                    </small>
+                  </div>
+                  <div className="event-toolbar">
+                    <button type="button" onClick={() => setSelectedMemberDuesPaymentPlanId(paymentPlan.id)}>Select</button>
+                    {paymentPlan.status === "cancelled" ? (
+                      <button type="button" onClick={() => updateMemberDuesPaymentPlanStatus(paymentPlan, "active")} disabled={busyAction !== null}>Activate</button>
+                    ) : (
+                      <button type="button" onClick={() => updateMemberDuesPaymentPlanStatus(paymentPlan, "cancelled")} disabled={busyAction !== null}>Cancel</button>
+                    )}
+                  </div>
                 </article>
               ))}
               {memberDuesChargeRun ? (

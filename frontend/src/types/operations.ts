@@ -1039,6 +1039,7 @@ export type MemberSubscriptionPaymentRead = {
   id: UUID;
   organization_id: UUID;
   subscription_id: UUID;
+  payment_plan_id: UUID | null;
   amount: string;
   currency: string;
   provider: string;
@@ -1050,6 +1051,30 @@ export type MemberSubscriptionPaymentRead = {
   notes: string | null;
   subscription_balance_amount: string;
   subscription_status: string;
+};
+
+export type MemberSubscriptionPaymentPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  subscription_id: UUID;
+  subject_label: string | null;
+  name: string;
+  plan_type: string;
+  status: string;
+  principal_amount: string;
+  amount_paid: string;
+  remaining_amount: string;
+  currency: string;
+  installment_amount: string;
+  installment_count: number;
+  paid_installment_count: number;
+  installment_frequency: string;
+  starts_on: string;
+  next_due_on: string | null;
+  ends_on: string | null;
+  approved_by_person_id: UUID | null;
+  approved_at: string | null;
+  notes: string | null;
 };
 
 export type MemberSubscriptionChargeRead = {

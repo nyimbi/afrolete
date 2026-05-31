@@ -1201,6 +1201,7 @@ class MemberSubscriptionRead(BaseModel):
 
 
 class MemberSubscriptionPaymentCreate(BaseModel):
+    payment_plan_id: UUID | None = None
     amount: Decimal = Field(
         gt=0,
         max_digits=12,
@@ -1221,6 +1222,7 @@ class MemberSubscriptionPaymentRead(BaseModel):
     id: UUID
     organization_id: UUID
     subscription_id: UUID
+    payment_plan_id: UUID | None
     amount: Decimal
     currency: str
     provider: str
@@ -1232,6 +1234,50 @@ class MemberSubscriptionPaymentRead(BaseModel):
     notes: str | None
     subscription_balance_amount: Decimal
     subscription_status: str
+
+
+class MemberSubscriptionPaymentPlanCreate(BaseModel):
+    name: str = Field(default="Member dues payment plan", min_length=2, max_length=180)
+    plan_type: str = Field(default="installment", pattern="^(installment|hardship|family|scholarship)$")
+    principal_amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    installment_amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    installment_count: int = Field(default=1, ge=1, le=60)
+    installment_frequency: str = Field(default="monthly", pattern="^(weekly|monthly|term|season)$")
+    starts_on: date
+    next_due_on: date | None = None
+    ends_on: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberSubscriptionPaymentPlanUpdate(BaseModel):
+    status: str | None = Field(default=None, pattern="^(proposed|active|completed|defaulted|cancelled)$")
+    next_due_on: date | None = None
+    ends_on: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class MemberSubscriptionPaymentPlanRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    subscription_id: UUID
+    subject_label: str | None = None
+    name: str
+    plan_type: str
+    status: str
+    principal_amount: Decimal
+    amount_paid: Decimal
+    remaining_amount: Decimal
+    currency: str
+    installment_amount: Decimal
+    installment_count: int
+    paid_installment_count: int
+    installment_frequency: str
+    starts_on: date
+    next_due_on: date | None
+    ends_on: date | None
+    approved_by_person_id: UUID | None
+    approved_at: datetime | None
+    notes: str | None
 
 
 class MemberSubscriptionChargeRead(BaseModel):

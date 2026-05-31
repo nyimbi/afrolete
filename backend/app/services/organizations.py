@@ -52,6 +52,7 @@ from app.models.organization import (
     MemberSubscription,
     MemberSubscriptionCharge,
     MemberSubscriptionPayment,
+    MemberSubscriptionPaymentPlan,
     MemberSubscriptionPlan,
     Membership,
     OrganizationAwardCategory,
@@ -102,6 +103,9 @@ from app.schemas.organization import (
     MemberSubscriptionReminderRunCreate,
     MemberSubscriptionReminderRunRead,
     MemberSubscriptionPaymentCreate,
+    MemberSubscriptionPaymentPlanCreate,
+    MemberSubscriptionPaymentPlanRead,
+    MemberSubscriptionPaymentPlanUpdate,
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanUpdate,
     OrganizationAwardCategoryCreate,
@@ -4818,6 +4822,134 @@ async def list_member_subscriptions(
     return result
 
 
+def member_subscription_payment_plan_read(
+    payment_plan: MemberSubscriptionPaymentPlan,
+    subject_label: str | None,
+) -> MemberSubscriptionPaymentPlanRead:
+    return MemberSubscriptionPaymentPlanRead(
+        id=payment_plan.id,
+        organization_id=payment_plan.organization_id,
+        subscription_id=payment_plan.subscription_id,
+        subject_label=subject_label,
+        name=payment_plan.name,
+        plan_type=payment_plan.plan_type,
+        status=payment_plan.status,
+        principal_amount=payment_plan.principal_amount,
+        amount_paid=payment_plan.amount_paid,
+        remaining_amount=payment_plan.remaining_amount,
+        currency=payment_plan.currency,
+        installment_amount=payment_plan.installment_amount,
+        installment_count=payment_plan.installment_count,
+        paid_installment_count=payment_plan.paid_installment_count,
+        installment_frequency=payment_plan.installment_frequency,
+        starts_on=payment_plan.starts_on,
+        next_due_on=payment_plan.next_due_on,
+        ends_on=payment_plan.ends_on,
+        approved_by_person_id=payment_plan.approved_by_person_id,
+        approved_at=payment_plan.approved_at,
+        notes=payment_plan.notes,
+    )
+
+
+async def create_member_subscription_payment_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    payload: MemberSubscriptionPaymentPlanCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionPaymentPlanRead:
+    subscription, plan, subject_label = await get_member_subscription_checkout_subject(db, subscription_id)
+    await ensure_manage_organization(db, identity, subscription.organization_id, authz)
+    open_amount = member_subscription_open_amount(subscription)
+    principal_amount = (payload.principal_amount or open_amount).quantize(Decimal("0.01"))
+    if principal_amount <= 0 or principal_amount > open_amount:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid payment plan amount")
+    installment_total = (payload.installment_amount * payload.installment_count).quantize(Decimal("0.01"))
+    if installment_total < principal_amount:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Payment plan installments must cover the planned amount",
+        )
+    payment_plan = MemberSubscriptionPaymentPlan(
+        organization_id=subscription.organization_id,
+        subscription_id=subscription.id,
+        name=payload.name,
+        plan_type=payload.plan_type,
+        status="active",
+        principal_amount=principal_amount,
+        amount_paid=Decimal("0.00"),
+        remaining_amount=principal_amount,
+        currency=plan.currency.upper(),
+        installment_amount=payload.installment_amount,
+        installment_count=payload.installment_count,
+        paid_installment_count=0,
+        installment_frequency=payload.installment_frequency,
+        starts_on=payload.starts_on,
+        next_due_on=payload.next_due_on or payload.starts_on,
+        ends_on=payload.ends_on,
+        approved_by_person_id=identity.person_id,
+        approved_at=datetime.now(UTC),
+        notes=payload.notes,
+    )
+    db.add(payment_plan)
+    if subscription.status == "past_due":
+        subscription.notes = append_member_dues_note(
+            subscription.notes,
+            f"Payment plan approved for {principal_amount} {plan.currency.upper()}.",
+        )
+    await db.commit()
+    await db.refresh(payment_plan)
+    return member_subscription_payment_plan_read(payment_plan, subject_label)
+
+
+async def list_member_subscription_payment_plans(
+    db: AsyncSession,
+    organization_id: UUID,
+    subscription_id: UUID | None = None,
+) -> list[MemberSubscriptionPaymentPlanRead]:
+    statement = (
+        select(MemberSubscriptionPaymentPlan, MemberSubscription)
+        .join(MemberSubscription, MemberSubscription.id == MemberSubscriptionPaymentPlan.subscription_id)
+        .where(MemberSubscriptionPaymentPlan.organization_id == organization_id)
+        .order_by(MemberSubscriptionPaymentPlan.status, MemberSubscriptionPaymentPlan.next_due_on)
+    )
+    if subscription_id is not None:
+        statement = statement.where(MemberSubscriptionPaymentPlan.subscription_id == subscription_id)
+    rows = (await db.execute(statement)).all()
+    return [
+        member_subscription_payment_plan_read(
+            payment_plan,
+            await member_subject_label(db, subscription.subject_type, subscription.subject_id),
+        )
+        for payment_plan, subscription in rows
+    ]
+
+
+async def update_member_subscription_payment_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payment_plan_id: UUID,
+    payload: MemberSubscriptionPaymentPlanUpdate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionPaymentPlanRead:
+    payment_plan = await db.get(MemberSubscriptionPaymentPlan, payment_plan_id)
+    if payment_plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues payment plan not found")
+    subscription = await db.get(MemberSubscription, payment_plan.subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+    await ensure_manage_organization(db, identity, payment_plan.organization_id, authz)
+    updates = payload.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(payment_plan, field, value)
+    await db.commit()
+    await db.refresh(payment_plan)
+    return member_subscription_payment_plan_read(
+        payment_plan,
+        await member_subject_label(db, subscription.subject_type, subscription.subject_id),
+    )
+
+
 async def list_member_subscription_charges(
     db: AsyncSession,
     organization_id: UUID,
@@ -5388,10 +5520,16 @@ async def record_member_subscription_payment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
     await ensure_manage_organization(db, identity, subscription.organization_id, authz)
     plan = await db.get(MemberSubscriptionPlan, subscription.plan_id)
+    payment_plan = await select_member_subscription_payment_plan_for_payment(
+        db,
+        subscription,
+        payload.payment_plan_id,
+    )
     currency = (payload.currency or (plan.currency if plan else "KES")).upper()
     payment = MemberSubscriptionPayment(
         organization_id=subscription.organization_id,
         subscription_id=subscription.id,
+        payment_plan_id=payment_plan.id if payment_plan is not None else None,
         amount=payload.amount,
         currency=currency,
         provider=payload.provider,
@@ -5415,7 +5553,10 @@ async def record_member_subscription_payment(
         subscription.balance_amount = max(Decimal("0"), subscription.balance_amount - payload.amount)
         if subscription.balance_amount == Decimal("0") and subscription.status == "past_due":
             subscription.status = "active"
+        if payment_plan is not None:
+            apply_member_subscription_payment_plan_payment(payment_plan, payload.amount)
         await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
+        await complete_member_subscription_payment_plans_if_settled(db, subscription)
     await db.commit()
     await db.refresh(payment)
     await db.refresh(subscription)
@@ -5499,6 +5640,7 @@ async def settle_member_subscription_checkout(
     payment = MemberSubscriptionPayment(
         organization_id=subscription.organization_id,
         subscription_id=subscription.id,
+        payment_plan_id=None,
         amount=amount,
         currency=currency,
         provider=normalized_provider,
@@ -5512,6 +5654,9 @@ async def settle_member_subscription_checkout(
     db.add(payment)
     if accepted:
         await db.flush()
+        payment_plan = await select_member_subscription_payment_plan_for_payment(db, subscription, None)
+        if payment_plan is not None:
+            payment.payment_plan_id = payment_plan.id
         await apply_member_subscription_payment_to_charges(
             db,
             subscription,
@@ -5524,7 +5669,10 @@ async def settle_member_subscription_checkout(
             subscription.balance_amount = Decimal("0.00")
             if subscription.status == "past_due":
                 subscription.status = "active"
-            await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
+        if payment_plan is not None:
+            apply_member_subscription_payment_plan_payment(payment_plan, amount)
+        await mark_member_subscription_charges_paid_if_settled(db, subscription, payment.id, payment.received_at)
+        await complete_member_subscription_payment_plans_if_settled(db, subscription)
     elif payload.status == "pending" and subscription.status == "active":
         subscription.notes = append_member_dues_note(subscription.notes, f"Pending hosted dues payment {session_id}.")
     await db.commit()
@@ -5786,6 +5934,86 @@ def member_subscription_charge_due_on(
     if due_on > period_end:
         return period_end
     return due_on
+
+
+async def select_member_subscription_payment_plan_for_payment(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+    payment_plan_id: UUID | None,
+) -> MemberSubscriptionPaymentPlan | None:
+    if payment_plan_id is not None:
+        payment_plan = await db.get(MemberSubscriptionPaymentPlan, payment_plan_id)
+        if payment_plan is None or payment_plan.subscription_id != subscription.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues payment plan not found")
+        if payment_plan.status not in {"proposed", "active"}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Member dues payment plan is not payable")
+        return payment_plan
+    return await db.scalar(
+        select(MemberSubscriptionPaymentPlan)
+        .where(MemberSubscriptionPaymentPlan.subscription_id == subscription.id)
+        .where(MemberSubscriptionPaymentPlan.status.in_(["proposed", "active"]))
+        .where(MemberSubscriptionPaymentPlan.remaining_amount > Decimal("0"))
+        .order_by(MemberSubscriptionPaymentPlan.next_due_on.asc().nulls_last(), MemberSubscriptionPaymentPlan.created_at.asc())
+    )
+
+
+def apply_member_subscription_payment_plan_payment(
+    payment_plan: MemberSubscriptionPaymentPlan,
+    amount: Decimal,
+) -> None:
+    applied = min(amount.quantize(Decimal("0.01")), payment_plan.remaining_amount).quantize(Decimal("0.01"))
+    if applied <= 0:
+        return
+    payment_plan.amount_paid = (payment_plan.amount_paid + applied).quantize(Decimal("0.01"))
+    payment_plan.remaining_amount = max(Decimal("0.00"), payment_plan.remaining_amount - applied).quantize(Decimal("0.01"))
+    if payment_plan.installment_amount > 0:
+        payment_plan.paid_installment_count = min(
+            payment_plan.installment_count,
+            int(payment_plan.amount_paid / payment_plan.installment_amount),
+        )
+    if payment_plan.remaining_amount <= 0:
+        payment_plan.remaining_amount = Decimal("0.00")
+        payment_plan.status = "completed"
+        payment_plan.next_due_on = None
+        return
+    if payment_plan.status == "proposed":
+        payment_plan.status = "active"
+    if payment_plan.next_due_on is not None and applied >= payment_plan.installment_amount:
+        payment_plan.next_due_on = next_member_subscription_payment_plan_due_on(
+            payment_plan.next_due_on,
+            payment_plan.installment_frequency,
+        )
+
+
+async def complete_member_subscription_payment_plans_if_settled(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+) -> None:
+    if member_subscription_open_amount(subscription) > 0:
+        return
+    payment_plans = (
+        await db.scalars(
+            select(MemberSubscriptionPaymentPlan)
+            .where(MemberSubscriptionPaymentPlan.subscription_id == subscription.id)
+            .where(MemberSubscriptionPaymentPlan.status.in_(["proposed", "active"]))
+        )
+    ).all()
+    for payment_plan in payment_plans:
+        payment_plan.remaining_amount = Decimal("0.00")
+        payment_plan.amount_paid = max(payment_plan.amount_paid, payment_plan.principal_amount).quantize(Decimal("0.01"))
+        payment_plan.paid_installment_count = payment_plan.installment_count
+        payment_plan.status = "completed"
+        payment_plan.next_due_on = None
+
+
+def next_member_subscription_payment_plan_due_on(value: date, frequency: str) -> date:
+    if frequency == "weekly":
+        return value + timedelta(days=7)
+    if frequency == "term":
+        return add_months(value, 3)
+    if frequency == "season":
+        return add_months(value, 12)
+    return add_months(value, 1)
 
 
 async def apply_member_subscription_payment_to_charges(

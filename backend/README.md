@@ -94,13 +94,15 @@ allocate oldest-due first against those charge rows, tracking per-period paid
 amount, open balance, paid-at timestamp, last payment id, and receivables aging
 summaries for collections decisions. Managers can pause, reactivate, or cancel
 member dues accounts, and retired dues plans stop producing future recurring
-club receivable charges. Approved waivers reduce open member-dues balances
-without recording fake cash and retain waiver reason, timestamp, and approving
-person on the charge. Member dues statements assemble charges, successful
-payments, and waivers into shareable running-balance account evidence, and can
-be exported as text or CSV artifacts with checksum and download filename
-metadata or sent through the communications system to members and guardians;
-tune with
+club receivable charges. Managers can also approve installment, hardship,
+family, or scholarship-style payment plans for outstanding balances; linked
+M-Pesa/manual/hosted payments reduce both the dues ledger and the active
+arrangement balance. Approved waivers reduce open member-dues balances without
+recording fake cash and retain waiver reason, timestamp, and approving person
+on the charge. Member dues statements assemble charges, successful payments,
+and waivers into shareable running-balance account evidence, and can be
+exported as text or CSV artifacts with checksum and download filename metadata
+or sent through the communications system to members and guardians; tune with
 `--member-dues-charge-on` and `--dry-run-member-dues-charges`. The member dues
 reminder lane sends repeat-suppressed reminders for due or overdue
 club-managed subscription balances, marks accounts past due after the plan

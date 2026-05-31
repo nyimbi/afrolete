@@ -30,6 +30,9 @@ from app.schemas.organization import (
     MemberSubscriptionHostedCheckoutRead,
     MemberSubscriptionPaymentCreate,
     MemberSubscriptionPaymentRead,
+    MemberSubscriptionPaymentPlanCreate,
+    MemberSubscriptionPaymentPlanRead,
+    MemberSubscriptionPaymentPlanUpdate,
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanRead,
     MemberSubscriptionRead,
@@ -149,6 +152,7 @@ from app.services.organizations import (
     add_organization_group_member,
     create_member_subscription,
     create_member_subscription_checkout_link,
+    create_member_subscription_payment_plan,
     create_member_subscription_plan,
     run_member_subscription_charge_generation,
     export_member_subscription_statement_artifact,
@@ -192,6 +196,7 @@ from app.services.organizations import (
     list_recovery_drills,
     list_recovery_plans,
     list_member_subscription_charges,
+    list_member_subscription_payment_plans,
     list_member_subscription_plans,
     list_member_subscriptions,
     member_subscription_receivables_summary,
@@ -214,6 +219,7 @@ from app.services.organizations import (
     run_member_subscription_reminders,
     send_member_subscription_statement,
     update_member_subscription,
+    update_member_subscription_payment_plan,
     update_member_subscription_plan,
     update_organization_external_report_status,
     waive_member_subscription_charge,
@@ -2066,6 +2072,7 @@ async def record_member_subscription_payment_route(
         id=payment.id,
         organization_id=payment.organization_id,
         subscription_id=payment.subscription_id,
+        payment_plan_id=payment.payment_plan_id,
         amount=payment.amount,
         currency=payment.currency,
         provider=payment.provider,
@@ -2078,6 +2085,47 @@ async def record_member_subscription_payment_route(
         subscription_balance_amount=subscription.balance_amount,
         subscription_status=subscription.status,
     )
+
+
+@router.post(
+    "/member-subscriptions/{subscription_id}/payment-plans",
+    response_model=MemberSubscriptionPaymentPlanRead,
+    status_code=201,
+)
+async def create_member_subscription_payment_plan_route(
+    subscription_id: UUID,
+    payload: MemberSubscriptionPaymentPlanCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionPaymentPlanRead:
+    return await create_member_subscription_payment_plan(db, identity, subscription_id, payload, authz)
+
+
+@router.get(
+    "/{organization_id}/member-subscription-payment-plans",
+    response_model=list[MemberSubscriptionPaymentPlanRead],
+)
+async def list_member_subscription_payment_plans_route(
+    organization_id: UUID,
+    subscription_id: UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberSubscriptionPaymentPlanRead]:
+    return await list_member_subscription_payment_plans(db, organization_id, subscription_id)
+
+
+@router.patch(
+    "/member-subscription-payment-plans/{payment_plan_id}",
+    response_model=MemberSubscriptionPaymentPlanRead,
+)
+async def update_member_subscription_payment_plan_route(
+    payment_plan_id: UUID,
+    payload: MemberSubscriptionPaymentPlanUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionPaymentPlanRead:
+    return await update_member_subscription_payment_plan(db, identity, payment_plan_id, payload, authz)
 
 
 @router.get(

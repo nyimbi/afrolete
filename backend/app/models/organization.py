@@ -496,6 +496,9 @@ class MemberSubscriptionPayment(IdMixin, TimestampMixin, Base):
 
     organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
     subscription_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    payment_plan_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("member_subscription_payment_plans.id"), index=True
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
     provider: Mapped[str] = mapped_column(String(80), default="mpesa", nullable=False, index=True)
@@ -504,6 +507,30 @@ class MemberSubscriptionPayment(IdMixin, TimestampMixin, Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(40), default="succeeded", nullable=False, index=True)
     raw_reference: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class MemberSubscriptionPaymentPlan(IdMixin, TimestampMixin, Base):
+    __tablename__ = "member_subscription_payment_plans"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    subscription_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("member_subscriptions.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    plan_type: Mapped[str] = mapped_column(String(80), default="installment", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
+    principal_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    remaining_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="KES", nullable=False)
+    installment_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    installment_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    paid_installment_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    installment_frequency: Mapped[str] = mapped_column(String(40), default="monthly", nullable=False, index=True)
+    starts_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    next_due_on: Mapped[date | None] = mapped_column(Date, index=True)
+    ends_on: Mapped[date | None] = mapped_column(Date, index=True)
+    approved_by_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
 

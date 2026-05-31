@@ -238,6 +238,7 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert payment_response.status_code == 201
     payment = payment_response.json()
     assert payment["provider"] == "mpesa"
+    assert payment["payment_plan_id"] is None
     assert payment["subscription_balance_amount"] == "500.00"
     assert payment["subscription_status"] == "active"
 
@@ -261,6 +262,51 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert partial_summary["oldest_open_due_on"] == "2026-06-05"
     assert partial_summary["collection_rate_percent"] == "66.67"
     assert partial_summary["total_waived"] == "0.00"
+
+    payment_plan_response = client.post(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/payment-plans",
+        headers=identity_headers,
+        json={
+            "name": "Two-part hardship plan",
+            "plan_type": "installment",
+            "principal_amount": "500.00",
+            "installment_amount": "250.00",
+            "installment_count": 2,
+            "installment_frequency": "monthly",
+            "starts_on": "2026-06-20",
+            "next_due_on": "2026-06-20",
+            "notes": "Board-approved family payment plan.",
+        },
+    )
+    assert payment_plan_response.status_code == 201
+    payment_plan = payment_plan_response.json()
+    assert payment_plan["subject_label"] == "Member Dues"
+    assert payment_plan["status"] == "active"
+    assert payment_plan["principal_amount"] == "500.00"
+    assert payment_plan["remaining_amount"] == "500.00"
+    assert payment_plan["installment_amount"] == "250.00"
+    assert payment_plan["approved_by_person_id"]
+    assert payment_plan["approved_at"] is not None
+
+    payment_plan_update_response = client.patch(
+        f"/api/v1/organizations/member-subscription-payment-plans/{payment_plan['id']}",
+        headers=identity_headers,
+        json={
+            "next_due_on": "2026-06-25",
+            "notes": "First installment due after family payday.",
+        },
+    )
+    assert payment_plan_update_response.status_code == 200
+    payment_plan = payment_plan_update_response.json()
+    assert payment_plan["next_due_on"] == "2026-06-25"
+    assert payment_plan["notes"] == "First installment due after family payday."
+
+    payment_plans = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-payment-plans",
+        headers=identity_headers,
+        params={"subscription_id": subscription["id"]},
+    ).json()
+    assert [item["id"] for item in payment_plans] == [payment_plan["id"]]
 
     checkout_response = client.post(
         f"/api/v1/organizations/member-subscriptions/{subscription['id']}/checkout-link",
@@ -350,6 +396,17 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert settlement["accepted"] is True
     assert settlement["open_amount"] == "0.00"
     assert settlement["session_status"] == "paid"
+
+    completed_payment_plans = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-payment-plans",
+        headers=identity_headers,
+        params={"subscription_id": subscription["id"]},
+    ).json()
+    assert completed_payment_plans[0]["status"] == "completed"
+    assert completed_payment_plans[0]["amount_paid"] == "500.00"
+    assert completed_payment_plans[0]["remaining_amount"] == "0.00"
+    assert completed_payment_plans[0]["paid_installment_count"] == 2
+    assert completed_payment_plans[0]["next_due_on"] is None
 
     subscriptions_response = client.get(
         f"/api/v1/organizations/{organization['id']}/member-subscriptions",
