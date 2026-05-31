@@ -83,9 +83,12 @@ from app.schemas.organization import (
     MemberSubscriptionCheckoutLinkRead,
     MemberSubscriptionCheckoutSettlementCreate,
     MemberSubscriptionCheckoutSettlementRead,
+    MemberSubscriptionChargeRead,
     MemberSubscriptionChargeRunCreate,
     MemberSubscriptionChargeRunItemRead,
     MemberSubscriptionChargeRunRead,
+    MemberSubscriptionChargeWaiverCreate,
+    MemberSubscriptionChargeWaiverRead,
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
@@ -4712,6 +4715,7 @@ async def create_member_subscription(
                 due_on=subscription.next_due_on,
                 amount=initial_balance,
                 amount_paid=Decimal("0.00"),
+                amount_waived=Decimal("0.00"),
                 balance_amount=initial_balance,
                 currency=plan.currency.upper(),
                 status="open",
@@ -4771,6 +4775,39 @@ async def list_member_subscription_charges(
     return result
 
 
+def member_subscription_charge_read(
+    charge: MemberSubscriptionCharge,
+    plan: MemberSubscriptionPlan,
+    subject_label: str | None,
+) -> MemberSubscriptionChargeRead:
+    return MemberSubscriptionChargeRead(
+        id=charge.id,
+        organization_id=charge.organization_id,
+        subscription_id=charge.subscription_id,
+        plan_id=charge.plan_id,
+        plan_name=plan.name,
+        subject_label=subject_label,
+        period_start=charge.period_start,
+        period_end=charge.period_end,
+        due_on=charge.due_on,
+        amount=charge.amount,
+        amount_paid=charge.amount_paid,
+        amount_waived=charge.amount_waived,
+        balance_amount=charge.balance_amount,
+        currency=charge.currency,
+        status=charge.status,
+        source=charge.source,
+        description=charge.description,
+        paid_at=charge.paid_at,
+        last_payment_id=charge.last_payment_id,
+        waived_at=charge.waived_at,
+        waived_by_person_id=charge.waived_by_person_id,
+        waiver_reason=charge.waiver_reason,
+        created_by_person_id=charge.created_by_person_id,
+        created_at=charge.created_at,
+    )
+
+
 async def member_subscription_receivables_summary(
     db: AsyncSession,
     organization_id: UUID,
@@ -4795,17 +4832,20 @@ async def member_subscription_receivables_summary(
     }
     total_charged = Decimal("0.00")
     total_collected = Decimal("0.00")
+    total_waived = Decimal("0.00")
     outstanding_balance = Decimal("0.00")
     open_due_dates: list[date] = []
     future_due_dates: list[date] = []
     open_charge_count = 0
     partial_charge_count = 0
     paid_charge_count = 0
+    waived_charge_count = 0
 
     for charge in charges:
         status_counts[charge.status] = status_counts.get(charge.status, 0) + 1
         total_charged += charge.amount
         total_collected += charge.amount_paid
+        total_waived += charge.amount_waived
         balance = max(charge.balance_amount, Decimal("0.00")).quantize(Decimal("0.01"))
         if charge.status == "open":
             open_charge_count += 1
@@ -4813,6 +4853,8 @@ async def member_subscription_receivables_summary(
             partial_charge_count += 1
         if charge.status == "paid":
             paid_charge_count += 1
+        if charge.status == "waived":
+            waived_charge_count += 1
         if balance <= 0:
             continue
         outstanding_balance += balance
@@ -4836,6 +4878,7 @@ async def member_subscription_receivables_summary(
 
     total_charged = total_charged.quantize(Decimal("0.01"))
     total_collected = total_collected.quantize(Decimal("0.01"))
+    total_waived = total_waived.quantize(Decimal("0.01"))
     outstanding_balance = outstanding_balance.quantize(Decimal("0.01"))
     for key, value in list(aging_buckets.items()):
         aging_buckets[key] = value.quantize(Decimal("0.01"))
@@ -4868,8 +4911,10 @@ async def member_subscription_receivables_summary(
         open_charge_count=open_charge_count,
         partial_charge_count=partial_charge_count,
         paid_charge_count=paid_charge_count,
+        waived_charge_count=waived_charge_count,
         total_charged=total_charged,
         total_collected=total_collected,
+        total_waived=total_waived,
         outstanding_balance=outstanding_balance,
         current_balance=aging_buckets["current"],
         overdue_balance=overdue_balance,
@@ -4879,6 +4924,57 @@ async def member_subscription_receivables_summary(
         status_counts=status_counts,
         collection_rate_percent=collection_rate,
         next_actions=next_actions,
+    )
+
+
+async def waive_member_subscription_charge(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    charge_id: UUID,
+    payload: MemberSubscriptionChargeWaiverCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionChargeWaiverRead:
+    charge = await db.get(MemberSubscriptionCharge, charge_id)
+    if charge is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member dues charge not found")
+    subscription = await db.get(MemberSubscription, charge.subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription not found")
+    await ensure_manage_organization(db, identity, charge.organization_id, authz)
+    plan = await db.get(MemberSubscriptionPlan, charge.plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member subscription plan not found")
+
+    open_balance = max(charge.balance_amount, Decimal("0.00")).quantize(Decimal("0.01"))
+    amount = (payload.amount or open_balance).quantize(Decimal("0.01"))
+    if amount <= 0 or amount > open_balance:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid member dues waiver amount")
+
+    charge.amount_waived = (charge.amount_waived + amount).quantize(Decimal("0.01"))
+    charge.balance_amount = (open_balance - amount).quantize(Decimal("0.01"))
+    charge.waived_at = payload.waived_at or datetime.now(UTC)
+    charge.waived_by_person_id = identity.person_id
+    charge.waiver_reason = append_member_dues_note(charge.waiver_reason, payload.reason)
+    if charge.balance_amount <= 0:
+        charge.balance_amount = Decimal("0.00")
+        charge.status = "waived"
+    else:
+        charge.status = "partial"
+    subscription.balance_amount = max(Decimal("0.00"), subscription.balance_amount - amount).quantize(Decimal("0.01"))
+    if subscription.balance_amount <= 0 and subscription.status == "past_due":
+        subscription.balance_amount = Decimal("0.00")
+        subscription.status = "active"
+
+    await db.commit()
+    await db.refresh(charge)
+    await db.refresh(subscription)
+    subject_label = await member_subject_label(db, subscription.subject_type, subscription.subject_id)
+    return MemberSubscriptionChargeWaiverRead(
+        charge=member_subscription_charge_read(charge, plan, subject_label),
+        amount_waived=amount,
+        subscription_balance_amount=subscription.balance_amount,
+        charge_status=charge.status,
+        message=f"Waived {amount} {charge.currency} from member dues charge.",
     )
 
 
@@ -5161,6 +5257,7 @@ async def run_member_subscription_charge_worker(
                 due_on=due_on,
                 amount=plan.amount,
                 amount_paid=Decimal("0.00"),
+                amount_waived=Decimal("0.00"),
                 balance_amount=plan.amount,
                 currency=plan.currency.upper(),
                 status="open",

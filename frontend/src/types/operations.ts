@@ -1064,6 +1064,7 @@ export type MemberSubscriptionChargeRead = {
   due_on: string | null;
   amount: string;
   amount_paid: string;
+  amount_waived: string;
   balance_amount: string;
   currency: string;
   status: string;
@@ -1071,8 +1072,19 @@ export type MemberSubscriptionChargeRead = {
   description: string | null;
   paid_at: string | null;
   last_payment_id: UUID | null;
+  waived_at: string | null;
+  waived_by_person_id: UUID | null;
+  waiver_reason: string | null;
   created_by_person_id: UUID | null;
   created_at: string;
+};
+
+export type MemberSubscriptionChargeWaiverRead = {
+  charge: MemberSubscriptionChargeRead;
+  amount_waived: string;
+  subscription_balance_amount: string;
+  charge_status: string;
+  message: string;
 };
 
 export type MemberSubscriptionReceivablesSummaryRead = {
@@ -1082,8 +1094,10 @@ export type MemberSubscriptionReceivablesSummaryRead = {
   open_charge_count: number;
   partial_charge_count: number;
   paid_charge_count: number;
+  waived_charge_count: number;
   total_charged: string;
   total_collected: string;
+  total_waived: string;
   outstanding_balance: string;
   current_balance: string;
   overdue_balance: string;

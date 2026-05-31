@@ -369,6 +369,7 @@ import type {
   MembershipRead,
   MemberSubscriptionChargeRead,
   MemberSubscriptionChargeRunRead,
+  MemberSubscriptionChargeWaiverRead,
   MemberSubscriptionCheckoutLinkRead,
   MemberSubscriptionPaymentRead,
   MemberSubscriptionPlanRead,
@@ -7438,6 +7439,36 @@ export default function HomePage() {
           `${run.charged_count} member dues cycle charge(s) created (${run.total_charged} total)`,
           run.failed_count ? "neutral" : "good"
         );
+      }
+    );
+  };
+
+  const waiveMemberDuesCharge = (charge: MemberSubscriptionChargeRead) => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before waiving member dues", "bad");
+      return;
+    }
+    const amount = Number(charge.balance_amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      addLog("Select an open member dues charge to waive", "bad");
+      return;
+    }
+    runAction(
+      `waive-member-dues-charge-${charge.id}`,
+      () =>
+        apiRequest<MemberSubscriptionChargeWaiverRead>(
+          `/organizations/member-subscription-charges/${charge.id}/waive`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              reason: "Club-approved dues waiver from operations console."
+            }
+          }
+        ),
+      async (waiver) => {
+        await loadMemberDues(selectedOrganizationId);
+        addLog(waiver.message, "good");
       }
     );
   };
@@ -24434,10 +24465,10 @@ export default function HomePage() {
                   <div>
                     <strong>Receivables aging</strong>
                     <span>
-                      {memberDuesReceivablesSummary.outstanding_balance} open · {memberDuesReceivablesSummary.overdue_balance} overdue · {memberDuesReceivablesSummary.collection_rate_percent}% collected
+                      {memberDuesReceivablesSummary.outstanding_balance} open · {memberDuesReceivablesSummary.overdue_balance} overdue · {memberDuesReceivablesSummary.total_waived} waived
                     </span>
                     <small>
-                      {memberDuesReceivablesSummary.open_charge_count} open · {memberDuesReceivablesSummary.partial_charge_count} partial · oldest {memberDuesReceivablesSummary.oldest_open_due_on ?? "none"}
+                      {memberDuesReceivablesSummary.collection_rate_percent}% collected · {memberDuesReceivablesSummary.waived_charge_count} waived · oldest {memberDuesReceivablesSummary.oldest_open_due_on ?? "none"}
                     </small>
                     <small>{memberDuesReceivablesSummary.next_actions[0] ?? "Dues ledger is current."}</small>
                   </div>
@@ -24476,9 +24507,12 @@ export default function HomePage() {
                 <article key={charge.id} className="task-card">
                   <div>
                     <strong>{charge.subject_label ?? charge.subscription_id} · {charge.plan_name}</strong>
-                    <span>{charge.balance_amount} {charge.currency} open · {charge.amount_paid} paid · {charge.status.replaceAll("_", " ")}</span>
-                    <small>{charge.period_start} to {charge.period_end} · due {charge.due_on ?? "not set"} · {charge.source.replaceAll("_", " ")}</small>
+                    <span>{charge.balance_amount} {charge.currency} open · {charge.amount_paid} paid · {charge.amount_waived} waived</span>
+                    <small>{charge.period_start} to {charge.period_end} · due {charge.due_on ?? "not set"} · {charge.status.replaceAll("_", " ")}</small>
                   </div>
+                  {Number(charge.balance_amount) > 0 ? (
+                    <button type="button" onClick={() => waiveMemberDuesCharge(charge)} disabled={busyAction !== null}>Waive</button>
+                  ) : null}
                 </article>
               ))}
               {memberDuesReminderRun ? (

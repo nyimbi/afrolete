@@ -92,7 +92,9 @@ the subscription period, increments the member balance, and keeps those
 receivables separate from AfroLete hosting invoices. Member dues payments
 allocate oldest-due first against those charge rows, tracking per-period paid
 amount, open balance, paid-at timestamp, last payment id, and receivables aging
-summaries for collections decisions; tune with
+summaries for collections decisions. Approved waivers reduce open member-dues
+balances without recording fake cash and retain waiver reason, timestamp, and
+approving person on the charge; tune with
 `--member-dues-charge-on` and `--dry-run-member-dues-charges`. The member dues
 reminder lane sends repeat-suppressed reminders for due or overdue
 club-managed subscription balances, marks accounts past due after the plan

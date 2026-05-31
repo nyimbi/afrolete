@@ -227,6 +227,7 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert partial_summary["aging_buckets"]["1_30"] == "500.00"
     assert partial_summary["oldest_open_due_on"] == "2026-06-05"
     assert partial_summary["collection_rate_percent"] == "66.67"
+    assert partial_summary["total_waived"] == "0.00"
 
     checkout_response = client.post(
         f"/api/v1/organizations/member-subscriptions/{subscription['id']}/checkout-link",
@@ -387,6 +388,33 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert aging_summary["outstanding_balance"] == "1500.00"
     assert aging_summary["current_balance"] == "1500.00"
     assert aging_summary["overdue_balance"] == "0.00"
+
+    waiver_response = client.post(
+        f"/api/v1/organizations/member-subscription-charges/{all_charges[0]['id']}/waive",
+        headers=identity_headers,
+        json={
+            "reason": "Board-approved hardship waiver.",
+        },
+    )
+    assert waiver_response.status_code == 200
+    waiver = waiver_response.json()
+    assert waiver["amount_waived"] == "1500.00"
+    assert waiver["subscription_balance_amount"] == "0.00"
+    assert waiver["charge_status"] == "waived"
+    assert waiver["charge"]["amount_waived"] == "1500.00"
+    assert waiver["charge"]["balance_amount"] == "0.00"
+    assert waiver["charge"]["waived_at"] is not None
+    assert waiver["charge"]["waived_by_person_id"]
+    assert "Board-approved hardship waiver." in waiver["charge"]["waiver_reason"]
+
+    waived_summary = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-charges/summary",
+        headers=identity_headers,
+        params={"as_of": "2026-07-01"},
+    ).json()
+    assert waived_summary["outstanding_balance"] == "0.00"
+    assert waived_summary["total_waived"] == "1500.00"
+    assert waived_summary["waived_charge_count"] == 1
 
     billing_summary_response = client.get(
         f"/api/v1/billing/summary?organization_id={organization['id']}",

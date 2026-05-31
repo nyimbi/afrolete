@@ -1210,6 +1210,7 @@ class MemberSubscriptionChargeRead(BaseModel):
     due_on: date | None
     amount: Decimal
     amount_paid: Decimal
+    amount_waived: Decimal
     balance_amount: Decimal
     currency: str
     status: str
@@ -1217,8 +1218,25 @@ class MemberSubscriptionChargeRead(BaseModel):
     description: str | None
     paid_at: datetime | None
     last_payment_id: UUID | None
+    waived_at: datetime | None
+    waived_by_person_id: UUID | None
+    waiver_reason: str | None
     created_by_person_id: UUID | None
     created_at: datetime
+
+
+class MemberSubscriptionChargeWaiverCreate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    reason: str = Field(min_length=3, max_length=1000)
+    waived_at: datetime | None = None
+
+
+class MemberSubscriptionChargeWaiverRead(BaseModel):
+    charge: MemberSubscriptionChargeRead
+    amount_waived: Decimal
+    subscription_balance_amount: Decimal
+    charge_status: str
+    message: str
 
 
 class MemberSubscriptionReceivablesSummaryRead(BaseModel):
@@ -1228,8 +1246,10 @@ class MemberSubscriptionReceivablesSummaryRead(BaseModel):
     open_charge_count: int
     partial_charge_count: int
     paid_charge_count: int
+    waived_charge_count: int
     total_charged: Decimal
     total_collected: Decimal
+    total_waived: Decimal
     outstanding_balance: Decimal
     current_balance: Decimal
     overdue_balance: Decimal

@@ -23,6 +23,8 @@ from app.schemas.organization import (
     MemberSubscriptionChargeRead,
     MemberSubscriptionChargeRunCreate,
     MemberSubscriptionChargeRunRead,
+    MemberSubscriptionChargeWaiverCreate,
+    MemberSubscriptionChargeWaiverRead,
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
@@ -203,6 +205,7 @@ from app.services.organizations import (
     record_member_subscription_payment,
     run_member_subscription_reminders,
     update_organization_external_report_status,
+    waive_member_subscription_charge,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
     settle_member_subscription_checkout,
@@ -1866,6 +1869,7 @@ def to_member_subscription_charge_read(item) -> MemberSubscriptionChargeRead:
         due_on=charge.due_on,
         amount=charge.amount,
         amount_paid=charge.amount_paid,
+        amount_waived=charge.amount_waived,
         balance_amount=charge.balance_amount,
         currency=charge.currency,
         status=charge.status,
@@ -1873,6 +1877,9 @@ def to_member_subscription_charge_read(item) -> MemberSubscriptionChargeRead:
         description=charge.description,
         paid_at=charge.paid_at,
         last_payment_id=charge.last_payment_id,
+        waived_at=charge.waived_at,
+        waived_by_person_id=charge.waived_by_person_id,
+        waiver_reason=charge.waiver_reason,
         created_by_person_id=charge.created_by_person_id,
         created_at=charge.created_at,
     )
@@ -1953,6 +1960,20 @@ async def list_member_subscription_charges_route(
         to_member_subscription_charge_read(row)
         for row in await list_member_subscription_charges(db, organization_id, subscription_id)
     ]
+
+
+@router.post(
+    "/member-subscription-charges/{charge_id}/waive",
+    response_model=MemberSubscriptionChargeWaiverRead,
+)
+async def waive_member_subscription_charge_route(
+    charge_id: UUID,
+    payload: MemberSubscriptionChargeWaiverCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionChargeWaiverRead:
+    return await waive_member_subscription_charge(db, identity, charge_id, payload, authz)
 
 
 @router.post(
