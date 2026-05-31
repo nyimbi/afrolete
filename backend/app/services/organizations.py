@@ -4,7 +4,7 @@ import json
 import re
 from base64 import b64decode
 from binascii import Error as BinasciiError
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -83,6 +83,9 @@ from app.schemas.organization import (
     MemberSubscriptionCheckoutSettlementRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
+    MemberSubscriptionReminderItemRead,
+    MemberSubscriptionReminderRunCreate,
+    MemberSubscriptionReminderRunRead,
     MemberSubscriptionPaymentCreate,
     MemberSubscriptionPlanCreate,
     OrganizationAwardCategoryCreate,
@@ -148,7 +151,7 @@ from app.schemas.agent import AgentTaskCreate
 from app.services.auth.identity_bridge import CurrentIdentity
 from app.services.authz.service import AuthorizationService, Relationship
 from app.services.agents import queue_agent_task
-from app.services.communications import create_message
+from app.services.communications import create_message, create_message_for_recipients, destination_for_channel
 from app.schemas.communication import CommunicationMessageCreate
 from app.services.storage.objects import put_object
 
@@ -4967,6 +4970,308 @@ def normalize_payment_provider(provider: str) -> str:
 
 def append_member_dues_note(existing: str | None, note: str) -> str:
     return f"{existing}\n{note}" if existing else note
+
+
+async def run_member_subscription_reminders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: MemberSubscriptionReminderRunCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionReminderRunRead:
+    await ensure_manage_organization(db, identity, payload.organization_id, authz)
+    return await run_member_subscription_reminder_worker(
+        db,
+        organization_id=payload.organization_id,
+        channel=payload.channel,
+        as_of=payload.as_of,
+        due_within_days=payload.due_within_days,
+        repeat_after_days=payload.repeat_after_days,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_member_subscription_reminder_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    as_of: date | None = None,
+    due_within_days: int = 7,
+    repeat_after_days: int = 7,
+    limit: int = 100,
+    dry_run: bool = False,
+) -> MemberSubscriptionReminderRunRead:
+    effective_as_of = as_of or date.today()
+    rows = await member_subscriptions_due_for_reminder(
+        db,
+        organization_id=organization_id,
+        due_on_or_before=effective_as_of + timedelta(days=due_within_days),
+        limit=limit,
+    )
+    items: list[MemberSubscriptionReminderItemRead] = []
+    subscription_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+    executed_count = 0
+    skipped_count = 0
+    failed_count = 0
+    marked_past_due_count = 0
+
+    for subscription, plan in rows:
+        executed_count += 1
+        subject_label = await member_subject_label(db, subscription.subject_type, subscription.subject_id)
+        if member_subscription_recently_reminded(subscription, repeat_after_days):
+            skipped_count += 1
+            items.append(
+                member_subscription_reminder_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"Dues reminder already sent within {repeat_after_days} days.",
+                    message_id=subscription.dues_reminder_message_id,
+                )
+            )
+            continue
+        recipients = await member_subscription_reminder_recipients(db, subscription, channel)
+        if not recipients:
+            skipped_count += 1
+            items.append(
+                member_subscription_reminder_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"No dues reminder recipient has a destination for {channel.value}.",
+                )
+            )
+            continue
+        should_mark_past_due = member_subscription_should_mark_past_due(subscription, plan, effective_as_of)
+        if dry_run:
+            skipped_count += 1
+            reason = f"Would remind {len(recipients)} recipient(s)."
+            if should_mark_past_due:
+                reason += " Would mark account past due."
+            items.append(
+                member_subscription_reminder_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    effective_as_of,
+                    action="dry_run",
+                    reason=reason,
+                    recipient_count=len(recipients),
+                )
+            )
+            continue
+        try:
+            message = await create_message_for_recipients(
+                db,
+                organization_id=subscription.organization_id,
+                message_type=CommunicationMessageType.REMINDER,
+                channel=channel,
+                scope_type=CommunicationScopeType.PERSON
+                if subscription.subject_type == MemberSubjectType.PERSON
+                else CommunicationScopeType.ORGANIZATION,
+                scope_id=subscription.subject_id
+                if subscription.subject_type == MemberSubjectType.PERSON
+                else subscription.organization_id,
+                recipient_person_ids=[person.id for person in recipients],
+                subject=f"Member dues reminder: {plan.name}",
+                body=member_subscription_reminder_body(subscription, plan, subject_label, effective_as_of),
+                urgent=(subscription.next_due_on is not None and subscription.next_due_on < effective_as_of),
+                created_by_person_id=None,
+            )
+            if should_mark_past_due and subscription.status != "past_due":
+                subscription.status = "past_due"
+                marked_past_due_count += 1
+            subscription.dues_last_reminded_at = datetime.now(UTC)
+            subscription.dues_reminder_message_id = message.id
+            subscription.dues_reminder_count = int(subscription.dues_reminder_count or 0) + 1
+            await db.commit()
+            await db.refresh(subscription)
+            subscription_ids.append(subscription.id)
+            message_ids.append(message.id)
+            items.append(
+                member_subscription_reminder_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    effective_as_of,
+                    action="reminded",
+                    reason=f"Dues reminder sent to {len(recipients)} recipient(s).",
+                    recipient_count=len(recipients),
+                    message_id=message.id,
+                )
+            )
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+            items.append(
+                member_subscription_reminder_item(
+                    subscription,
+                    plan,
+                    subject_label,
+                    effective_as_of,
+                    action="failed",
+                    reason="Failed to create dues reminder message.",
+                    recipient_count=len(recipients),
+                )
+            )
+
+    return MemberSubscriptionReminderRunRead(
+        organization_id=organization_id,
+        channel=channel,
+        as_of=effective_as_of,
+        due_within_days=due_within_days,
+        repeat_after_days=repeat_after_days,
+        eligible_count=len(rows),
+        executed_count=executed_count,
+        reminded_count=len(message_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        marked_past_due_count=marked_past_due_count,
+        dry_run=dry_run,
+        subscription_ids=subscription_ids,
+        message_ids=message_ids,
+        items=items,
+    )
+
+
+async def member_subscriptions_due_for_reminder(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    due_on_or_before: date,
+    limit: int,
+) -> list[tuple[MemberSubscription, MemberSubscriptionPlan]]:
+    statement = (
+        select(MemberSubscription, MemberSubscriptionPlan)
+        .join(MemberSubscriptionPlan, MemberSubscriptionPlan.id == MemberSubscription.plan_id)
+        .where(MemberSubscription.status.in_(["trialing", "active", "past_due"]))
+        .where(MemberSubscription.balance_amount > Decimal("0"))
+        .where(MemberSubscription.next_due_on.is_not(None))
+        .where(MemberSubscription.next_due_on <= due_on_or_before)
+        .order_by(MemberSubscription.next_due_on.asc(), MemberSubscription.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(MemberSubscription.organization_id == organization_id)
+    return list((await db.execute(statement)).all())
+
+
+def member_subscription_recently_reminded(subscription: MemberSubscription, repeat_after_days: int) -> bool:
+    if subscription.dues_last_reminded_at is None:
+        return False
+    if repeat_after_days <= 0:
+        return False
+    last_reminded = (
+        subscription.dues_last_reminded_at.replace(tzinfo=UTC)
+        if subscription.dues_last_reminded_at.tzinfo is None
+        else subscription.dues_last_reminded_at.astimezone(UTC)
+    )
+    return last_reminded >= datetime.now(UTC) - timedelta(days=repeat_after_days)
+
+
+def member_subscription_should_mark_past_due(
+    subscription: MemberSubscription,
+    plan: MemberSubscriptionPlan,
+    as_of: date,
+) -> bool:
+    if subscription.next_due_on is None:
+        return False
+    return subscription.next_due_on + timedelta(days=plan.grace_period_days) < as_of
+
+
+async def member_subscription_reminder_recipients(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+    channel: CommunicationChannel,
+) -> list[Person]:
+    recipients: list[Person] = []
+    if subscription.subject_type == MemberSubjectType.PERSON:
+        person = await db.get(Person, subscription.subject_id)
+        if person is not None and (
+            channel == CommunicationChannel.IN_APP or destination_for_channel(person, channel) is not None
+        ):
+            recipients.append(person)
+    if recipients:
+        return recipients
+    managers = (
+        await db.scalars(
+            select(Person)
+            .join(Membership, Membership.subject_id == Person.id)
+            .where(Membership.organization_id == subscription.organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(Membership.role.in_([MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.STAFF]))
+            .where(Membership.status == "active")
+            .order_by(Membership.role.asc(), Person.display_name.asc())
+        )
+    ).all()
+    for person in managers:
+        if channel == CommunicationChannel.IN_APP or destination_for_channel(person, channel) is not None:
+            recipients.append(person)
+    unique: dict[UUID, Person] = {}
+    for person in recipients:
+        unique.setdefault(person.id, person)
+    return list(unique.values())
+
+
+def member_subscription_reminder_body(
+    subscription: MemberSubscription,
+    plan: MemberSubscriptionPlan,
+    subject_label: str | None,
+    as_of: date,
+) -> str:
+    open_amount = member_subscription_open_amount(subscription)
+    due_line = (
+        f"Due date: {subscription.next_due_on.isoformat()}."
+        if subscription.next_due_on is not None
+        else "No due date is currently recorded."
+    )
+    days_line = (
+        f"Days until due: {(subscription.next_due_on - as_of).days}."
+        if subscription.next_due_on is not None
+        else "Days until due: not available."
+    )
+    dues_reference = subscription.external_reference or f"DUES-{str(subscription.id).split('-')[0].upper()}"
+    return "\n".join(
+        [
+            f"{plan.name} has {open_amount} {plan.currency.upper()} outstanding for {subject_label or subscription.subject_id}.",
+            due_line,
+            days_line,
+            f"Reference: {dues_reference}. This is a club-managed dues account, not an AfroLete hosting invoice.",
+            "Use the member dues payment link, M-Pesa, bank transfer, or the club office to settle the balance.",
+        ]
+    )
+
+
+def member_subscription_reminder_item(
+    subscription: MemberSubscription,
+    plan: MemberSubscriptionPlan,
+    subject_label: str | None,
+    as_of: date,
+    *,
+    action: str,
+    reason: str,
+    recipient_count: int = 0,
+    message_id: UUID | None = None,
+) -> MemberSubscriptionReminderItemRead:
+    return MemberSubscriptionReminderItemRead(
+        subscription_id=subscription.id,
+        plan_name=plan.name,
+        subject_label=subject_label,
+        next_due_on=subscription.next_due_on,
+        days_until_due=(subscription.next_due_on - as_of).days if subscription.next_due_on is not None else None,
+        balance_amount=subscription.balance_amount,
+        currency=plan.currency.upper(),
+        recipient_count=recipient_count,
+        action=action,
+        reason=reason,
+        message_id=message_id,
+    )
 
 
 async def create_organization_market_profile(

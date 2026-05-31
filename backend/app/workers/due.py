@@ -27,6 +27,7 @@ from app.services.communications import (
 )
 from app.services.developer import run_developer_webhook_retry_due
 from app.services.events import run_event_travel_consent_reminder_worker
+from app.services.organizations import run_member_subscription_reminder_worker
 from app.services.performance import (
     run_assessment_review_escalation_worker,
     run_performance_achievement_worker,
@@ -63,6 +64,7 @@ WORKER_LANES = (
     "family-coordination-digests",
     "family-portal-invite-reminders",
     "insurance-renewal-reminders",
+    "member-dues-reminders",
     "object-storage-lifecycle",
     "performance-achievements",
     "performance-forecast-validations",
@@ -173,6 +175,16 @@ def parse_args() -> argparse.Namespace:
         default=CommunicationChannel.EMAIL.value,
     )
     parser.add_argument("--dry-run-insurance-renewal-reminders", action="store_true")
+    parser.add_argument("--member-dues-reminder-limit", type=int, default=None)
+    parser.add_argument("--member-dues-reminder-as-of", type=date_from_isoformat, default=None)
+    parser.add_argument("--member-dues-reminder-due-within-days", type=int, default=7)
+    parser.add_argument("--member-dues-reminder-repeat-after-days", type=int, default=7)
+    parser.add_argument(
+        "--member-dues-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.EMAIL.value,
+    )
+    parser.add_argument("--dry-run-member-dues-reminders", action="store_true")
     parser.add_argument("--volunteer-reminder-limit", type=int, default=None)
     parser.add_argument("--volunteer-reminder-due-within-days", type=int, default=7)
     parser.add_argument("--volunteer-reminder-repeat-after-hours", type=int, default=24)
@@ -358,6 +370,12 @@ async def run_due_workers(
     insurance_renewal_reminder_repeat_after_days: int = 14,
     insurance_renewal_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
     dry_run_insurance_renewal_reminders: bool = False,
+    member_dues_reminder_limit: int | None = None,
+    member_dues_reminder_as_of: date | None = None,
+    member_dues_reminder_due_within_days: int = 7,
+    member_dues_reminder_repeat_after_days: int = 7,
+    member_dues_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    dry_run_member_dues_reminders: bool = False,
     volunteer_reminder_limit: int | None = None,
     volunteer_reminder_due_within_days: int = 7,
     volunteer_reminder_repeat_after_hours: int = 24,
@@ -559,6 +577,19 @@ async def run_due_workers(
                 repeat_after_days=insurance_renewal_reminder_repeat_after_days,
                 limit=insurance_renewal_reminder_limit or limit,
                 dry_run=dry_run_insurance_renewal_reminders,
+            )
+        ).model_dump(mode="json")
+    if "member-dues-reminders" in active_lanes:
+        results["member_dues_reminders"] = (
+            await run_member_subscription_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=member_dues_reminder_channel,
+                as_of=member_dues_reminder_as_of,
+                due_within_days=member_dues_reminder_due_within_days,
+                repeat_after_days=member_dues_reminder_repeat_after_days,
+                limit=member_dues_reminder_limit or limit,
+                dry_run=dry_run_member_dues_reminders,
             )
         ).model_dump(mode="json")
     if "volunteer-reminders" in active_lanes:
@@ -819,6 +850,12 @@ async def run() -> None:
                 args.insurance_renewal_reminder_channel
             ),
             dry_run_insurance_renewal_reminders=args.dry_run_insurance_renewal_reminders,
+            member_dues_reminder_limit=args.member_dues_reminder_limit,
+            member_dues_reminder_as_of=args.member_dues_reminder_as_of,
+            member_dues_reminder_due_within_days=args.member_dues_reminder_due_within_days,
+            member_dues_reminder_repeat_after_days=args.member_dues_reminder_repeat_after_days,
+            member_dues_reminder_channel=CommunicationChannel(args.member_dues_reminder_channel),
+            dry_run_member_dues_reminders=args.dry_run_member_dues_reminders,
             volunteer_reminder_limit=args.volunteer_reminder_limit,
             volunteer_reminder_due_within_days=args.volunteer_reminder_due_within_days,
             volunteer_reminder_repeat_after_hours=args.volunteer_reminder_repeat_after_hours,

@@ -371,6 +371,7 @@ import type {
   MemberSubscriptionPaymentRead,
   MemberSubscriptionPlanRead,
   MemberSubscriptionRead,
+  MemberSubscriptionReminderRunRead,
   MetricCategory,
   MetricDefinitionRead,
   MetricVerificationStatus,
@@ -1885,6 +1886,7 @@ export default function HomePage() {
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
   const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
+  const [memberDuesReminderRun, setMemberDuesReminderRun] = useState<MemberSubscriptionReminderRunRead | null>(null);
   const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
   const [marketProfileSummary, setMarketProfileSummary] = useState<OrganizationMarketProfileSummaryRead | null>(null);
   const [externalReports, setExternalReports] = useState<OrganizationExternalReportRead[]>([]);
@@ -6087,6 +6089,7 @@ export default function HomePage() {
       setMemberSubscriptions([]);
       setMemberSubscriptionPayment(null);
       setMemberDuesCheckoutLink(null);
+      setMemberDuesReminderRun(null);
       setSelectedMemberSubscriptionId("");
       setMarketProfiles([]);
       setMarketProfileSummary(null);
@@ -7389,6 +7392,41 @@ export default function HomePage() {
         if (typeof window !== "undefined") {
           window.open(link.checkout_url, "_blank", "noopener,noreferrer");
         }
+      }
+    );
+  };
+
+  const runMemberDuesReminders = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running member dues reminders", "bad");
+      return;
+    }
+    runAction(
+      "run-member-dues-reminders",
+      () =>
+        apiRequest<MemberSubscriptionReminderRunRead>(
+          `/organizations/${selectedOrganizationId}/member-subscription-reminders/run`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              due_within_days: 7,
+              repeat_after_days: 7,
+              limit: 50
+            }
+          }
+        ),
+      async (run) => {
+        setMemberDuesReminderRun(run);
+        if (selectedOrganizationId) {
+          await loadMemberDues(selectedOrganizationId);
+        }
+        addLog(
+          `${run.reminded_count} member dues reminders sent (${run.marked_past_due_count} marked past due)`,
+          run.failed_count ? "neutral" : "good"
+        );
       }
     );
   };
@@ -24323,6 +24361,7 @@ export default function HomePage() {
               <button type="button" onClick={createMemberDuesSubscription} disabled={busyAction !== null}>Assign selected member</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
               <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
+              <button type="button" onClick={runMemberDuesReminders} disabled={busyAction !== null}>Remind due</button>
             </div>
             <div className="form-grid">
               <label>
@@ -24358,10 +24397,20 @@ export default function HomePage() {
                     <strong>{subscription.subject_label ?? subscription.subject_id} · {subscription.plan_name}</strong>
                     <span>{subscription.balance_amount} {subscription.currency} outstanding · {subscription.status.replaceAll("_", " ")}</span>
                     <small>{subscription.next_due_on ? `Next due ${subscription.next_due_on}` : "No next due date"} · {subscription.external_reference ?? "local ledger"}</small>
+                    <small>{subscription.dues_reminder_count} reminder(s) · last {subscription.dues_last_reminded_at ? new Date(subscription.dues_last_reminded_at).toLocaleString() : "not sent"}</small>
                   </div>
                   <button type="button" onClick={() => setSelectedMemberSubscriptionId(subscription.id)}>Select</button>
                 </article>
               ))}
+              {memberDuesReminderRun ? (
+                <article className={`task-card ${memberDuesReminderRun.failed_count ? "risk-card" : "selected"}`}>
+                  <div>
+                    <strong>Member dues reminders</strong>
+                    <span>{memberDuesReminderRun.reminded_count} sent · {memberDuesReminderRun.marked_past_due_count} past due · {memberDuesReminderRun.skipped_count} skipped</span>
+                    <small>{memberDuesReminderRun.items[0]?.reason ?? "No dues reminders due"}</small>
+                  </div>
+                </article>
+              ) : null}
               {memberSubscriptionPayment ? (
                 <article className="task-card">
                   <div>

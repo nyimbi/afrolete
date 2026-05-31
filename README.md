@@ -185,8 +185,8 @@ Major capability areas include:
   auto-generated funder reports, grant portfolio utilization/impact/ROI
   analytics, financial budgeting, forecasting, management financial statements,
   club-managed member dues with M-Pesa/mobile-money collection support,
-  hosted dues payment links, and venue digital-signage sponsor rotations with
-  playback telemetry.
+  hosted dues payment links, scheduled dues reminders, and venue
+  digital-signage sponsor rotations with playback telemetry.
 - Reports and intelligence: report definitions, generated reports, scheduled
   delivery, artifact storage, signed links, chart-ready summaries, deterministic
   AI insights, export jobs, and government/federation reporting registers tied

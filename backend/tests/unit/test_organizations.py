@@ -205,6 +205,54 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert public_checkout["receivable_owner_type"] == "tenant_organization"
     assert "does not pay AfroLete platform hosting" in public_checkout["receivable_note"]
 
+    reminder_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2026-06-20",
+            "due_within_days": 0,
+            "repeat_after_days": 7,
+            "limit": 10,
+        },
+    )
+    assert reminder_response.status_code == 200
+    reminder_run = reminder_response.json()
+    assert reminder_run["eligible_count"] == 1
+    assert reminder_run["reminded_count"] == 1
+    assert reminder_run["marked_past_due_count"] == 1
+    assert reminder_run["subscription_ids"] == [subscription["id"]]
+    assert reminder_run["items"][0]["action"] == "reminded"
+    assert reminder_run["items"][0]["recipient_count"] == 1
+
+    reminded_subscriptions = client.get(
+        f"/api/v1/organizations/{organization['id']}/member-subscriptions",
+        headers=identity_headers,
+    ).json()
+    reminded_subscription = reminded_subscriptions[0]
+    assert reminded_subscription["status"] == "past_due"
+    assert reminded_subscription["dues_reminder_count"] == 1
+    assert reminded_subscription["dues_reminder_message_id"] == reminder_run["message_ids"][0]
+    assert reminded_subscription["dues_last_reminded_at"] is not None
+
+    repeat_reminder_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/member-subscription-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2026-06-20",
+            "due_within_days": 0,
+            "repeat_after_days": 7,
+            "limit": 10,
+        },
+    )
+    assert repeat_reminder_response.status_code == 200
+    repeat_reminder_run = repeat_reminder_response.json()
+    assert repeat_reminder_run["reminded_count"] == 0
+    assert repeat_reminder_run["skipped_count"] == 1
+
     settlement_response = client.post(
         f"/api/v1/organizations/member-subscription-checkout-sessions/{checkout['session_id']}/settle",
         json={

@@ -26,6 +26,8 @@ from app.schemas.organization import (
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanRead,
     MemberSubscriptionRead,
+    MemberSubscriptionReminderRunCreate,
+    MemberSubscriptionReminderRunRead,
     MembershipRead,
     OrganizationAwardCategoryCreate,
     OrganizationAwardCategoryRead,
@@ -191,6 +193,7 @@ from app.services.organizations import (
     registration_onboarding_presets,
     registration_readiness,
     record_member_subscription_payment,
+    run_member_subscription_reminders,
     update_organization_external_report_status,
     queue_registration_inquiry_agent_review,
     search_public_organizations,
@@ -1833,6 +1836,9 @@ def to_member_subscription_read(item) -> MemberSubscriptionRead:
         status=subscription.status,
         balance_amount=subscription.balance_amount,
         currency=plan.currency,
+        dues_last_reminded_at=subscription.dues_last_reminded_at,
+        dues_reminder_message_id=subscription.dues_reminder_message_id,
+        dues_reminder_count=subscription.dues_reminder_count,
         external_reference=subscription.external_reference,
         notes=subscription.notes,
     )
@@ -1889,6 +1895,22 @@ async def list_member_subscriptions_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[MemberSubscriptionRead]:
     return [to_member_subscription_read(row) for row in await list_member_subscriptions(db, organization_id)]
+
+
+@router.post(
+    "/{organization_id}/member-subscription-reminders/run",
+    response_model=MemberSubscriptionReminderRunRead,
+)
+async def run_member_subscription_reminders_route(
+    organization_id: UUID,
+    payload: MemberSubscriptionReminderRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionReminderRunRead:
+    if payload.organization_id != organization_id:
+        raise HTTPException(status_code=422, detail="organization_id mismatch")
+    return await run_member_subscription_reminders(db, identity, payload, authz)
 
 
 @router.post(

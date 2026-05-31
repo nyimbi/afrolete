@@ -1028,6 +1028,9 @@ export type MemberSubscriptionRead = {
   status: string;
   balance_amount: string;
   currency: string;
+  dues_last_reminded_at: string | null;
+  dues_reminder_message_id: UUID | null;
+  dues_reminder_count: number;
   external_reference: string | null;
   notes: string | null;
 };
@@ -1094,6 +1097,38 @@ export type MemberSubscriptionCheckoutSettlementRead = {
   open_amount: string;
   session_status: string;
   message: string;
+};
+
+export type MemberSubscriptionReminderItemRead = {
+  subscription_id: UUID;
+  plan_name: string;
+  subject_label: string | null;
+  next_due_on: string | null;
+  days_until_due: number | null;
+  balance_amount: string;
+  currency: string;
+  recipient_count: number;
+  action: string;
+  reason: string;
+  message_id: UUID | null;
+};
+
+export type MemberSubscriptionReminderRunRead = {
+  organization_id: UUID | null;
+  channel: CommunicationChannel;
+  as_of: string;
+  due_within_days: number;
+  repeat_after_days: number;
+  eligible_count: number;
+  executed_count: number;
+  reminded_count: number;
+  skipped_count: number;
+  failed_count: number;
+  marked_past_due_count: number;
+  dry_run: boolean;
+  subscription_ids: UUID[];
+  message_ids: UUID[];
+  items: MemberSubscriptionReminderItemRead[];
 };
 
 export type OrganizationMarketProfileRead = {

@@ -1157,6 +1157,9 @@ class MemberSubscriptionRead(BaseModel):
     status: str
     balance_amount: Decimal
     currency: str
+    dues_last_reminded_at: datetime | None = None
+    dues_reminder_message_id: UUID | None = None
+    dues_reminder_count: int = 0
     external_reference: str | None
     notes: str | None
 
@@ -1251,6 +1254,48 @@ class MemberSubscriptionCheckoutSettlementRead(BaseModel):
     open_amount: Decimal
     session_status: str
     message: str
+
+
+class MemberSubscriptionReminderRunCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    as_of: date | None = None
+    due_within_days: int = Field(default=7, ge=0, le=365)
+    repeat_after_days: int = Field(default=7, ge=0, le=365)
+    limit: int = Field(default=100, ge=1, le=1000)
+    dry_run: bool = False
+
+
+class MemberSubscriptionReminderItemRead(BaseModel):
+    subscription_id: UUID
+    plan_name: str
+    subject_label: str | None
+    next_due_on: date | None
+    days_until_due: int | None
+    balance_amount: Decimal
+    currency: str
+    recipient_count: int = 0
+    action: str
+    reason: str
+    message_id: UUID | None = None
+
+
+class MemberSubscriptionReminderRunRead(BaseModel):
+    organization_id: UUID | None
+    channel: CommunicationChannel
+    as_of: date
+    due_within_days: int
+    repeat_after_days: int
+    eligible_count: int
+    executed_count: int
+    reminded_count: int
+    skipped_count: int
+    failed_count: int
+    marked_past_due_count: int
+    dry_run: bool = False
+    subscription_ids: list[UUID]
+    message_ids: list[UUID]
+    items: list[MemberSubscriptionReminderItemRead]
 
 
 class OrganizationMarketProfileCreate(BaseModel):

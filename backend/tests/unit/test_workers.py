@@ -46,7 +46,7 @@ from app.models.enums import (
 )
 from app.models.event import BackgroundCheck, ComplianceCredential, ConsentRequest, Event, EventTravelPlan, InsurancePolicy
 from app.models.identity import AppUser, Person
-from app.models.organization import Membership, Organization, RegistrationInquiry
+from app.models.organization import MemberSubscription, MemberSubscriptionPlan, Membership, Organization, RegistrationInquiry
 from app.models.performance import (
     AthletePerformanceObservation,
     OppositionScoutingVideoAsset,
@@ -1199,6 +1199,78 @@ async def test_due_worker_sends_insurance_renewal_reminders(db_session) -> None:
         select(func.count(CommunicationMessage.id)).where(
             CommunicationMessage.organization_id == organization.id,
             CommunicationMessage.subject == "Insurance renewal due: Worker Liability Policy",
+        )
+    )
+    assert message_count == 1
+
+
+async def test_due_worker_sends_member_dues_reminders(db_session) -> None:
+    organization = Organization(
+        name="Member Dues Reminder Club",
+        slug="member-dues-reminder-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    member = Person(display_name="Dues Member", primary_email="dues-member@example.com")
+    db_session.add_all([organization, member])
+    await db_session.flush()
+    membership = Membership(
+        organization_id=organization.id,
+        subject_type=MemberSubjectType.PERSON,
+        subject_id=member.id,
+        role=MembershipRole.ATHLETE,
+    )
+    plan = MemberSubscriptionPlan(
+        organization_id=organization.id,
+        name="Senior dues",
+        amount=Decimal("1500.00"),
+        currency="KES",
+        billing_interval="monthly",
+        grace_period_days=3,
+    )
+    db_session.add_all([membership, plan])
+    await db_session.flush()
+    subscription = MemberSubscription(
+        organization_id=organization.id,
+        plan_id=plan.id,
+        membership_id=membership.id,
+        subject_type=MemberSubjectType.PERSON,
+        subject_id=member.id,
+        starts_on=date(2026, 6, 1),
+        current_period_start=date(2026, 6, 1),
+        current_period_end=date(2026, 6, 30),
+        next_due_on=date(2026, 6, 5),
+        balance_amount=Decimal("1500.00"),
+        external_reference="DUES-WORKER-001",
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("member-dues-reminders",),
+        limit=10,
+        member_dues_reminder_as_of=date(2026, 6, 10),
+        member_dues_reminder_due_within_days=0,
+        member_dues_reminder_channel=CommunicationChannel.EMAIL,
+    )
+
+    reminders = result["results"]["member_dues_reminders"]
+    assert reminders["eligible_count"] == 1
+    assert reminders["reminded_count"] == 1
+    assert reminders["marked_past_due_count"] == 1
+    assert reminders["subscription_ids"] == [str(subscription.id)]
+    assert result["summary"]["processed_count"] == 1
+
+    await db_session.refresh(subscription)
+    assert subscription.status == "past_due"
+    assert subscription.dues_reminder_count == 1
+    assert str(subscription.dues_reminder_message_id) == reminders["message_ids"][0]
+    message_count = await db_session.scalar(
+        select(func.count(CommunicationMessage.id)).where(
+            CommunicationMessage.organization_id == organization.id,
+            CommunicationMessage.subject == "Member dues reminder: Senior dues",
         )
     )
     assert message_count == 1

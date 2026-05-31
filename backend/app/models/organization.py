@@ -449,6 +449,11 @@ class MemberSubscription(IdMixin, TimestampMixin, Base):
     next_due_on: Mapped[date | None] = mapped_column(Date, index=True)
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)
     balance_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    dues_last_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    dues_reminder_message_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("communication_messages.id"), index=True
+    )
+    dues_reminder_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     external_reference: Mapped[str | None] = mapped_column(String(180), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
 

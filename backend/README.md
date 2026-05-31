@@ -62,6 +62,7 @@ Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, 
 `--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
 `--lane insurance-renewal-reminders`,
+`--lane member-dues-reminders`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
 `--lane performance-review-escalations`, `--lane performance-injury-risk-alerts`,
 `--lane performance-video-pose`, or `--lane wearable-pull-retries` to run a
@@ -84,7 +85,13 @@ repeat-suppressed reminders to organization managers for active or expiring
 policies inside each policy renewal-notice window; tune with
 `--insurance-renewal-reminder-horizon-days`,
 `--insurance-renewal-reminder-repeat-after-days`, and
-`--dry-run-insurance-renewal-reminders`. The
+`--dry-run-insurance-renewal-reminders`. The member dues lane sends
+repeat-suppressed reminders for due or overdue club-managed subscription
+balances, marks accounts past due after the plan grace period, and keeps those
+receivables separate from AfroLete hosting invoices; tune with
+`--member-dues-reminder-due-within-days`,
+`--member-dues-reminder-repeat-after-days`, and
+`--dry-run-member-dues-reminders`. The
 communication escalation lane scans unresolved urgent messages and creates
 quiet-hours-override escalation messages with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with
