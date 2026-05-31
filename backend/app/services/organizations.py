@@ -95,6 +95,8 @@ from app.schemas.organization import (
     MemberSubscriptionStatementLineRead,
     MemberSubscriptionStatementArtifactRead,
     MemberSubscriptionStatementRead,
+    MemberSubscriptionStatementSendCreate,
+    MemberSubscriptionStatementSendRead,
     MemberSubscriptionReminderItemRead,
     MemberSubscriptionReminderRunCreate,
     MemberSubscriptionReminderRunRead,
@@ -5149,6 +5151,106 @@ async def export_member_subscription_statement_artifact(
         checksum=sha256(content_bytes).hexdigest(),
         size_bytes=len(content_bytes),
     )
+
+
+async def send_member_subscription_statement(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    payload: MemberSubscriptionStatementSendCreate,
+    authz: AuthorizationService,
+) -> MemberSubscriptionStatementSendRead:
+    subscription, plan, subject_label = await get_member_subscription_checkout_subject(db, subscription_id)
+    await ensure_manage_organization(db, identity, subscription.organization_id, authz)
+    artifact = await export_member_subscription_statement_artifact(
+        db,
+        identity,
+        subscription_id,
+        authz,
+        artifact_format=payload.artifact_format,
+    )
+    recipients = await member_subscription_statement_recipients(
+        db,
+        subscription,
+        payload.channel,
+        include_member=payload.include_member,
+        include_guardians=payload.include_guardians,
+    )
+    if not recipients:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No member dues statement recipients have a destination for {payload.channel.value}.",
+        )
+    body_parts = [
+        payload.note.strip() if payload.note else None,
+        f"Member dues statement for {subject_label or subscription.subject_id}.",
+        f"Reference: {artifact.statement_reference}.",
+        "",
+        artifact.content,
+    ]
+    message = await create_message_for_recipients(
+        db,
+        organization_id=subscription.organization_id,
+        message_type=CommunicationMessageType.REPORT,
+        channel=payload.channel,
+        scope_type=CommunicationScopeType.PERSON
+        if subscription.subject_type == MemberSubjectType.PERSON
+        else CommunicationScopeType.ORGANIZATION,
+        scope_id=subscription.subject_id
+        if subscription.subject_type == MemberSubjectType.PERSON
+        else subscription.organization_id,
+        recipient_person_ids=[person.id for person in recipients],
+        subject=payload.subject or f"Member dues statement: {plan.name}",
+        body="\n".join(part for part in body_parts if part is not None),
+        urgent=False,
+        created_by_person_id=identity.person_id,
+    )
+    return MemberSubscriptionStatementSendRead(
+        subscription_id=subscription.id,
+        organization_id=subscription.organization_id,
+        statement_reference=artifact.statement_reference,
+        message_id=message.id,
+        channel=payload.channel,
+        recipient_person_ids=[person.id for person in recipients],
+        recipient_count=len(recipients),
+        artifact_format=artifact.artifact_format,
+        status=message.status,
+        sent_at=message.sent_at,
+    )
+
+
+async def member_subscription_statement_recipients(
+    db: AsyncSession,
+    subscription: MemberSubscription,
+    channel: CommunicationChannel,
+    *,
+    include_member: bool,
+    include_guardians: bool,
+) -> list[Person]:
+    recipients: list[Person] = []
+    if subscription.subject_type == MemberSubjectType.PERSON:
+        if include_member:
+            person = await db.get(Person, subscription.subject_id)
+            if person is not None and (
+                channel == CommunicationChannel.IN_APP or destination_for_channel(person, channel) is not None
+            ):
+                recipients.append(person)
+        if include_guardians:
+            guardians = (
+                await db.scalars(
+                    select(Person)
+                    .join(GuardianRelationship, GuardianRelationship.guardian_person_id == Person.id)
+                    .where(GuardianRelationship.athlete_person_id == subscription.subject_id)
+                    .order_by(GuardianRelationship.is_primary.desc(), Person.display_name.asc())
+                )
+            ).all()
+            for guardian in guardians:
+                if channel == CommunicationChannel.IN_APP or destination_for_channel(guardian, channel) is not None:
+                    recipients.append(guardian)
+    unique: dict[UUID, Person] = {}
+    for person in recipients:
+        unique.setdefault(person.id, person)
+    return list(unique.values())
 
 
 def render_member_subscription_statement_text(statement: MemberSubscriptionStatementRead) -> str:

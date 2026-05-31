@@ -35,6 +35,8 @@ from app.schemas.organization import (
     MemberSubscriptionRead,
     MemberSubscriptionStatementArtifactRead,
     MemberSubscriptionStatementRead,
+    MemberSubscriptionStatementSendCreate,
+    MemberSubscriptionStatementSendRead,
     MemberSubscriptionReminderRunCreate,
     MemberSubscriptionReminderRunRead,
     MembershipRead,
@@ -208,6 +210,7 @@ from app.services.organizations import (
     registration_readiness,
     record_member_subscription_payment,
     run_member_subscription_reminders,
+    send_member_subscription_statement,
     update_organization_external_report_status,
     waive_member_subscription_charge,
     queue_registration_inquiry_agent_review,
@@ -2087,6 +2090,20 @@ async def export_member_subscription_statement_artifact_route(
         period_start=period_start,
         period_end=period_end,
     )
+
+
+@router.post(
+    "/member-subscriptions/{subscription_id}/statement/send",
+    response_model=MemberSubscriptionStatementSendRead,
+)
+async def send_member_subscription_statement_route(
+    subscription_id: UUID,
+    payload: MemberSubscriptionStatementSendCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionStatementSendRead:
+    return await send_member_subscription_statement(db, identity, subscription_id, payload, authz)
 
 
 @router.post(

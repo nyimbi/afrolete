@@ -1183,6 +1183,19 @@ export type MemberSubscriptionStatementArtifactRead = {
   size_bytes: number;
 };
 
+export type MemberSubscriptionStatementSendRead = {
+  subscription_id: UUID;
+  organization_id: UUID;
+  statement_reference: string;
+  message_id: UUID;
+  channel: CommunicationChannel;
+  recipient_person_ids: UUID[];
+  recipient_count: number;
+  artifact_format: string;
+  status: string;
+  sent_at: string | null;
+};
+
 export type MemberSubscriptionHostedCheckoutRead = {
   subscription_id: UUID;
   organization_id: UUID;

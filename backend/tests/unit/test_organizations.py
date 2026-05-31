@@ -459,6 +459,26 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert statement_csv["content_type"] == "text/csv; charset=utf-8"
     assert "entry_date,entry_type,description,debit_amount,credit_amount,balance_amount,currency" in statement_csv["content"]
 
+    statement_send_response = client.post(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/statement/send",
+        headers=identity_headers,
+        json={
+            "channel": "in_app",
+            "include_member": True,
+            "include_guardians": True,
+            "artifact_format": "txt",
+            "note": "Your club dues statement is attached below.",
+        },
+    )
+    assert statement_send_response.status_code == 200
+    statement_send = statement_send_response.json()
+    assert statement_send["statement_reference"] == statement["statement_reference"]
+    assert statement_send["recipient_person_ids"] == [member["subject_id"]]
+    assert statement_send["recipient_count"] == 1
+    assert statement_send["channel"] == "in_app"
+    assert statement_send["status"] == "sent"
+    assert statement_send["sent_at"] is not None
+
     billing_summary_response = client.get(
         f"/api/v1/billing/summary?organization_id={organization['id']}",
         headers=identity_headers,

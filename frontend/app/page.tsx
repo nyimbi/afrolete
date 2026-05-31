@@ -378,6 +378,7 @@ import type {
   MemberSubscriptionReminderRunRead,
   MemberSubscriptionStatementArtifactRead,
   MemberSubscriptionStatementRead,
+  MemberSubscriptionStatementSendRead,
   MetricCategory,
   MetricDefinitionRead,
   MetricVerificationStatus,
@@ -1896,6 +1897,7 @@ export default function HomePage() {
   const [memberDuesChargeRun, setMemberDuesChargeRun] = useState<MemberSubscriptionChargeRunRead | null>(null);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
   const [memberDuesStatement, setMemberDuesStatement] = useState<MemberSubscriptionStatementRead | null>(null);
+  const [memberDuesStatementSend, setMemberDuesStatementSend] = useState<MemberSubscriptionStatementSendRead | null>(null);
   const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
   const [memberDuesReminderRun, setMemberDuesReminderRun] = useState<MemberSubscriptionReminderRunRead | null>(null);
   const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
@@ -6109,6 +6111,7 @@ export default function HomePage() {
       setMemberDuesChargeRun(null);
       setMemberSubscriptionPayment(null);
       setMemberDuesStatement(null);
+      setMemberDuesStatementSend(null);
       setMemberDuesCheckoutLink(null);
       setMemberDuesReminderRun(null);
       setSelectedMemberSubscriptionId("");
@@ -7425,6 +7428,36 @@ export default function HomePage() {
       (artifact) => {
         downloadTextArtifact(artifact.content, artifact.content_type, artifact.download_filename);
         addLog(`Downloaded ${artifact.statement_reference} ${artifact.artifact_format.toUpperCase()} statement`, "good");
+      }
+    );
+  };
+
+  const sendMemberDuesStatement = () => {
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!subscriptionId) {
+      addLog("Select a member dues account before sending a statement", "bad");
+      return;
+    }
+    runAction(
+      "send-member-dues-statement",
+      () =>
+        apiRequest<MemberSubscriptionStatementSendRead>(
+          `/organizations/member-subscriptions/${subscriptionId}/statement/send`,
+          {
+            method: "POST",
+            identity,
+            body: {
+              channel: "in_app",
+              include_member: true,
+              include_guardians: true,
+              artifact_format: "txt",
+              note: "Your club dues statement is attached below."
+            }
+          }
+        ),
+      (delivery) => {
+        setMemberDuesStatementSend(delivery);
+        addLog(`Statement sent to ${delivery.recipient_count} recipient(s)`, "good");
       }
     );
   };
@@ -24484,6 +24517,7 @@ export default function HomePage() {
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
               <button type="button" onClick={loadMemberDuesStatement} disabled={busyAction !== null}>Statement</button>
               <button type="button" onClick={() => downloadMemberDuesStatement("txt")} disabled={busyAction !== null}>Download</button>
+              <button type="button" onClick={sendMemberDuesStatement} disabled={busyAction !== null}>Send</button>
               <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
               <button type="button" onClick={runMemberDuesReminders} disabled={busyAction !== null}>Remind due</button>
             </div>
@@ -24578,6 +24612,15 @@ export default function HomePage() {
                       Charged {memberDuesStatement.total_charged} · paid {memberDuesStatement.total_paid} · waived {memberDuesStatement.total_waived} · balance {memberDuesStatement.closing_balance}
                     </span>
                     <small>{memberDuesStatement.line_count} line(s) · latest {memberDuesStatement.lines[memberDuesStatement.lines.length - 1]?.entry_type ?? "none"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {memberDuesStatementSend ? (
+                <article className="task-card selected">
+                  <div>
+                    <strong>Statement sent</strong>
+                    <span>{memberDuesStatementSend.statement_reference} · {memberDuesStatementSend.recipient_count} recipient(s) · {memberDuesStatementSend.channel}</span>
+                    <small>{memberDuesStatementSend.status} · {memberDuesStatementSend.message_id}</small>
                   </div>
                 </article>
               ) : null}

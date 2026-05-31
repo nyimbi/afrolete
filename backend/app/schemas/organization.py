@@ -1284,6 +1284,28 @@ class MemberSubscriptionStatementArtifactRead(BaseModel):
     size_bytes: int
 
 
+class MemberSubscriptionStatementSendCreate(BaseModel):
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    include_member: bool = True
+    include_guardians: bool = True
+    artifact_format: str = Field(default="txt", pattern="^(txt|csv)$")
+    subject: str | None = Field(default=None, min_length=2, max_length=240)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class MemberSubscriptionStatementSendRead(BaseModel):
+    subscription_id: UUID
+    organization_id: UUID
+    statement_reference: str
+    message_id: UUID
+    channel: CommunicationChannel
+    recipient_person_ids: list[UUID]
+    recipient_count: int
+    artifact_format: str
+    status: str
+    sent_at: datetime | None
+
+
 class MemberSubscriptionReceivablesSummaryRead(BaseModel):
     organization_id: UUID
     as_of: date
