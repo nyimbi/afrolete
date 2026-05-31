@@ -1689,9 +1689,16 @@ def saas_invoice_hosted_checkout_read(
         organization_id=invoice.organization_id,
         subscription_id=invoice.subscription_id,
         payer_type="tenant_organization",
+        payer_organization_id=invoice.organization_id,
+        hosting_payer_type="club_or_tenant_organization",
         payer_note=(
             "AfroLete hosting is charged to the tenant club, school, association, "
             "or organization. Individual members are not the platform hosting payer."
+        ),
+        member_dues_supported=True,
+        member_dues_note=(
+            "Member subscriptions and club dues can be managed separately through "
+            "M-Pesa, manual receipts, payment links, or provider settlements."
         ),
         title=f"AfroLete club hosting invoice {invoice.invoice_number}",
         memo=invoice.line_items,

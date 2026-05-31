@@ -1364,6 +1364,32 @@ class OrganizationFinancialAidApplicationRead(BaseModel):
     notes: str | None
 
 
+class OrganizationFinancialAidSummaryRead(BaseModel):
+    organization_id: UUID
+    program_id: UUID | None
+    as_of: date
+    program_count: int
+    application_count: int
+    submitted_count: int
+    awarded_count: int
+    denied_count: int
+    waitlisted_count: int
+    total_requested: Decimal
+    total_awarded: Decimal
+    total_applied: Decimal
+    annual_budget_total: Decimal
+    budget_remaining: Decimal
+    awards_available_total: int | None
+    awards_remaining: int | None
+    average_eligibility_score: Decimal
+    award_utilization_percent: Decimal
+    applied_award_percent: Decimal
+    compliance_watch_count: int
+    renewal_review_count: int
+    donor_report_summary: list[str]
+    next_actions: list[str]
+
+
 class MemberSubscriptionChargeRead(BaseModel):
     id: UUID
     organization_id: UUID
@@ -1536,8 +1562,11 @@ class MemberSubscriptionHostedCheckoutRead(BaseModel):
     plan_id: UUID
     plan_name: str
     receivable_owner_type: str
+    receivable_collector_type: str
     receivable_note: str
+    hosting_payer_type: str
     platform_hosting_charge: bool
+    mpesa_collection_supported: bool
     subject_label: str | None
     dues_reference: str
     title: str

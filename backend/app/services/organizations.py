@@ -127,6 +127,7 @@ from app.schemas.organization import (
     OrganizationFinancialAidApplicationCreate,
     OrganizationFinancialAidApplicationRead,
     OrganizationFinancialAidApplicationReview,
+    OrganizationFinancialAidSummaryRead,
     OrganizationFinancialAidProgramCreate,
     OrganizationFinancialAidProgramRead,
     OrganizationGroupCreate,
@@ -5157,6 +5158,102 @@ async def list_organization_financial_aid_applications(
     ]
 
 
+async def organization_financial_aid_summary(
+    db: AsyncSession,
+    organization_id: UUID,
+    program_id: UUID | None = None,
+    as_of: date | None = None,
+) -> OrganizationFinancialAidSummaryRead:
+    effective_as_of = as_of or date.today()
+    program_statement = select(OrganizationFinancialAidProgram).where(
+        OrganizationFinancialAidProgram.organization_id == organization_id
+    )
+    application_statement = select(OrganizationFinancialAidApplication).where(
+        OrganizationFinancialAidApplication.organization_id == organization_id
+    )
+    if program_id is not None:
+        program_statement = program_statement.where(OrganizationFinancialAidProgram.id == program_id)
+        application_statement = application_statement.where(OrganizationFinancialAidApplication.program_id == program_id)
+    programs = list((await db.scalars(program_statement)).all())
+    applications = list((await db.scalars(application_statement)).all())
+    status_counts: dict[str, int] = {}
+    total_requested = Decimal("0.00")
+    total_awarded = Decimal("0.00")
+    total_applied = Decimal("0.00")
+    eligibility_total = 0
+    compliance_watch_count = 0
+    renewal_review_count = 0
+
+    for application in applications:
+        status_counts[application.status] = status_counts.get(application.status, 0) + 1
+        total_requested += application.amount_requested
+        total_awarded += application.amount_awarded
+        total_applied += application.amount_applied
+        eligibility_total += application.eligibility_score
+        if application.status in {"conditionally_approved", "awarded"} and application.amount_applied < application.amount_awarded:
+            compliance_watch_count += 1
+        if application.status == "awarded" and application.decided_on is not None:
+            days_since_decision = (effective_as_of - application.decided_on).days
+            if days_since_decision >= 300:
+                renewal_review_count += 1
+
+    annual_budget_total = sum((program.annual_budget for program in programs), Decimal("0.00")).quantize(Decimal("0.01"))
+    budget_awarded = sum((program.budget_awarded for program in programs), Decimal("0.00")).quantize(Decimal("0.01"))
+    budget_remaining = max(Decimal("0.00"), annual_budget_total - budget_awarded).quantize(Decimal("0.01"))
+    awards_available_values = [program.awards_available for program in programs if program.awards_available is not None]
+    awards_available_total = sum(awards_available_values) if awards_available_values else None
+    awards_made = sum(program.awards_made for program in programs)
+    awards_remaining = max(0, awards_available_total - awards_made) if awards_available_total is not None else None
+    average_eligibility = (
+        (Decimal(eligibility_total) / Decimal(len(applications))).quantize(Decimal("0.01"))
+        if applications
+        else Decimal("0.00")
+    )
+    award_utilization = (
+        (budget_awarded / annual_budget_total * Decimal("100")).quantize(Decimal("0.01"))
+        if annual_budget_total > 0
+        else Decimal("0.00")
+    )
+    applied_award_percent = (
+        (total_applied / total_awarded * Decimal("100")).quantize(Decimal("0.01"))
+        if total_awarded > 0
+        else Decimal("0.00")
+    )
+    donor_report_summary = financial_aid_donor_report_lines(programs, applications, total_awarded, total_applied)
+    next_actions = financial_aid_next_actions(
+        applications=applications,
+        budget_remaining=budget_remaining,
+        awards_remaining=awards_remaining,
+        compliance_watch_count=compliance_watch_count,
+        renewal_review_count=renewal_review_count,
+    )
+    return OrganizationFinancialAidSummaryRead(
+        organization_id=organization_id,
+        program_id=program_id,
+        as_of=effective_as_of,
+        program_count=len(programs),
+        application_count=len(applications),
+        submitted_count=status_counts.get("submitted", 0),
+        awarded_count=status_counts.get("awarded", 0) + status_counts.get("approved", 0) + status_counts.get("conditionally_approved", 0),
+        denied_count=status_counts.get("denied", 0),
+        waitlisted_count=status_counts.get("waitlisted", 0),
+        total_requested=total_requested.quantize(Decimal("0.01")),
+        total_awarded=total_awarded.quantize(Decimal("0.01")),
+        total_applied=total_applied.quantize(Decimal("0.01")),
+        annual_budget_total=annual_budget_total,
+        budget_remaining=budget_remaining,
+        awards_available_total=awards_available_total,
+        awards_remaining=awards_remaining,
+        average_eligibility_score=average_eligibility,
+        award_utilization_percent=award_utilization,
+        applied_award_percent=applied_award_percent,
+        compliance_watch_count=compliance_watch_count,
+        renewal_review_count=renewal_review_count,
+        donor_report_summary=donor_report_summary,
+        next_actions=next_actions,
+    )
+
+
 async def review_organization_financial_aid_application(
     db: AsyncSession,
     identity: CurrentIdentity,
@@ -5301,6 +5398,52 @@ def financial_aid_recommendation(
     if score >= program.minimum_score:
         return "Eligible financial aid candidate; committee should confirm documentation and award level."
     return "Below automatic threshold; committee review, documentation, or waitlist decision required."
+
+
+def financial_aid_donor_report_lines(
+    programs: list[OrganizationFinancialAidProgram],
+    applications: list[OrganizationFinancialAidApplication],
+    total_awarded: Decimal,
+    total_applied: Decimal,
+) -> list[str]:
+    if not programs:
+        return ["No financial aid programs are configured yet."]
+    recipient_count = len([item for item in applications if item.status in {"awarded", "approved", "conditionally_approved"}])
+    fund_sources = sorted({program.fund_source for program in programs if program.fund_source})
+    lines = [
+        f"{recipient_count} recipient(s) supported across {len(programs)} program(s).",
+        f"{total_awarded.quantize(Decimal('0.01'))} awarded; {total_applied.quantize(Decimal('0.01'))} applied to dues relief.",
+    ]
+    if fund_sources:
+        lines.append(f"Fund sources: {', '.join(fund_sources[:3])}.")
+    return lines
+
+
+def financial_aid_next_actions(
+    *,
+    applications: list[OrganizationFinancialAidApplication],
+    budget_remaining: Decimal,
+    awards_remaining: int | None,
+    compliance_watch_count: int,
+    renewal_review_count: int,
+) -> list[str]:
+    actions: list[str] = []
+    submitted_count = len([item for item in applications if item.status == "submitted"])
+    if submitted_count:
+        actions.append(f"Review {submitted_count} submitted financial aid application(s).")
+    if compliance_watch_count:
+        actions.append(f"Follow up on {compliance_watch_count} award(s) with unapplied or conditional aid.")
+    if renewal_review_count:
+        actions.append(f"Run renewal review for {renewal_review_count} award(s) approaching one year.")
+    if budget_remaining <= 0:
+        actions.append("Program budget is fully allocated; pause new awards or add funding.")
+    if awards_remaining == 0:
+        actions.append("Award slots are fully used; waitlist additional eligible applicants.")
+    if not applications:
+        actions.append("Open financial aid applications for eligible members with dues balances.")
+    if not actions:
+        actions.append("Prepare donor impact update and monitor recipient compliance.")
+    return actions
 
 
 async def list_member_subscription_charges(
@@ -6522,11 +6665,14 @@ def member_subscription_hosted_checkout_read(
         plan_id=plan.id,
         plan_name=plan.name,
         receivable_owner_type="tenant_organization",
+        receivable_collector_type="club",
         receivable_note=(
             "This is a club-managed member dues receivable collected for the tenant organization; "
             "it does not pay AfroLete platform hosting."
         ),
+        hosting_payer_type="club_or_tenant_organization",
         platform_hosting_charge=False,
+        mpesa_collection_supported=True,
         subject_label=subject_label,
         dues_reference=subscription.external_reference or f"DUES-{str(subscription.id).split('-')[0].upper()}",
         title=title,

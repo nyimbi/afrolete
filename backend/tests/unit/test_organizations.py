@@ -329,6 +329,9 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert public_checkout["payment_methods"][0] == "mobile_money"
     assert public_checkout["platform_hosting_charge"] is False
     assert public_checkout["receivable_owner_type"] == "tenant_organization"
+    assert public_checkout["receivable_collector_type"] == "club"
+    assert public_checkout["hosting_payer_type"] == "club_or_tenant_organization"
+    assert public_checkout["mpesa_collection_supported"] is True
     assert "does not pay AfroLete platform hosting" in public_checkout["receivable_note"]
 
     reminder_response = client.post(
@@ -739,6 +742,32 @@ def test_financial_aid_awards_apply_to_club_member_dues(client, identity_headers
     ).json()
     assert programs[0]["budget_awarded"] == "400.00"
     assert programs[0]["awards_made"] == 1
+
+    summary_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/financial-aid-summary",
+        headers=identity_headers,
+        params={"program_id": program["id"], "as_of": "2026-06-30"},
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["program_count"] == 1
+    assert summary["application_count"] == 1
+    assert summary["submitted_count"] == 0
+    assert summary["awarded_count"] == 1
+    assert summary["total_requested"] == "400.00"
+    assert summary["total_awarded"] == "400.00"
+    assert summary["total_applied"] == "400.00"
+    assert summary["annual_budget_total"] == "2000.00"
+    assert summary["budget_remaining"] == "1600.00"
+    assert summary["awards_available_total"] == 2
+    assert summary["awards_remaining"] == 1
+    assert summary["average_eligibility_score"] == "100.00"
+    assert summary["award_utilization_percent"] == "20.00"
+    assert summary["applied_award_percent"] == "100.00"
+    assert summary["compliance_watch_count"] == 0
+    assert summary["renewal_review_count"] == 0
+    assert "1 recipient" in summary["donor_report_summary"][0]
+    assert summary["next_actions"]
 
     charges = client.get(
         f"/api/v1/organizations/{organization['id']}/member-subscription-charges",

@@ -307,7 +307,11 @@ def test_saas_invoice_hosted_checkout_settles_invoice(client, identity_headers) 
     assert link["hosted_checkout"]["open_amount"] == "249.00"
     assert link["hosted_checkout"]["session_status"] == "ready"
     assert link["hosted_checkout"]["payer_type"] == "tenant_organization"
+    assert link["hosted_checkout"]["payer_organization_id"] == organization["id"]
+    assert link["hosted_checkout"]["hosting_payer_type"] == "club_or_tenant_organization"
+    assert link["hosted_checkout"]["member_dues_supported"] is True
     assert "Individual members are not the platform hosting payer" in link["hosted_checkout"]["payer_note"]
+    assert "M-Pesa" in link["hosted_checkout"]["member_dues_note"]
     assert "kind=saas" in link["checkout_url"]
 
     checkout_response = client.get(

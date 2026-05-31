@@ -73,6 +73,7 @@ from app.schemas.organization import (
     OrganizationFinancialAidApplicationCreate,
     OrganizationFinancialAidApplicationRead,
     OrganizationFinancialAidApplicationReview,
+    OrganizationFinancialAidSummaryRead,
     OrganizationFinancialAidProgramCreate,
     OrganizationFinancialAidProgramRead,
     OrganizationGroupCreate,
@@ -198,6 +199,7 @@ from app.services.organizations import (
     list_organization_external_reports,
     list_organization_financial_aid_applications,
     list_organization_financial_aid_programs,
+    organization_financial_aid_summary,
     list_organization_group_members,
     list_organization_groups,
     list_organization_programs,
@@ -2183,6 +2185,16 @@ async def list_organization_financial_aid_applications_route(
     db: AsyncSession = Depends(get_db),
 ) -> list[OrganizationFinancialAidApplicationRead]:
     return await list_organization_financial_aid_applications(db, organization_id, program_id)
+
+
+@router.get("/{organization_id}/financial-aid-summary", response_model=OrganizationFinancialAidSummaryRead)
+async def organization_financial_aid_summary_route(
+    organization_id: UUID,
+    program_id: UUID | None = Query(default=None),
+    as_of: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> OrganizationFinancialAidSummaryRead:
+    return await organization_financial_aid_summary(db, organization_id, program_id, as_of)
 
 
 @router.patch(

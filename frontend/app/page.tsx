@@ -399,6 +399,7 @@ import type {
   OrganizationExternalReportSummaryRead,
   OrganizationFinancialAidApplicationRead,
   OrganizationFinancialAidProgramRead,
+  OrganizationFinancialAidSummaryRead,
   OrganizationGroupMembershipRead,
   OrganizationGroupRead,
   OrganizationMarketProfileRead,
@@ -1898,6 +1899,7 @@ export default function HomePage() {
   const [memberDuesPaymentPlans, setMemberDuesPaymentPlans] = useState<MemberSubscriptionPaymentPlanRead[]>([]);
   const [financialAidPrograms, setFinancialAidPrograms] = useState<OrganizationFinancialAidProgramRead[]>([]);
   const [financialAidApplications, setFinancialAidApplications] = useState<OrganizationFinancialAidApplicationRead[]>([]);
+  const [financialAidSummary, setFinancialAidSummary] = useState<OrganizationFinancialAidSummaryRead | null>(null);
   const [memberDuesReceivablesSummary, setMemberDuesReceivablesSummary] =
     useState<MemberSubscriptionReceivablesSummaryRead | null>(null);
   const [memberDuesChargeRun, setMemberDuesChargeRun] = useState<MemberSubscriptionChargeRunRead | null>(null);
@@ -4437,7 +4439,7 @@ export default function HomePage() {
   }, [identity]);
 
   const loadMemberDues = useCallback(async (organizationId: string) => {
-    const [plans, subscriptions, charges, paymentPlans, aidPrograms, aidApplications, summary] = await Promise.all([
+    const [plans, subscriptions, charges, paymentPlans, aidPrograms, aidApplications, aidSummary, summary] = await Promise.all([
       apiRequest<MemberSubscriptionPlanRead[]>(`/organizations/${organizationId}/member-subscription-plans`),
       apiRequest<MemberSubscriptionRead[]>(`/organizations/${organizationId}/member-subscriptions`),
       apiRequest<MemberSubscriptionChargeRead[]>(`/organizations/${organizationId}/member-subscription-charges`),
@@ -4446,6 +4448,7 @@ export default function HomePage() {
       ),
       apiRequest<OrganizationFinancialAidProgramRead[]>(`/organizations/${organizationId}/financial-aid-programs`),
       apiRequest<OrganizationFinancialAidApplicationRead[]>(`/organizations/${organizationId}/financial-aid-applications`),
+      apiRequest<OrganizationFinancialAidSummaryRead>(`/organizations/${organizationId}/financial-aid-summary`),
       apiRequest<MemberSubscriptionReceivablesSummaryRead>(
         `/organizations/${organizationId}/member-subscription-charges/summary`
       )
@@ -4456,6 +4459,7 @@ export default function HomePage() {
     setMemberDuesPaymentPlans(paymentPlans);
     setFinancialAidPrograms(aidPrograms);
     setFinancialAidApplications(aidApplications);
+    setFinancialAidSummary(aidSummary);
     setMemberDuesReceivablesSummary(summary);
     setSelectedMemberSubscriptionId((current) =>
       subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
@@ -6168,6 +6172,7 @@ export default function HomePage() {
       setMemberDuesPaymentPlans([]);
       setFinancialAidPrograms([]);
       setFinancialAidApplications([]);
+      setFinancialAidSummary(null);
       setMemberDuesReceivablesSummary(null);
       setMemberDuesChargeRun(null);
       setMemberSubscriptionPayment(null);
@@ -7539,8 +7544,9 @@ export default function HomePage() {
             body: financialAidProgramForm
           }
         ),
-      (program) => {
+      async (program) => {
         setFinancialAidPrograms((current) => [program, ...current.filter((item) => item.id !== program.id)]);
+        await loadMemberDues(selectedOrganizationId);
         addLog(`${program.name} financial aid program ready`, "good");
       }
     );
@@ -7573,11 +7579,12 @@ export default function HomePage() {
             }
           }
         ),
-      (application) => {
+      async (application) => {
         setFinancialAidApplications((current) => [
           application,
           ...current.filter((item) => item.id !== application.id)
         ]);
+        await loadMemberDues(selectedOrganizationId);
         addLog(`Financial aid eligibility ${application.eligibility_score}/100`, "good");
       }
     );
@@ -24859,6 +24866,20 @@ export default function HomePage() {
                       {memberDuesReceivablesSummary.collection_rate_percent}% collected · {memberDuesReceivablesSummary.waived_charge_count} waived · oldest {memberDuesReceivablesSummary.oldest_open_due_on ?? "none"}
                     </small>
                     <small>{memberDuesReceivablesSummary.next_actions[0] ?? "Dues ledger is current."}</small>
+                  </div>
+                </article>
+              ) : null}
+              {financialAidSummary ? (
+                <article className={`task-card ${financialAidSummary.compliance_watch_count > 0 ? "risk-card" : "selected"}`}>
+                  <div>
+                    <strong>Financial aid impact</strong>
+                    <span>
+                      {financialAidSummary.total_applied} applied · {financialAidSummary.budget_remaining} budget left · {financialAidSummary.awards_remaining ?? "open"} slots left
+                    </span>
+                    <small>
+                      {financialAidSummary.awarded_count} awarded · {financialAidSummary.submitted_count} pending · {financialAidSummary.average_eligibility_score}/100 eligibility
+                    </small>
+                    <small>{financialAidSummary.next_actions[0] ?? financialAidSummary.donor_report_summary[0] ?? "Aid portfolio is current."}</small>
                   </div>
                 </article>
               ) : null}

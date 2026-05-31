@@ -1130,6 +1130,32 @@ export type OrganizationFinancialAidApplicationRead = {
   notes: string | null;
 };
 
+export type OrganizationFinancialAidSummaryRead = {
+  organization_id: UUID;
+  program_id: UUID | null;
+  as_of: string;
+  program_count: number;
+  application_count: number;
+  submitted_count: number;
+  awarded_count: number;
+  denied_count: number;
+  waitlisted_count: number;
+  total_requested: string;
+  total_awarded: string;
+  total_applied: string;
+  annual_budget_total: string;
+  budget_remaining: string;
+  awards_available_total: number | null;
+  awards_remaining: number | null;
+  average_eligibility_score: string;
+  award_utilization_percent: string;
+  applied_award_percent: string;
+  compliance_watch_count: number;
+  renewal_review_count: number;
+  donor_report_summary: string[];
+  next_actions: string[];
+};
+
 export type MemberSubscriptionChargeRead = {
   id: UUID;
   organization_id: UUID;
@@ -1280,8 +1306,11 @@ export type MemberSubscriptionHostedCheckoutRead = {
   plan_id: UUID;
   plan_name: string;
   receivable_owner_type: string;
+  receivable_collector_type: string;
   receivable_note: string;
+  hosting_payer_type: string;
   platform_hosting_charge: boolean;
+  mpesa_collection_supported: boolean;
   subject_label: string | null;
   dues_reference: string;
   title: string;
@@ -6041,7 +6070,11 @@ export type SaaSInvoiceHostedCheckoutRead = {
   organization_id: UUID;
   subscription_id: UUID;
   payer_type: string;
+  payer_organization_id: UUID;
+  hosting_payer_type: string;
   payer_note: string;
+  member_dues_supported: boolean;
+  member_dues_note: string;
   title: string;
   memo: string | null;
   due_on: string | null;
