@@ -416,6 +416,24 @@ def test_club_manages_member_dues_without_saas_subscription_coupling(client, ide
     assert waived_summary["total_waived"] == "1500.00"
     assert waived_summary["waived_charge_count"] == 1
 
+    statement_response = client.get(
+        f"/api/v1/organizations/member-subscriptions/{subscription['id']}/statement",
+        headers=identity_headers,
+    )
+    assert statement_response.status_code == 200
+    statement = statement_response.json()
+    assert statement["statement_reference"].startswith("DUES-STMT-")
+    assert statement["subject_label"] == "Member Dues"
+    assert statement["total_charged"] == "3000.00"
+    assert statement["total_paid"] == "1500.00"
+    assert statement["total_waived"] == "1500.00"
+    assert statement["closing_balance"] == "0.00"
+    assert statement["line_count"] == 5
+    assert [line["entry_type"] for line in statement["lines"]].count("charge") == 2
+    assert [line["entry_type"] for line in statement["lines"]].count("payment") == 2
+    assert [line["entry_type"] for line in statement["lines"]].count("waiver") == 1
+    assert statement["lines"][-1]["balance_amount"] == "0.00"
+
     billing_summary_response = client.get(
         f"/api/v1/billing/summary?organization_id={organization['id']}",
         headers=identity_headers,

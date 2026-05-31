@@ -33,6 +33,7 @@ from app.schemas.organization import (
     MemberSubscriptionPlanCreate,
     MemberSubscriptionPlanRead,
     MemberSubscriptionRead,
+    MemberSubscriptionStatementRead,
     MemberSubscriptionReminderRunCreate,
     MemberSubscriptionReminderRunRead,
     MembershipRead,
@@ -156,6 +157,7 @@ from app.services.organizations import (
     registration_launch_command_center,
     get_public_registration_account_readiness,
     get_member_subscription_hosted_checkout,
+    get_member_subscription_statement,
     get_registration_payment_hosted_checkout,
     get_organization_for_identity,
     get_public_registration_inquiry,
@@ -2036,6 +2038,28 @@ async def record_member_subscription_payment_route(
         notes=payment.notes,
         subscription_balance_amount=subscription.balance_amount,
         subscription_status=subscription.status,
+    )
+
+
+@router.get(
+    "/member-subscriptions/{subscription_id}/statement",
+    response_model=MemberSubscriptionStatementRead,
+)
+async def get_member_subscription_statement_route(
+    subscription_id: UUID,
+    period_start: date | None = Query(default=None),
+    period_end: date | None = Query(default=None),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> MemberSubscriptionStatementRead:
+    return await get_member_subscription_statement(
+        db,
+        identity,
+        subscription_id,
+        authz,
+        period_start=period_start,
+        period_end=period_end,
     )
 
 

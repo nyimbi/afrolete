@@ -376,6 +376,7 @@ import type {
   MemberSubscriptionRead,
   MemberSubscriptionReceivablesSummaryRead,
   MemberSubscriptionReminderRunRead,
+  MemberSubscriptionStatementRead,
   MetricCategory,
   MetricDefinitionRead,
   MetricVerificationStatus,
@@ -1893,6 +1894,7 @@ export default function HomePage() {
     useState<MemberSubscriptionReceivablesSummaryRead | null>(null);
   const [memberDuesChargeRun, setMemberDuesChargeRun] = useState<MemberSubscriptionChargeRunRead | null>(null);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
+  const [memberDuesStatement, setMemberDuesStatement] = useState<MemberSubscriptionStatementRead | null>(null);
   const [memberDuesCheckoutLink, setMemberDuesCheckoutLink] = useState<MemberSubscriptionCheckoutLinkRead | null>(null);
   const [memberDuesReminderRun, setMemberDuesReminderRun] = useState<MemberSubscriptionReminderRunRead | null>(null);
   const [marketProfiles, setMarketProfiles] = useState<OrganizationMarketProfileRead[]>([]);
@@ -6105,6 +6107,7 @@ export default function HomePage() {
       setMemberDuesReceivablesSummary(null);
       setMemberDuesChargeRun(null);
       setMemberSubscriptionPayment(null);
+      setMemberDuesStatement(null);
       setMemberDuesCheckoutLink(null);
       setMemberDuesReminderRun(null);
       setSelectedMemberSubscriptionId("");
@@ -7381,6 +7384,26 @@ export default function HomePage() {
           )
         );
         addLog(`Recorded ${payment.provider.toUpperCase()} dues payment`, "good");
+      }
+    );
+  };
+
+  const loadMemberDuesStatement = () => {
+    const subscriptionId = selectedMemberSubscriptionId || memberSubscriptions[0]?.id;
+    if (!subscriptionId) {
+      addLog("Select a member dues account before loading a statement", "bad");
+      return;
+    }
+    runAction(
+      "load-member-dues-statement",
+      () =>
+        apiRequest<MemberSubscriptionStatementRead>(
+          `/organizations/member-subscriptions/${subscriptionId}/statement`,
+          { identity }
+        ),
+      (statement) => {
+        setMemberDuesStatement(statement);
+        addLog(`Statement ${statement.statement_reference} ready`, "good");
       }
     );
   };
@@ -24438,6 +24461,7 @@ export default function HomePage() {
               <button type="button" onClick={createMemberDuesSubscription} disabled={busyAction !== null}>Assign selected member</button>
               <button type="button" onClick={runMemberDuesCharges} disabled={busyAction !== null}>Bill cycle</button>
               <button type="button" onClick={recordMemberDuesPayment} disabled={busyAction !== null}>Record payment</button>
+              <button type="button" onClick={loadMemberDuesStatement} disabled={busyAction !== null}>Statement</button>
               <button type="button" onClick={createMemberDuesCheckoutLink} disabled={busyAction !== null}>Payment link</button>
               <button type="button" onClick={runMemberDuesReminders} disabled={busyAction !== null}>Remind due</button>
             </div>
@@ -24521,6 +24545,17 @@ export default function HomePage() {
                     <strong>Member dues reminders</strong>
                     <span>{memberDuesReminderRun.reminded_count} sent · {memberDuesReminderRun.marked_past_due_count} past due · {memberDuesReminderRun.skipped_count} skipped</span>
                     <small>{memberDuesReminderRun.items[0]?.reason ?? "No dues reminders due"}</small>
+                  </div>
+                </article>
+              ) : null}
+              {memberDuesStatement ? (
+                <article className="task-card selected">
+                  <div>
+                    <strong>{memberDuesStatement.statement_reference} · {memberDuesStatement.subject_label ?? "Member account"}</strong>
+                    <span>
+                      Charged {memberDuesStatement.total_charged} · paid {memberDuesStatement.total_paid} · waived {memberDuesStatement.total_waived} · balance {memberDuesStatement.closing_balance}
+                    </span>
+                    <small>{memberDuesStatement.line_count} line(s) · latest {memberDuesStatement.lines[memberDuesStatement.lines.length - 1]?.entry_type ?? "none"}</small>
                   </div>
                 </article>
               ) : null}

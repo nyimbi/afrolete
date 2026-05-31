@@ -1239,6 +1239,38 @@ class MemberSubscriptionChargeWaiverRead(BaseModel):
     message: str
 
 
+class MemberSubscriptionStatementLineRead(BaseModel):
+    entry_date: date
+    entry_type: str
+    reference_id: UUID
+    description: str
+    debit_amount: Decimal
+    credit_amount: Decimal
+    balance_amount: Decimal
+    currency: str
+    metadata: dict[str, str | None] = Field(default_factory=dict)
+
+
+class MemberSubscriptionStatementRead(BaseModel):
+    subscription_id: UUID
+    organization_id: UUID
+    plan_id: UUID
+    plan_name: str
+    subject_label: str | None
+    statement_reference: str
+    period_start: date | None
+    period_end: date | None
+    generated_at: datetime
+    currency: str
+    total_charged: Decimal
+    total_paid: Decimal
+    total_waived: Decimal
+    opening_balance: Decimal
+    closing_balance: Decimal
+    line_count: int
+    lines: list[MemberSubscriptionStatementLineRead]
+
+
 class MemberSubscriptionReceivablesSummaryRead(BaseModel):
     organization_id: UUID
     as_of: date

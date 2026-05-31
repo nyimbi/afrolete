@@ -92,6 +92,8 @@ from app.schemas.organization import (
     MemberSubscriptionReceivablesSummaryRead,
     MemberSubscriptionCreate,
     MemberSubscriptionHostedCheckoutRead,
+    MemberSubscriptionStatementLineRead,
+    MemberSubscriptionStatementRead,
     MemberSubscriptionReminderItemRead,
     MemberSubscriptionReminderRunCreate,
     MemberSubscriptionReminderRunRead,
@@ -4975,6 +4977,133 @@ async def waive_member_subscription_charge(
         subscription_balance_amount=subscription.balance_amount,
         charge_status=charge.status,
         message=f"Waived {amount} {charge.currency} from member dues charge.",
+    )
+
+
+async def get_member_subscription_statement(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    subscription_id: UUID,
+    authz: AuthorizationService,
+    *,
+    period_start: date | None = None,
+    period_end: date | None = None,
+) -> MemberSubscriptionStatementRead:
+    subscription, plan, subject_label = await get_member_subscription_checkout_subject(db, subscription_id)
+    await ensure_manage_organization(db, identity, subscription.organization_id, authz)
+    charge_statement = select(MemberSubscriptionCharge).where(
+        MemberSubscriptionCharge.subscription_id == subscription.id
+    )
+    payment_statement = select(MemberSubscriptionPayment).where(
+        MemberSubscriptionPayment.subscription_id == subscription.id
+    )
+    if period_start is not None:
+        charge_statement = charge_statement.where(MemberSubscriptionCharge.period_end >= period_start)
+        payment_statement = payment_statement.where(MemberSubscriptionPayment.received_at >= datetime.combine(period_start, datetime.min.time(), UTC))
+    if period_end is not None:
+        charge_statement = charge_statement.where(MemberSubscriptionCharge.period_start <= period_end)
+        payment_statement = payment_statement.where(MemberSubscriptionPayment.received_at <= datetime.combine(period_end, datetime.max.time(), UTC))
+    charges = list((await db.scalars(charge_statement)).all())
+    payments = list((await db.scalars(payment_statement)).all())
+
+    entries: list[tuple[date, int, MemberSubscriptionStatementLineRead]] = []
+    for charge in charges:
+        entries.append(
+            (
+                charge.created_at.date(),
+                10,
+                MemberSubscriptionStatementLineRead(
+                    entry_date=charge.created_at.date(),
+                    entry_type="charge",
+                    reference_id=charge.id,
+                    description=f"{plan.name}: {charge.period_start.isoformat()} to {charge.period_end.isoformat()}",
+                    debit_amount=charge.amount.quantize(Decimal("0.01")),
+                    credit_amount=Decimal("0.00"),
+                    balance_amount=Decimal("0.00"),
+                    currency=charge.currency,
+                    metadata={
+                        "status": charge.status,
+                        "source": charge.source,
+                        "due_on": charge.due_on.isoformat() if charge.due_on else None,
+                    },
+                ),
+            )
+        )
+        if charge.amount_waived > 0:
+            waiver_date = (charge.waived_at or charge.updated_at).date()
+            entries.append(
+                (
+                    waiver_date,
+                    30,
+                    MemberSubscriptionStatementLineRead(
+                        entry_date=waiver_date,
+                        entry_type="waiver",
+                        reference_id=charge.id,
+                        description=charge.waiver_reason or f"Dues waiver for {plan.name}",
+                        debit_amount=Decimal("0.00"),
+                        credit_amount=charge.amount_waived.quantize(Decimal("0.01")),
+                        balance_amount=Decimal("0.00"),
+                        currency=charge.currency,
+                        metadata={
+                            "status": charge.status,
+                            "waived_by_person_id": str(charge.waived_by_person_id) if charge.waived_by_person_id else None,
+                        },
+                    ),
+                )
+            )
+    for payment in payments:
+        if payment.status != "succeeded":
+            continue
+        entries.append(
+            (
+                payment.received_at.date(),
+                20,
+                MemberSubscriptionStatementLineRead(
+                    entry_date=payment.received_at.date(),
+                    entry_type="payment",
+                    reference_id=payment.id,
+                    description=payment.notes or payment.raw_reference or f"{payment.provider.upper()} dues payment",
+                    debit_amount=Decimal("0.00"),
+                    credit_amount=payment.amount.quantize(Decimal("0.01")),
+                    balance_amount=Decimal("0.00"),
+                    currency=payment.currency,
+                    metadata={
+                        "provider": payment.provider,
+                        "method": payment.method,
+                        "status": payment.status,
+                        "external_payment_id": payment.external_payment_id,
+                    },
+                ),
+            )
+        )
+
+    running_balance = Decimal("0.00")
+    lines: list[MemberSubscriptionStatementLineRead] = []
+    for _entry_date, _priority, line in sorted(entries, key=lambda entry: (entry[0], entry[1], str(entry[2].reference_id))):
+        running_balance = (running_balance + line.debit_amount - line.credit_amount).quantize(Decimal("0.01"))
+        lines.append(line.model_copy(update={"balance_amount": running_balance}))
+
+    total_charged = sum((charge.amount for charge in charges), Decimal("0.00")).quantize(Decimal("0.01"))
+    total_paid = sum((payment.amount for payment in payments if payment.status == "succeeded"), Decimal("0.00")).quantize(Decimal("0.01"))
+    total_waived = sum((charge.amount_waived for charge in charges), Decimal("0.00")).quantize(Decimal("0.01"))
+    return MemberSubscriptionStatementRead(
+        subscription_id=subscription.id,
+        organization_id=subscription.organization_id,
+        plan_id=plan.id,
+        plan_name=plan.name,
+        subject_label=subject_label,
+        statement_reference=f"DUES-STMT-{str(subscription.id).split('-')[0].upper()}",
+        period_start=period_start,
+        period_end=period_end,
+        generated_at=datetime.now(UTC),
+        currency=plan.currency.upper(),
+        total_charged=total_charged,
+        total_paid=total_paid,
+        total_waived=total_waived,
+        opening_balance=Decimal("0.00"),
+        closing_balance=subscription.balance_amount.quantize(Decimal("0.01")),
+        line_count=len(lines),
+        lines=lines,
     )
 
 

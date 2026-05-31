@@ -1138,6 +1138,38 @@ export type MemberSubscriptionChargeRunRead = {
   items: MemberSubscriptionChargeRunItemRead[];
 };
 
+export type MemberSubscriptionStatementLineRead = {
+  entry_date: string;
+  entry_type: string;
+  reference_id: UUID;
+  description: string;
+  debit_amount: string;
+  credit_amount: string;
+  balance_amount: string;
+  currency: string;
+  metadata: Record<string, string | null>;
+};
+
+export type MemberSubscriptionStatementRead = {
+  subscription_id: UUID;
+  organization_id: UUID;
+  plan_id: UUID;
+  plan_name: string;
+  subject_label: string | null;
+  statement_reference: string;
+  period_start: string | null;
+  period_end: string | null;
+  generated_at: string;
+  currency: string;
+  total_charged: string;
+  total_paid: string;
+  total_waived: string;
+  opening_balance: string;
+  closing_balance: string;
+  line_count: number;
+  lines: MemberSubscriptionStatementLineRead[];
+};
+
 export type MemberSubscriptionHostedCheckoutRead = {
   subscription_id: UUID;
   organization_id: UUID;
