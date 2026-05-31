@@ -6782,6 +6782,9 @@ export type InsurancePolicyRead = {
   effective_on: string;
   expires_on: string;
   renewal_notice_days: number;
+  renewal_last_reminded_at: string | null;
+  renewal_reminder_message_id: UUID | null;
+  renewal_reminder_count: number;
   certificate_url: string | null;
   document_url: string | null;
   notes: string | null;
@@ -6821,6 +6824,36 @@ export type InsurancePortfolioSummaryRead = {
   paid_claims_cents: number;
   currencies: string[];
   renewal_alerts: string[];
+};
+
+export type InsurancePolicyRenewalReminderItemRead = {
+  policy_id: UUID;
+  policy_name: string;
+  policy_number: string;
+  provider_name: string;
+  expires_on: string;
+  days_until_expiry: number;
+  recipient_count: number;
+  action: string;
+  reason: string;
+  message_id: UUID | null;
+};
+
+export type InsurancePolicyRenewalReminderRunRead = {
+  organization_id: UUID | null;
+  channel: CommunicationChannel;
+  as_of: string;
+  horizon_days: number;
+  repeat_after_days: number;
+  eligible_count: number;
+  executed_count: number;
+  reminded_count: number;
+  skipped_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  policy_ids: UUID[];
+  message_ids: UUID[];
+  items: InsurancePolicyRenewalReminderItemRead[];
 };
 
 export type IncidentInsuranceClaimProviderSyncRead = {

@@ -32,6 +32,8 @@ from app.models.enums import (
     ConsentStatus,
     IncidentReportPackageStatus,
     InsuranceClaimStatus,
+    MemberSubjectType,
+    MembershipRole,
     MedicalClearanceStatus,
     ParticipationClearanceStatus,
     SafeguardingIncidentSeverity,
@@ -58,7 +60,7 @@ from app.models.event import (
 from app.models.agent import AgentDecisionAppeal
 from app.models.communication import CommunicationMessage, MessageRecipient
 from app.models.identity import AppUser, Person
-from app.models.organization import Organization
+from app.models.organization import Membership, Organization
 from app.models.performance import (
     OppositionScoutingVideoAsset,
     PerformanceAchievementAward,
@@ -138,6 +140,9 @@ from app.schemas.safeguarding import (
     InsuranceCoverageVerificationRead,
     InsurancePolicyCreate,
     InsurancePolicyRead,
+    InsurancePolicyRenewalReminderItemRead,
+    InsurancePolicyRenewalReminderRunCreate,
+    InsurancePolicyRenewalReminderRunRead,
     InsurancePolicyUpdate,
     InsurancePortfolioSummaryRead,
     IncidentMedicalClearanceCreate,
@@ -482,6 +487,9 @@ async def insurance_policy_read(db: AsyncSession, policy: InsurancePolicy) -> In
         paid_claims_cents=sum(claim.paid_amount_cents for claim in claims),
         renewal_due=insurance_policy_renewal_due(policy, today),
         days_until_expiry=(policy.expires_on - today).days,
+        renewal_last_reminded_at=policy.renewal_last_reminded_at,
+        renewal_reminder_message_id=policy.renewal_reminder_message_id,
+        renewal_reminder_count=policy.renewal_reminder_count,
     )
 
 
@@ -3024,6 +3032,259 @@ async def insurance_portfolio_summary(
             f"{policy.name} ({policy.policy_number}) expires on {policy.expires_on.isoformat()}."
             for policy in expiring_policies[:10]
         ],
+    )
+
+
+async def run_insurance_policy_renewal_reminders(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    payload: InsurancePolicyRenewalReminderRunCreate,
+    authz: AuthorizationService,
+) -> InsurancePolicyRenewalReminderRunRead:
+    await ensure_org_manage(authz, payload.organization_id, identity)
+    return await run_insurance_policy_renewal_reminder_worker(
+        db,
+        organization_id=payload.organization_id,
+        channel=payload.channel,
+        as_of=payload.as_of,
+        horizon_days=payload.horizon_days,
+        repeat_after_days=payload.repeat_after_days,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+    )
+
+
+async def run_insurance_policy_renewal_reminder_worker(
+    db: AsyncSession,
+    organization_id: UUID | None = None,
+    *,
+    channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    as_of: date | None = None,
+    horizon_days: int = 120,
+    repeat_after_days: int = 14,
+    limit: int = 50,
+    dry_run: bool = False,
+) -> InsurancePolicyRenewalReminderRunRead:
+    effective_as_of = as_of or today_utc()
+    policies = await insurance_policies_due_for_renewal_reminder(
+        db,
+        organization_id=organization_id,
+        as_of=effective_as_of,
+        horizon_days=horizon_days,
+        limit=limit,
+    )
+    items: list[InsurancePolicyRenewalReminderItemRead] = []
+    policy_ids: list[UUID] = []
+    message_ids: list[UUID] = []
+    executed_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for policy in policies:
+        executed_count += 1
+        days_until_expiry = (policy.expires_on - effective_as_of).days
+        if not insurance_policy_renewal_due(policy, effective_as_of):
+            skipped_count += 1
+            items.append(
+                insurance_policy_renewal_reminder_item(
+                    policy,
+                    effective_as_of,
+                    action="skipped",
+                    reason="Policy is inside the worker horizon but not inside its configured renewal notice window.",
+                )
+            )
+            continue
+        if insurance_policy_recently_reminded(policy, repeat_after_days):
+            skipped_count += 1
+            items.append(
+                insurance_policy_renewal_reminder_item(
+                    policy,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"Renewal reminder already sent within {repeat_after_days} days.",
+                    message_id=policy.renewal_reminder_message_id,
+                )
+            )
+            continue
+        recipients = await insurance_policy_manager_recipients(db, policy.organization_id, channel)
+        if not recipients:
+            skipped_count += 1
+            items.append(
+                insurance_policy_renewal_reminder_item(
+                    policy,
+                    effective_as_of,
+                    action="skipped",
+                    reason=f"No organization manager has a destination for {channel.value}.",
+                )
+            )
+            continue
+        if dry_run:
+            skipped_count += 1
+            items.append(
+                insurance_policy_renewal_reminder_item(
+                    policy,
+                    effective_as_of,
+                    action="dry_run",
+                    reason=f"Would remind {len(recipients)} manager(s); policy expires in {days_until_expiry} days.",
+                    recipient_count=len(recipients),
+                )
+            )
+            continue
+        try:
+            message = await create_message_for_recipients(
+                db,
+                organization_id=policy.organization_id,
+                message_type=CommunicationMessageType.REMINDER,
+                channel=channel,
+                scope_type=CommunicationScopeType.ORGANIZATION,
+                scope_id=policy.organization_id,
+                recipient_person_ids=[person.id for person in recipients],
+                subject=f"Insurance renewal due: {policy.name}",
+                body=insurance_policy_renewal_reminder_body(policy, effective_as_of),
+                urgent=days_until_expiry <= 30,
+                created_by_person_id=None,
+            )
+            policy.renewal_last_reminded_at = utc_now()
+            policy.renewal_reminder_message_id = message.id
+            policy.renewal_reminder_count = int(policy.renewal_reminder_count or 0) + 1
+            await db.commit()
+            await db.refresh(policy)
+            policy_ids.append(policy.id)
+            message_ids.append(message.id)
+            items.append(
+                insurance_policy_renewal_reminder_item(
+                    policy,
+                    effective_as_of,
+                    action="reminded",
+                    reason=f"Renewal reminder sent to {len(recipients)} manager(s).",
+                    recipient_count=len(recipients),
+                    message_id=message.id,
+                )
+            )
+        except Exception:
+            failed_count += 1
+            await db.rollback()
+            items.append(
+                insurance_policy_renewal_reminder_item(
+                    policy,
+                    effective_as_of,
+                    action="failed",
+                    reason="Failed to create renewal reminder message.",
+                    recipient_count=len(recipients),
+                )
+            )
+
+    return InsurancePolicyRenewalReminderRunRead(
+        organization_id=organization_id,
+        channel=channel,
+        as_of=effective_as_of,
+        horizon_days=horizon_days,
+        repeat_after_days=repeat_after_days,
+        eligible_count=len(policies),
+        executed_count=executed_count,
+        reminded_count=len(message_ids),
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        dry_run=dry_run,
+        policy_ids=policy_ids,
+        message_ids=message_ids,
+        items=items,
+    )
+
+
+async def insurance_policies_due_for_renewal_reminder(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    as_of: date,
+    horizon_days: int,
+    limit: int,
+) -> list[InsurancePolicy]:
+    statement = (
+        select(InsurancePolicy)
+        .where(InsurancePolicy.status.in_(["active", "expiring"]))
+        .where(InsurancePolicy.expires_on <= as_of + timedelta(days=horizon_days))
+        .order_by(InsurancePolicy.expires_on.asc(), InsurancePolicy.created_at.asc())
+        .limit(limit)
+    )
+    if organization_id is not None:
+        statement = statement.where(InsurancePolicy.organization_id == organization_id)
+    return list((await db.scalars(statement)).all())
+
+
+def insurance_policy_recently_reminded(policy: InsurancePolicy, repeat_after_days: int) -> bool:
+    if policy.renewal_last_reminded_at is None:
+        return False
+    if repeat_after_days <= 0:
+        return False
+    last_reminded = (
+        policy.renewal_last_reminded_at.replace(tzinfo=UTC)
+        if policy.renewal_last_reminded_at.tzinfo is None
+        else policy.renewal_last_reminded_at.astimezone(UTC)
+    )
+    return last_reminded >= utc_now() - timedelta(days=repeat_after_days)
+
+
+async def insurance_policy_manager_recipients(
+    db: AsyncSession,
+    organization_id: UUID,
+    channel: CommunicationChannel,
+) -> list[Person]:
+    rows = (
+        await db.scalars(
+            select(Person)
+            .join(Membership, Membership.subject_id == Person.id)
+            .where(Membership.organization_id == organization_id)
+            .where(Membership.subject_type == MemberSubjectType.PERSON)
+            .where(Membership.role.in_([MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.STAFF]))
+            .where(Membership.status == "active")
+            .order_by(Membership.role.asc(), Person.display_name.asc())
+        )
+    ).all()
+    recipients: list[Person] = []
+    for person in rows:
+        if channel == CommunicationChannel.IN_APP or destination_for_channel(person, channel) is not None:
+            recipients.append(person)
+    return recipients
+
+
+def insurance_policy_renewal_reminder_body(policy: InsurancePolicy, as_of: date) -> str:
+    days_until_expiry = (policy.expires_on - as_of).days
+    broker = policy.broker_name or policy.broker_email or policy.broker_phone or "No broker contact recorded"
+    coverage = f"{policy.coverage_limit_cents / 100:.2f} {policy.currency}"
+    premium = f"{policy.premium_cents / 100:.2f} {policy.currency}"
+    return "\n".join(
+        [
+            f"{policy.name} ({policy.policy_number}) expires on {policy.expires_on.isoformat()}.",
+            f"Days until expiry: {days_until_expiry}. Renewal notice window: {policy.renewal_notice_days} days.",
+            f"Provider: {policy.provider_name}. Broker/contact: {broker}.",
+            f"Coverage limit: {coverage}. Annual premium: {premium}.",
+            f"Certificate: {policy.certificate_url or 'not attached'}.",
+            "Review renewal terms, certificate updates, exclusions, and any coverage gaps before the policy lapses.",
+        ]
+    )
+
+
+def insurance_policy_renewal_reminder_item(
+    policy: InsurancePolicy,
+    as_of: date,
+    *,
+    action: str,
+    reason: str,
+    recipient_count: int = 0,
+    message_id: UUID | None = None,
+) -> InsurancePolicyRenewalReminderItemRead:
+    return InsurancePolicyRenewalReminderItemRead(
+        policy_id=policy.id,
+        policy_name=policy.name,
+        policy_number=policy.policy_number,
+        provider_name=policy.provider_name,
+        expires_on=policy.expires_on,
+        days_until_expiry=(policy.expires_on - as_of).days,
+        recipient_count=recipient_count,
+        action=action,
+        reason=reason,
+        message_id=message_id,
     )
 
 

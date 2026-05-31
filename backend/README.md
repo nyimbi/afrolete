@@ -61,6 +61,7 @@ uv run python -m app.workers.due --limit 25
 Use `--lane agent-tasks`, `--lane billing-dunning`, `--lane billing-late-fees`, `--lane billing-payment-retries`, `--lane billing-recurring-invoices`, `--lane commercial-grant-alerts`, `--lane communication-digests`,
 `--lane communication-escalations`,
 `--lane event-travel-consent-reminders`, `--lane emergency-escalations`, `--lane developer-webhooks`,
+`--lane insurance-renewal-reminders`,
 `--lane performance-achievements`, `--lane performance-forecast-validations`,
 `--lane performance-review-escalations`, `--lane performance-injury-risk-alerts`,
 `--lane performance-video-pose`, or `--lane wearable-pull-retries` to run a
@@ -78,7 +79,12 @@ max-attempt limits. The communication digest lane creates daily/weekly digests
 for people with matching notification preferences and unread inbox items. The
 commercial grant alert lane executes due saved searches, persists run evidence,
 updates last-run match counts, and leaves outbound funder/channel delivery to
-the later provider integration layer. The
+the later provider integration layer. The insurance renewal lane sends
+repeat-suppressed reminders to organization managers for active or expiring
+policies inside each policy renewal-notice window; tune with
+`--insurance-renewal-reminder-horizon-days`,
+`--insurance-renewal-reminder-repeat-after-days`, and
+`--dry-run-insurance-renewal-reminders`. The
 communication escalation lane scans unresolved urgent messages and creates
 quiet-hours-override escalation messages with repeat suppression. The travel consent lane sends scheduled
 guardian reminders for due travel consent requests and suppresses repeats with

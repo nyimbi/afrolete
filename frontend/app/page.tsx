@@ -350,6 +350,7 @@ import type {
   IncidentInsuranceClaimProviderSyncRead,
   InsuranceCoverageVerificationRead,
   InsurancePolicyRead,
+  InsurancePolicyRenewalReminderRunRead,
   InsurancePortfolioSummaryRead,
   IncidentMedicalClearanceRead,
   IncidentMedicalClearanceProviderSyncRead,
@@ -2500,6 +2501,8 @@ export default function HomePage() {
   const [incidentReportPackageSubmission, setIncidentReportPackageSubmission] = useState<IncidentReportPackageProviderSubmissionRead | null>(null);
   const [insurancePolicies, setInsurancePolicies] = useState<InsurancePolicyRead[]>([]);
   const [insurancePortfolioSummary, setInsurancePortfolioSummary] = useState<InsurancePortfolioSummaryRead | null>(null);
+  const [insuranceRenewalReminderRun, setInsuranceRenewalReminderRun] =
+    useState<InsurancePolicyRenewalReminderRunRead | null>(null);
   const [insuranceCoverageVerification, setInsuranceCoverageVerification] =
     useState<InsuranceCoverageVerificationRead | null>(null);
   const [incidentInsuranceClaims, setIncidentInsuranceClaims] = useState<IncidentInsuranceClaimRead[]>([]);
@@ -10617,6 +10620,41 @@ export default function HomePage() {
           await loadInsurancePortfolio(selectedOrganizationId);
         }
         addLog(`${policy.name} insurance policy is active`, "good");
+      }
+    );
+  };
+
+  const runInsuranceRenewalReminders = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before running insurance renewal reminders", "bad");
+      return;
+    }
+    runAction(
+      "run-insurance-renewal-reminders",
+      () =>
+        apiRequest<InsurancePolicyRenewalReminderRunRead>(
+          "/safeguarding/insurance-policies/renewal-reminders/run",
+          {
+            method: "POST",
+            identity,
+            body: {
+              organization_id: selectedOrganizationId,
+              channel: "in_app",
+              horizon_days: 180,
+              repeat_after_days: 14,
+              limit: 25
+            }
+          }
+        ),
+      async (run) => {
+        setInsuranceRenewalReminderRun(run);
+        if (selectedOrganizationId) {
+          await loadInsurancePortfolio(selectedOrganizationId);
+        }
+        addLog(
+          `${run.reminded_count} insurance renewal reminders sent (${run.skipped_count} skipped)`,
+          run.failed_count ? "neutral" : "good"
+        );
       }
     );
   };
@@ -35844,6 +35882,7 @@ export default function HomePage() {
               <button type="button" onClick={createComplianceCredential} disabled={busyAction !== null}>Track credential</button>
               <button type="button" onClick={createSafeguardingIncident} disabled={busyAction !== null}>Log incident</button>
               <button type="button" onClick={createInsurancePolicy} disabled={busyAction !== null}>Policy</button>
+              <button type="button" onClick={runInsuranceRenewalReminders} disabled={busyAction !== null}>Renewals</button>
               <button type="button" onClick={() => verifyInsuranceCoverage(safeguardingIncidents[0])} disabled={busyAction !== null}>Coverage</button>
               <button type="button" onClick={createSafeguardingEvidencePolicyRule} disabled={busyAction !== null}>Policy rule</button>
               <button type="button" onClick={reconcileCompliance} disabled={busyAction !== null}>Reconcile</button>
@@ -36437,6 +36476,20 @@ export default function HomePage() {
                 </div>
               </article>
             ) : null}
+            {insuranceRenewalReminderRun ? (
+              <article className={`task-card ${insuranceRenewalReminderRun.failed_count ? "risk-card" : "selected"}`}>
+                <div>
+                  <strong>Insurance renewal reminders</strong>
+                  <span>
+                    {insuranceRenewalReminderRun.reminded_count} sent · {insuranceRenewalReminderRun.skipped_count} skipped · {insuranceRenewalReminderRun.failed_count} failed
+                  </span>
+                  <span>
+                    {insuranceRenewalReminderRun.channel} · horizon {insuranceRenewalReminderRun.horizon_days}d · repeat {insuranceRenewalReminderRun.repeat_after_days}d
+                  </span>
+                  <span>{insuranceRenewalReminderRun.items[0]?.reason ?? "No due policy reminders"}</span>
+                </div>
+              </article>
+            ) : null}
             {insuranceCoverageVerification ? (
               <article className={`task-card ${insuranceCoverageVerification.covered ? "selected" : "risk-card"}`}>
                 <div>
@@ -36457,6 +36510,9 @@ export default function HomePage() {
                   <span>{policy.policy_number} · expires {policy.expires_on} · {policy.days_until_expiry ?? 0} days</span>
                   <span>
                     {(policy.coverage_limit_cents / 100).toFixed(2)} coverage · {(policy.premium_cents / 100).toFixed(2)} premium · {policy.claim_count} claims
+                  </span>
+                  <span>
+                    {policy.renewal_reminder_count} renewal reminders · last {policy.renewal_last_reminded_at ? new Date(policy.renewal_last_reminded_at).toLocaleString() : "not sent"}
                   </span>
                   <span>{policy.broker_name ?? "No broker"} · {policy.certificate_url ?? "No certificate"}</span>
                 </div>

@@ -80,6 +80,8 @@ from app.schemas.safeguarding import (
     InsuranceCoverageVerificationRead,
     InsurancePolicyCreate,
     InsurancePolicyRead,
+    InsurancePolicyRenewalReminderRunCreate,
+    InsurancePolicyRenewalReminderRunRead,
     InsurancePolicyUpdate,
     InsurancePortfolioSummaryRead,
     IncidentMedicalClearanceCreate,
@@ -141,6 +143,7 @@ from app.services.safeguarding import (
     list_insurance_policies,
     poll_incident_insurance_claim_provider_status,
     poll_incident_medical_clearance_provider_status,
+    run_insurance_policy_renewal_reminders,
     list_incident_medical_clearances,
     list_incident_report_packages,
     list_safeguarding_evidence_policy_rules,
@@ -961,6 +964,16 @@ async def list_insurance_policies_route(
 ) -> list[InsurancePolicyRead]:
     await ensure_org_manage(authz, organization_id, identity)
     return await list_insurance_policies(db, organization_id, status_filter)
+
+
+@router.post("/insurance-policies/renewal-reminders/run", response_model=InsurancePolicyRenewalReminderRunRead)
+async def run_insurance_policy_renewal_reminders_route(
+    payload: InsurancePolicyRenewalReminderRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> InsurancePolicyRenewalReminderRunRead:
+    return await run_insurance_policy_renewal_reminders(db, identity, payload, authz)
 
 
 @router.patch("/insurance-policies/{policy_id}", response_model=InsurancePolicyRead)

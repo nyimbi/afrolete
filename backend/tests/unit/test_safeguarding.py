@@ -1348,6 +1348,54 @@ def test_insurance_policy_portfolio_links_coverage_and_claims(client, identity_h
     assert summary["open_claim_count"] == 1
     assert "Accident Medical 2026" in summary["renewal_alerts"][0]
 
+    reminder_response = client.post(
+        "/api/v1/safeguarding/insurance-policies/renewal-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2026-06-01",
+            "horizon_days": 365,
+            "repeat_after_days": 14,
+            "limit": 10,
+        },
+    )
+    assert reminder_response.status_code == 200
+    reminder_run = reminder_response.json()
+    assert reminder_run["eligible_count"] == 1
+    assert reminder_run["reminded_count"] == 1
+    assert reminder_run["policy_ids"] == [policy["id"]]
+    assert reminder_run["message_ids"][0]
+    assert reminder_run["items"][0]["action"] == "reminded"
+    assert reminder_run["items"][0]["recipient_count"] == 1
+
+    listed_policies_after_reminder = client.get(
+        f"/api/v1/safeguarding/insurance-policies?organization_id={organization['id']}",
+        headers=identity_headers,
+    ).json()
+    reminded_policy = listed_policies_after_reminder[0]
+    assert reminded_policy["renewal_reminder_count"] == 1
+    assert reminded_policy["renewal_reminder_message_id"] == reminder_run["message_ids"][0]
+    assert reminded_policy["renewal_last_reminded_at"] is not None
+
+    repeat_response = client.post(
+        "/api/v1/safeguarding/insurance-policies/renewal-reminders/run",
+        headers=identity_headers,
+        json={
+            "organization_id": organization["id"],
+            "channel": "in_app",
+            "as_of": "2026-06-01",
+            "horizon_days": 365,
+            "repeat_after_days": 14,
+            "limit": 10,
+        },
+    )
+    assert repeat_response.status_code == 200
+    repeat_run = repeat_response.json()
+    assert repeat_run["eligible_count"] == 1
+    assert repeat_run["reminded_count"] == 0
+    assert repeat_run["skipped_count"] == 1
+
 
 def test_medical_clearance_provider_submit_and_status_poll_record_only(
     client,

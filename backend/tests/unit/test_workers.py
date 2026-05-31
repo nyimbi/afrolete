@@ -44,7 +44,7 @@ from app.models.enums import (
     SubscriptionStatus,
     TravelPlanStatus,
 )
-from app.models.event import BackgroundCheck, ComplianceCredential, ConsentRequest, Event, EventTravelPlan
+from app.models.event import BackgroundCheck, ComplianceCredential, ConsentRequest, Event, EventTravelPlan, InsurancePolicy
 from app.models.identity import AppUser, Person
 from app.models.organization import Membership, Organization, RegistrationInquiry
 from app.models.performance import (
@@ -1137,6 +1137,71 @@ async def test_due_worker_reconciles_compliance_expiry(db_session) -> None:
     assert check.status == BackgroundCheckStatus.EXPIRED
     assert expired_credential.status == ComplianceCredentialStatus.EXPIRED
     assert expiring_credential.status == ComplianceCredentialStatus.EXPIRING_SOON
+
+
+async def test_due_worker_sends_insurance_renewal_reminders(db_session) -> None:
+    organization = Organization(
+        name="Insurance Reminder Worker Club",
+        slug="insurance-reminder-worker-club",
+        organization_type=OrganizationType.CLUB,
+        primary_sport="football",
+    )
+    manager = Person(display_name="Insurance Manager", primary_email="insurance-manager@example.com")
+    db_session.add_all([organization, manager])
+    await db_session.flush()
+    db_session.add(
+        Membership(
+            organization_id=organization.id,
+            subject_type=MemberSubjectType.PERSON,
+            subject_id=manager.id,
+            role=MembershipRole.OWNER,
+        )
+    )
+    policy = InsurancePolicy(
+        organization_id=organization.id,
+        name="Worker Liability Policy",
+        policy_type="general_liability",
+        provider_name="Worker Insurance",
+        policy_number="WIP-2026-001",
+        coverage_limit_cents=10000000,
+        deductible_cents=50000,
+        premium_cents=250000,
+        currency="USD",
+        effective_on=date(2026, 1, 1),
+        expires_on=date(2026, 7, 15),
+        renewal_notice_days=90,
+        certificate_url="https://example.test/liability.pdf",
+    )
+    db_session.add(policy)
+    await db_session.commit()
+
+    result = await run_due_workers(
+        db_session,
+        organization_id=organization.id,
+        lanes=("insurance-renewal-reminders",),
+        limit=10,
+        insurance_renewal_reminder_as_of=date(2026, 6, 1),
+        insurance_renewal_reminder_horizon_days=120,
+        insurance_renewal_reminder_channel=CommunicationChannel.EMAIL,
+    )
+
+    reminders = result["results"]["insurance_renewal_reminders"]
+    assert reminders["eligible_count"] == 1
+    assert reminders["reminded_count"] == 1
+    assert reminders["policy_ids"] == [str(policy.id)]
+    assert reminders["message_ids"][0]
+    assert result["summary"]["processed_count"] == 1
+
+    await db_session.refresh(policy)
+    assert policy.renewal_reminder_count == 1
+    assert str(policy.renewal_reminder_message_id) == reminders["message_ids"][0]
+    message_count = await db_session.scalar(
+        select(func.count(CommunicationMessage.id)).where(
+            CommunicationMessage.organization_id == organization.id,
+            CommunicationMessage.subject == "Insurance renewal due: Worker Liability Policy",
+        )
+    )
+    assert message_count == 1
 
 
 async def test_due_worker_runs_communication_digest_lane(db_session) -> None:

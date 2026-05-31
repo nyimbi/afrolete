@@ -1298,6 +1298,9 @@ class InsurancePolicyRead(InsurancePolicyCreate):
     paid_claims_cents: int = 0
     renewal_due: bool = False
     days_until_expiry: int | None = None
+    renewal_last_reminded_at: datetime | None = None
+    renewal_reminder_message_id: UUID | None = None
+    renewal_reminder_count: int = 0
 
 
 class InsuranceCoverageVerificationCreate(BaseModel):
@@ -1337,6 +1340,46 @@ class InsurancePortfolioSummaryRead(BaseModel):
     paid_claims_cents: int
     currencies: list[str]
     renewal_alerts: list[str]
+
+
+class InsurancePolicyRenewalReminderRunCreate(BaseModel):
+    organization_id: UUID
+    channel: CommunicationChannel = CommunicationChannel.EMAIL
+    as_of: date | None = None
+    horizon_days: int = Field(default=120, ge=0, le=730)
+    repeat_after_days: int = Field(default=14, ge=0, le=365)
+    limit: int = Field(default=50, ge=1, le=500)
+    dry_run: bool = False
+
+
+class InsurancePolicyRenewalReminderItemRead(BaseModel):
+    policy_id: UUID
+    policy_name: str
+    policy_number: str
+    provider_name: str
+    expires_on: date
+    days_until_expiry: int
+    recipient_count: int = 0
+    action: str
+    reason: str
+    message_id: UUID | None = None
+
+
+class InsurancePolicyRenewalReminderRunRead(BaseModel):
+    organization_id: UUID | None
+    channel: CommunicationChannel
+    as_of: date
+    horizon_days: int
+    repeat_after_days: int
+    eligible_count: int
+    executed_count: int
+    reminded_count: int
+    skipped_count: int
+    failed_count: int
+    dry_run: bool = False
+    policy_ids: list[UUID]
+    message_ids: list[UUID]
+    items: list[InsurancePolicyRenewalReminderItemRead]
 
 
 class IncidentInsuranceClaimProviderSyncRead(BaseModel):

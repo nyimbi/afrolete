@@ -40,6 +40,7 @@ from app.services.safeguarding import (
     run_compliance_reconciliation_worker,
     run_family_coordination_digest_worker,
     run_guardian_portal_invite_reminder_worker,
+    run_insurance_policy_renewal_reminder_worker,
 )
 from app.services.storage.lifecycle import run_object_storage_lifecycle
 from app.services.volunteers import run_volunteer_reminder_worker
@@ -61,6 +62,7 @@ WORKER_LANES = (
     "event-travel-consent-reminders",
     "family-coordination-digests",
     "family-portal-invite-reminders",
+    "insurance-renewal-reminders",
     "object-storage-lifecycle",
     "performance-achievements",
     "performance-forecast-validations",
@@ -161,6 +163,16 @@ def parse_args() -> argparse.Namespace:
         default=CommunicationChannel.EMAIL.value,
     )
     parser.add_argument("--dry-run-family-portal-invite-reminders", action="store_true")
+    parser.add_argument("--insurance-renewal-reminder-limit", type=int, default=None)
+    parser.add_argument("--insurance-renewal-reminder-as-of", type=date_from_isoformat, default=None)
+    parser.add_argument("--insurance-renewal-reminder-horizon-days", type=int, default=120)
+    parser.add_argument("--insurance-renewal-reminder-repeat-after-days", type=int, default=14)
+    parser.add_argument(
+        "--insurance-renewal-reminder-channel",
+        choices=[channel.value for channel in CommunicationChannel],
+        default=CommunicationChannel.EMAIL.value,
+    )
+    parser.add_argument("--dry-run-insurance-renewal-reminders", action="store_true")
     parser.add_argument("--volunteer-reminder-limit", type=int, default=None)
     parser.add_argument("--volunteer-reminder-due-within-days", type=int, default=7)
     parser.add_argument("--volunteer-reminder-repeat-after-hours", type=int, default=24)
@@ -340,6 +352,12 @@ async def run_due_workers(
     family_portal_invite_reminder_repeat_after_hours: int = 24,
     family_portal_invite_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
     dry_run_family_portal_invite_reminders: bool = False,
+    insurance_renewal_reminder_limit: int | None = None,
+    insurance_renewal_reminder_as_of: date | None = None,
+    insurance_renewal_reminder_horizon_days: int = 120,
+    insurance_renewal_reminder_repeat_after_days: int = 14,
+    insurance_renewal_reminder_channel: CommunicationChannel = CommunicationChannel.EMAIL,
+    dry_run_insurance_renewal_reminders: bool = False,
     volunteer_reminder_limit: int | None = None,
     volunteer_reminder_due_within_days: int = 7,
     volunteer_reminder_repeat_after_hours: int = 24,
@@ -528,6 +546,19 @@ async def run_due_workers(
                 repeat_after_hours=family_coordination_digest_repeat_after_hours,
                 limit=family_coordination_digest_limit or limit,
                 dry_run=dry_run_family_coordination_digests,
+            )
+        ).model_dump(mode="json")
+    if "insurance-renewal-reminders" in active_lanes:
+        results["insurance_renewal_reminders"] = (
+            await run_insurance_policy_renewal_reminder_worker(
+                db,
+                organization_id=organization_id,
+                channel=insurance_renewal_reminder_channel,
+                as_of=insurance_renewal_reminder_as_of,
+                horizon_days=insurance_renewal_reminder_horizon_days,
+                repeat_after_days=insurance_renewal_reminder_repeat_after_days,
+                limit=insurance_renewal_reminder_limit or limit,
+                dry_run=dry_run_insurance_renewal_reminders,
             )
         ).model_dump(mode="json")
     if "volunteer-reminders" in active_lanes:
@@ -780,6 +811,14 @@ async def run() -> None:
                 args.family_portal_invite_reminder_channel
             ),
             dry_run_family_portal_invite_reminders=args.dry_run_family_portal_invite_reminders,
+            insurance_renewal_reminder_limit=args.insurance_renewal_reminder_limit,
+            insurance_renewal_reminder_as_of=args.insurance_renewal_reminder_as_of,
+            insurance_renewal_reminder_horizon_days=args.insurance_renewal_reminder_horizon_days,
+            insurance_renewal_reminder_repeat_after_days=args.insurance_renewal_reminder_repeat_after_days,
+            insurance_renewal_reminder_channel=CommunicationChannel(
+                args.insurance_renewal_reminder_channel
+            ),
+            dry_run_insurance_renewal_reminders=args.dry_run_insurance_renewal_reminders,
             volunteer_reminder_limit=args.volunteer_reminder_limit,
             volunteer_reminder_due_within_days=args.volunteer_reminder_due_within_days,
             volunteer_reminder_repeat_after_hours=args.volunteer_reminder_repeat_after_hours,

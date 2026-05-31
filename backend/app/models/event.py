@@ -615,6 +615,11 @@ class InsurancePolicy(IdMixin, TimestampMixin, Base):
     effective_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     expires_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     renewal_notice_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    renewal_last_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    renewal_reminder_message_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("communication_messages.id"), index=True
+    )
+    renewal_reminder_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     certificate_url: Mapped[str | None] = mapped_column(String(500))
     document_url: Mapped[str | None] = mapped_column(String(500))
     notes: Mapped[str | None] = mapped_column(Text)
