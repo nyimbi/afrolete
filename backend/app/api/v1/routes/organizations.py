@@ -33,6 +33,10 @@ from app.schemas.organization import (
     OrganizationAwardRecipientRead,
     OrganizationAwardVoteCreate,
     OrganizationAwardVoteRead,
+    OrganizationDataMigrationProjectCreate,
+    OrganizationDataMigrationProjectRead,
+    OrganizationDataMigrationRunCreate,
+    OrganizationDataMigrationRunRead,
     OrganizationCreate,
     OrganizationDirectoryRead,
     OrganizationGroupCreate,
@@ -45,6 +49,10 @@ from app.schemas.organization import (
     OrganizationProgramCreate,
     OrganizationProgramRead,
     OrganizationPublicSiteRead,
+    OrganizationRecoveryDrillCreate,
+    OrganizationRecoveryDrillRead,
+    OrganizationRecoveryPlanCreate,
+    OrganizationRecoveryPlanRead,
     OrganizationRead,
     OrganizationSeasonCreate,
     OrganizationSeasonRead,
@@ -100,6 +108,10 @@ from app.services.organizations import (
     create_organization_award_nomination,
     create_organization_award_program,
     create_organization_award_recipient,
+    create_data_migration_project,
+    create_data_migration_run,
+    create_recovery_drill,
+    create_recovery_plan,
     add_organization_group_member,
     create_member_subscription,
     create_member_subscription_plan,
@@ -124,10 +136,14 @@ from app.services.organizations import (
     list_organization_award_nominations,
     list_organization_award_programs,
     list_organization_award_recipients,
+    list_data_migration_projects,
+    list_data_migration_runs,
     list_organization_group_members,
     list_organization_groups,
     list_organization_programs,
     list_organization_seasons,
+    list_recovery_drills,
+    list_recovery_plans,
     list_member_subscription_plans,
     list_member_subscriptions,
     list_committees,
@@ -1424,6 +1440,208 @@ async def list_organization_award_recipients_route(
     return [
         to_organization_award_recipient_read(row)
         for row in await list_organization_award_recipients(db, identity, program_id, authz)
+    ]
+
+
+def to_data_migration_project_read(row) -> OrganizationDataMigrationProjectRead:
+    project, run_count = row
+    return OrganizationDataMigrationProjectRead(
+        id=project.id,
+        organization_id=project.organization_id,
+        name=project.name,
+        source_system=project.source_system,
+        source_format=project.source_format,
+        migration_type=project.migration_type,
+        data_domains=project.data_domains,
+        owner_person_id=project.owner_person_id,
+        status=project.status,
+        risk_level=project.risk_level,
+        records_expected=project.records_expected,
+        records_imported=project.records_imported,
+        error_count=project.error_count,
+        started_at=project.started_at,
+        completed_at=project.completed_at,
+        notes=project.notes,
+        run_count=run_count,
+    )
+
+
+def to_data_migration_run_read(run) -> OrganizationDataMigrationRunRead:
+    return OrganizationDataMigrationRunRead(
+        id=run.id,
+        organization_id=run.organization_id,
+        project_id=run.project_id,
+        run_type=run.run_type,
+        status=run.status,
+        input_artifact_url=run.input_artifact_url,
+        mapping_summary=run.mapping_summary,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        records_seen=run.records_seen,
+        records_created=run.records_created,
+        records_updated=run.records_updated,
+        records_skipped=run.records_skipped,
+        error_count=run.error_count,
+        checksum=run.checksum,
+        report_url=run.report_url,
+        notes=run.notes,
+    )
+
+
+def to_recovery_plan_read(row) -> OrganizationRecoveryPlanRead:
+    plan, drill_count = row
+    return OrganizationRecoveryPlanRead(
+        id=plan.id,
+        organization_id=plan.organization_id,
+        name=plan.name,
+        scope=plan.scope,
+        rpo_minutes=plan.rpo_minutes,
+        rto_minutes=plan.rto_minutes,
+        backup_frequency=plan.backup_frequency,
+        storage_location=plan.storage_location,
+        retention_days=plan.retention_days,
+        encryption_policy=plan.encryption_policy,
+        status=plan.status,
+        last_tested_at=plan.last_tested_at,
+        next_test_due_at=plan.next_test_due_at,
+        notes=plan.notes,
+        drill_count=drill_count,
+    )
+
+
+def to_recovery_drill_read(drill) -> OrganizationRecoveryDrillRead:
+    return OrganizationRecoveryDrillRead(
+        id=drill.id,
+        organization_id=drill.organization_id,
+        recovery_plan_id=drill.recovery_plan_id,
+        drill_type=drill.drill_type,
+        status=drill.status,
+        started_at=drill.started_at,
+        finished_at=drill.finished_at,
+        rpo_minutes_observed=drill.rpo_minutes_observed,
+        rto_minutes_observed=drill.rto_minutes_observed,
+        data_loss_summary=drill.data_loss_summary,
+        result_summary=drill.result_summary,
+        action_items=drill.action_items,
+        evidence_url=drill.evidence_url,
+        notes=drill.notes,
+    )
+
+
+@router.post(
+    "/{organization_id}/data-migration-projects",
+    response_model=OrganizationDataMigrationProjectRead,
+    status_code=201,
+)
+async def create_data_migration_project_route(
+    organization_id: UUID,
+    payload: OrganizationDataMigrationProjectCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationDataMigrationProjectRead:
+    project = await create_data_migration_project(db, identity, organization_id, payload, authz)
+    rows = await list_data_migration_projects(db, organization_id)
+    return to_data_migration_project_read(next(row for row in rows if row[0].id == project.id))
+
+
+@router.get(
+    "/{organization_id}/data-migration-projects",
+    response_model=list[OrganizationDataMigrationProjectRead],
+)
+async def list_data_migration_projects_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationDataMigrationProjectRead]:
+    return [to_data_migration_project_read(row) for row in await list_data_migration_projects(db, organization_id)]
+
+
+@router.post(
+    "/data-migration-projects/{project_id}/runs",
+    response_model=OrganizationDataMigrationRunRead,
+    status_code=201,
+)
+async def create_data_migration_run_route(
+    project_id: UUID,
+    payload: OrganizationDataMigrationRunCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationDataMigrationRunRead:
+    run, _ = await create_data_migration_run(db, identity, project_id, payload, authz)
+    return to_data_migration_run_read(run)
+
+
+@router.get(
+    "/data-migration-projects/{project_id}/runs",
+    response_model=list[OrganizationDataMigrationRunRead],
+)
+async def list_data_migration_runs_route(
+    project_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationDataMigrationRunRead]:
+    return [
+        to_data_migration_run_read(run)
+        for run in await list_data_migration_runs(db, identity, project_id, authz)
+    ]
+
+
+@router.post(
+    "/{organization_id}/recovery-plans",
+    response_model=OrganizationRecoveryPlanRead,
+    status_code=201,
+)
+async def create_recovery_plan_route(
+    organization_id: UUID,
+    payload: OrganizationRecoveryPlanCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationRecoveryPlanRead:
+    plan = await create_recovery_plan(db, identity, organization_id, payload, authz)
+    rows = await list_recovery_plans(db, organization_id)
+    return to_recovery_plan_read(next(row for row in rows if row[0].id == plan.id))
+
+
+@router.get("/{organization_id}/recovery-plans", response_model=list[OrganizationRecoveryPlanRead])
+async def list_recovery_plans_route(
+    organization_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[OrganizationRecoveryPlanRead]:
+    return [to_recovery_plan_read(row) for row in await list_recovery_plans(db, organization_id)]
+
+
+@router.post(
+    "/recovery-plans/{recovery_plan_id}/drills",
+    response_model=OrganizationRecoveryDrillRead,
+    status_code=201,
+)
+async def create_recovery_drill_route(
+    recovery_plan_id: UUID,
+    payload: OrganizationRecoveryDrillCreate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> OrganizationRecoveryDrillRead:
+    drill, _ = await create_recovery_drill(db, identity, recovery_plan_id, payload, authz)
+    return to_recovery_drill_read(drill)
+
+
+@router.get(
+    "/recovery-plans/{recovery_plan_id}/drills",
+    response_model=list[OrganizationRecoveryDrillRead],
+)
+async def list_recovery_drills_route(
+    recovery_plan_id: UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    authz: AuthorizationService = Depends(get_authorization_service),
+) -> list[OrganizationRecoveryDrillRead]:
+    return [
+        to_recovery_drill_read(drill)
+        for drill in await list_recovery_drills(db, identity, recovery_plan_id, authz)
     ]
 
 

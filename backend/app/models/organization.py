@@ -254,6 +254,85 @@ class OrganizationAwardRecipient(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), default="awarded", nullable=False, index=True)
 
 
+class OrganizationDataMigrationProject(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_data_migration_projects"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    source_system: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    source_format: Mapped[str] = mapped_column(String(80), default="csv", nullable=False, index=True)
+    migration_type: Mapped[str] = mapped_column(String(80), default="initial_import", nullable=False, index=True)
+    data_domains: Mapped[str | None] = mapped_column(Text)
+    owner_person_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("persons.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="planning", nullable=False, index=True)
+    risk_level: Mapped[str] = mapped_column(String(40), default="medium", nullable=False, index=True)
+    records_expected: Mapped[int | None] = mapped_column(Integer)
+    records_imported: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationDataMigrationRun(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_data_migration_runs"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    project_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_data_migration_projects.id"), index=True)
+    run_type: Mapped[str] = mapped_column(String(80), default="validation", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="queued", nullable=False, index=True)
+    input_artifact_url: Mapped[str | None] = mapped_column(String(500))
+    mapping_summary: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    records_seen: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    records_created: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    records_updated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    records_skipped: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    checksum: Mapped[str | None] = mapped_column(String(128), index=True)
+    report_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationRecoveryPlan(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_recovery_plans"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(160), default="tenant_operational_data", nullable=False, index=True)
+    rpo_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    rto_minutes: Mapped[int] = mapped_column(Integer, default=240, nullable=False)
+    backup_frequency: Mapped[str] = mapped_column(String(80), default="daily", nullable=False, index=True)
+    storage_location: Mapped[str | None] = mapped_column(String(500))
+    retention_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    encryption_policy: Mapped[str | None] = mapped_column(String(240))
+    status: Mapped[str] = mapped_column(String(40), default="draft", nullable=False, index=True)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    next_test_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizationRecoveryDrill(IdMixin, TimestampMixin, Base):
+    __tablename__ = "organization_recovery_drills"
+
+    organization_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organizations.id"), index=True)
+    recovery_plan_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("organization_recovery_plans.id"), index=True)
+    drill_type: Mapped[str] = mapped_column(String(80), default="restore_test", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="planned", nullable=False, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    rpo_minutes_observed: Mapped[int | None] = mapped_column(Integer)
+    rto_minutes_observed: Mapped[int | None] = mapped_column(Integer)
+    data_loss_summary: Mapped[str | None] = mapped_column(Text)
+    result_summary: Mapped[str | None] = mapped_column(Text)
+    action_items: Mapped[str | None] = mapped_column(Text)
+    evidence_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class Membership(IdMixin, TimestampMixin, Base):
     __tablename__ = "memberships"
     __table_args__ = (

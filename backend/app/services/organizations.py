@@ -57,9 +57,13 @@ from app.models.organization import (
     OrganizationAwardProgram,
     OrganizationAwardRecipient,
     OrganizationAwardVote,
+    OrganizationDataMigrationProject,
+    OrganizationDataMigrationRun,
     OrganizationGroup,
     OrganizationGroupMembership,
     OrganizationProgram,
+    OrganizationRecoveryDrill,
+    OrganizationRecoveryPlan,
     OrganizationSeason,
     Organization,
     RegistrationInquiry,
@@ -78,9 +82,13 @@ from app.schemas.organization import (
     OrganizationAwardProgramCreate,
     OrganizationAwardRecipientCreate,
     OrganizationAwardVoteCreate,
+    OrganizationDataMigrationProjectCreate,
+    OrganizationDataMigrationRunCreate,
     OrganizationGroupCreate,
     OrganizationGroupMemberAdd,
     OrganizationProgramCreate,
+    OrganizationRecoveryDrillCreate,
+    OrganizationRecoveryPlanCreate,
     OrganizationSeasonCreate,
     OrganizationHandleAvailabilityRead,
     OrganizationCreate,
@@ -4184,6 +4192,207 @@ async def scalar_count_for(db: AsyncSession, column, value: UUID) -> int:
 async def next_award_certificate_number(db: AsyncSession, organization_id: UUID) -> str:
     count = await scalar_count_for(db, OrganizationAwardRecipient.organization_id, organization_id)
     return f"AFROLETE-AWARD-{str(organization_id)[:8].upper()}-{count + 1:04d}"
+
+
+async def create_data_migration_project(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationDataMigrationProjectCreate,
+    authz: AuthorizationService,
+) -> OrganizationDataMigrationProject:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    if payload.owner_person_id is not None and await db.get(Person, payload.owner_person_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Migration owner not found")
+    project = OrganizationDataMigrationProject(
+        organization_id=organization_id,
+        **payload.model_dump(),
+    )
+    db.add(project)
+    await db.commit()
+    await db.refresh(project)
+    return project
+
+
+async def list_data_migration_projects(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[OrganizationDataMigrationProject, int]]:
+    projects = list(
+        (
+            await db.scalars(
+                select(OrganizationDataMigrationProject)
+                .where(OrganizationDataMigrationProject.organization_id == organization_id)
+                .order_by(
+                    OrganizationDataMigrationProject.status,
+                    OrganizationDataMigrationProject.created_at.desc(),
+                )
+            )
+        ).all()
+    )
+    return [
+        (project, await scalar_count_for(db, OrganizationDataMigrationRun.project_id, project.id))
+        for project in projects
+    ]
+
+
+async def get_data_migration_project_for_manage(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    project_id: UUID,
+    authz: AuthorizationService,
+) -> OrganizationDataMigrationProject:
+    project = await db.get(OrganizationDataMigrationProject, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data migration project not found")
+    await ensure_manage_organization(db, identity, project.organization_id, authz)
+    return project
+
+
+async def create_data_migration_run(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    project_id: UUID,
+    payload: OrganizationDataMigrationRunCreate,
+    authz: AuthorizationService,
+) -> tuple[OrganizationDataMigrationRun, OrganizationDataMigrationProject]:
+    project = await get_data_migration_project_for_manage(db, identity, project_id, authz)
+    run = OrganizationDataMigrationRun(
+        organization_id=project.organization_id,
+        project_id=project.id,
+        **payload.model_dump(),
+    )
+    db.add(run)
+    project.error_count += payload.error_count
+    if payload.status in {"succeeded", "partial"} and payload.run_type in {"import", "reconciliation"}:
+        project.records_imported += payload.records_created + payload.records_updated
+    if payload.status == "running":
+        project.status = "importing" if payload.run_type == "import" else "validating"
+        project.started_at = project.started_at or payload.started_at or datetime.now(UTC)
+    elif payload.status == "failed":
+        project.status = "blocked"
+    elif payload.status == "succeeded" and payload.run_type == "reconciliation":
+        project.status = "completed"
+        project.completed_at = payload.finished_at or datetime.now(UTC)
+    elif payload.status in {"succeeded", "partial"} and payload.run_type == "import":
+        project.status = "reconciled" if payload.status == "succeeded" and payload.error_count == 0 else "validating"
+    elif payload.run_type in {"mapping_preview", "validation", "dry_run"} and payload.status in {"succeeded", "partial"}:
+        project.status = "validating"
+    await db.commit()
+    await db.refresh(run)
+    await db.refresh(project)
+    return run, project
+
+
+async def list_data_migration_runs(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    project_id: UUID,
+    authz: AuthorizationService,
+) -> list[OrganizationDataMigrationRun]:
+    project = await get_data_migration_project_for_manage(db, identity, project_id, authz)
+    return list(
+        (
+            await db.scalars(
+                select(OrganizationDataMigrationRun)
+                .where(OrganizationDataMigrationRun.project_id == project.id)
+                .order_by(OrganizationDataMigrationRun.created_at.desc())
+            )
+        ).all()
+    )
+
+
+async def create_recovery_plan(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    organization_id: UUID,
+    payload: OrganizationRecoveryPlanCreate,
+    authz: AuthorizationService,
+) -> OrganizationRecoveryPlan:
+    await ensure_manage_organization(db, identity, organization_id, authz)
+    plan = OrganizationRecoveryPlan(
+        organization_id=organization_id,
+        **payload.model_dump(),
+    )
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
+async def list_recovery_plans(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[tuple[OrganizationRecoveryPlan, int]]:
+    plans = list(
+        (
+            await db.scalars(
+                select(OrganizationRecoveryPlan)
+                .where(OrganizationRecoveryPlan.organization_id == organization_id)
+                .order_by(OrganizationRecoveryPlan.status, OrganizationRecoveryPlan.name)
+            )
+        ).all()
+    )
+    return [
+        (plan, await scalar_count_for(db, OrganizationRecoveryDrill.recovery_plan_id, plan.id))
+        for plan in plans
+    ]
+
+
+async def get_recovery_plan_for_manage(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recovery_plan_id: UUID,
+    authz: AuthorizationService,
+) -> OrganizationRecoveryPlan:
+    plan = await db.get(OrganizationRecoveryPlan, recovery_plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery plan not found")
+    await ensure_manage_organization(db, identity, plan.organization_id, authz)
+    return plan
+
+
+async def create_recovery_drill(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recovery_plan_id: UUID,
+    payload: OrganizationRecoveryDrillCreate,
+    authz: AuthorizationService,
+) -> tuple[OrganizationRecoveryDrill, OrganizationRecoveryPlan]:
+    plan = await get_recovery_plan_for_manage(db, identity, recovery_plan_id, authz)
+    drill = OrganizationRecoveryDrill(
+        organization_id=plan.organization_id,
+        recovery_plan_id=plan.id,
+        **payload.model_dump(),
+    )
+    db.add(drill)
+    if payload.status in {"passed", "failed", "blocked"}:
+        plan.last_tested_at = payload.finished_at or datetime.now(UTC)
+        plan.status = "active" if payload.status == "passed" else "failed"
+    elif payload.status == "running":
+        plan.status = "testing"
+    await db.commit()
+    await db.refresh(drill)
+    await db.refresh(plan)
+    return drill, plan
+
+
+async def list_recovery_drills(
+    db: AsyncSession,
+    identity: CurrentIdentity,
+    recovery_plan_id: UUID,
+    authz: AuthorizationService,
+) -> list[OrganizationRecoveryDrill]:
+    plan = await get_recovery_plan_for_manage(db, identity, recovery_plan_id, authz)
+    return list(
+        (
+            await db.scalars(
+                select(OrganizationRecoveryDrill)
+                .where(OrganizationRecoveryDrill.recovery_plan_id == plan.id)
+                .order_by(OrganizationRecoveryDrill.created_at.desc())
+            )
+        ).all()
+    )
 
 
 async def create_member_subscription_plan(

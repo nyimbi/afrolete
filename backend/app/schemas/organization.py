@@ -913,6 +913,102 @@ class RegistrationInquiryFollowUpRead(BaseModel):
     recipient_person_id: UUID
 
 
+class OrganizationDataMigrationProjectCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    source_system: str = Field(min_length=2, max_length=120)
+    source_format: str = Field(default="csv", min_length=2, max_length=80)
+    migration_type: str = Field(
+        default="initial_import",
+        pattern="^(initial_import|historical_backfill|consolidation|emergency_restore)$",
+    )
+    data_domains: str | None = Field(default=None, max_length=4000)
+    owner_person_id: UUID | None = None
+    status: str = Field(default="planning", pattern="^(planning|mapping|validating|importing|reconciled|completed|blocked|cancelled)$")
+    risk_level: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    records_expected: int | None = Field(default=None, ge=0)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationDataMigrationProjectRead(OrganizationDataMigrationProjectCreate):
+    id: UUID
+    organization_id: UUID
+    records_imported: int
+    error_count: int
+    run_count: int
+
+
+class OrganizationDataMigrationRunCreate(BaseModel):
+    run_type: str = Field(
+        default="validation",
+        pattern="^(mapping_preview|validation|dry_run|import|reconciliation|rollback)$",
+    )
+    status: str = Field(default="queued", pattern="^(queued|running|succeeded|failed|partial|cancelled)$")
+    input_artifact_url: str | None = Field(default=None, max_length=500)
+    mapping_summary: str | None = Field(default=None, max_length=8000)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    records_seen: int = Field(default=0, ge=0)
+    records_created: int = Field(default=0, ge=0)
+    records_updated: int = Field(default=0, ge=0)
+    records_skipped: int = Field(default=0, ge=0)
+    error_count: int = Field(default=0, ge=0)
+    checksum: str | None = Field(default=None, max_length=128)
+    report_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationDataMigrationRunRead(OrganizationDataMigrationRunCreate):
+    id: UUID
+    organization_id: UUID
+    project_id: UUID
+
+
+class OrganizationRecoveryPlanCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    scope: str = Field(default="tenant_operational_data", min_length=2, max_length=160)
+    rpo_minutes: int = Field(default=60, ge=0, le=60 * 24 * 30)
+    rto_minutes: int = Field(default=240, ge=0, le=60 * 24 * 30)
+    backup_frequency: str = Field(default="daily", min_length=2, max_length=80)
+    storage_location: str | None = Field(default=None, max_length=500)
+    retention_days: int = Field(default=90, ge=1, le=3650)
+    encryption_policy: str | None = Field(default=None, max_length=240)
+    status: str = Field(default="draft", pattern="^(draft|active|testing|failed|retired)$")
+    last_tested_at: datetime | None = None
+    next_test_due_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationRecoveryPlanRead(OrganizationRecoveryPlanCreate):
+    id: UUID
+    organization_id: UUID
+    drill_count: int
+
+
+class OrganizationRecoveryDrillCreate(BaseModel):
+    drill_type: str = Field(
+        default="restore_test",
+        pattern="^(restore_test|failover_rehearsal|table_restore|full_environment_rebuild)$",
+    )
+    status: str = Field(default="planned", pattern="^(planned|running|passed|failed|blocked|cancelled)$")
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    rpo_minutes_observed: int | None = Field(default=None, ge=0)
+    rto_minutes_observed: int | None = Field(default=None, ge=0)
+    data_loss_summary: str | None = Field(default=None, max_length=4000)
+    result_summary: str | None = Field(default=None, max_length=4000)
+    action_items: str | None = Field(default=None, max_length=4000)
+    evidence_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class OrganizationRecoveryDrillRead(OrganizationRecoveryDrillCreate):
+    id: UUID
+    organization_id: UUID
+    recovery_plan_id: UUID
+
+
 class MemberAdd(BaseModel):
     subject_type: MemberSubjectType = MemberSubjectType.PERSON
     subject_id: UUID | None = None

@@ -1049,6 +1049,81 @@ export type MemberSubscriptionPaymentRead = {
   subscription_status: string;
 };
 
+export type OrganizationDataMigrationProjectRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  source_system: string;
+  source_format: string;
+  migration_type: string;
+  data_domains: string | null;
+  owner_person_id: UUID | null;
+  status: string;
+  risk_level: string;
+  records_expected: number | null;
+  records_imported: number;
+  error_count: number;
+  started_at: string | null;
+  completed_at: string | null;
+  notes: string | null;
+  run_count: number;
+};
+
+export type OrganizationDataMigrationRunRead = {
+  id: UUID;
+  organization_id: UUID;
+  project_id: UUID;
+  run_type: string;
+  status: string;
+  input_artifact_url: string | null;
+  mapping_summary: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  records_seen: number;
+  records_created: number;
+  records_updated: number;
+  records_skipped: number;
+  error_count: number;
+  checksum: string | null;
+  report_url: string | null;
+  notes: string | null;
+};
+
+export type OrganizationRecoveryPlanRead = {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  scope: string;
+  rpo_minutes: number;
+  rto_minutes: number;
+  backup_frequency: string;
+  storage_location: string | null;
+  retention_days: number;
+  encryption_policy: string | null;
+  status: string;
+  last_tested_at: string | null;
+  next_test_due_at: string | null;
+  notes: string | null;
+  drill_count: number;
+};
+
+export type OrganizationRecoveryDrillRead = {
+  id: UUID;
+  organization_id: UUID;
+  recovery_plan_id: UUID;
+  drill_type: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  rpo_minutes_observed: number | null;
+  rto_minutes_observed: number | null;
+  data_loss_summary: string | null;
+  result_summary: string | null;
+  action_items: string | null;
+  evidence_url: string | null;
+  notes: string | null;
+};
+
 export type VolunteerProfileRead = {
   id: UUID;
   organization_id: UUID;

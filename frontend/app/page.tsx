@@ -351,9 +351,13 @@ import type {
   OrganizationAwardProgramRead,
   OrganizationAwardRecipientRead,
   OrganizationAwardVoteRead,
+  OrganizationDataMigrationProjectRead,
+  OrganizationDataMigrationRunRead,
   OrganizationGroupMembershipRead,
   OrganizationGroupRead,
   OrganizationProgramRead,
+  OrganizationRecoveryDrillRead,
+  OrganizationRecoveryPlanRead,
   OrganizationRead,
   OrganizationSeasonRead,
   OrganizationType,
@@ -1843,6 +1847,10 @@ export default function HomePage() {
   const [memberSubscriptionPlans, setMemberSubscriptionPlans] = useState<MemberSubscriptionPlanRead[]>([]);
   const [memberSubscriptions, setMemberSubscriptions] = useState<MemberSubscriptionRead[]>([]);
   const [memberSubscriptionPayment, setMemberSubscriptionPayment] = useState<MemberSubscriptionPaymentRead | null>(null);
+  const [dataMigrationProjects, setDataMigrationProjects] = useState<OrganizationDataMigrationProjectRead[]>([]);
+  const [dataMigrationRuns, setDataMigrationRuns] = useState<OrganizationDataMigrationRunRead[]>([]);
+  const [recoveryPlans, setRecoveryPlans] = useState<OrganizationRecoveryPlanRead[]>([]);
+  const [recoveryDrills, setRecoveryDrills] = useState<OrganizationRecoveryDrillRead[]>([]);
   const [events, setEvents] = useState<EventRead[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecordRead[]>([]);
   const [attendancePolicy, setAttendancePolicy] = useState<EventAttendancePolicyRead | null>(null);
@@ -2472,6 +2480,8 @@ export default function HomePage() {
   const [selectedUsageMeterId, setSelectedUsageMeterId] = useState("");
   const [selectedSaasInvoiceId, setSelectedSaasInvoiceId] = useState("");
   const [selectedMemberSubscriptionId, setSelectedMemberSubscriptionId] = useState("");
+  const [selectedDataMigrationProjectId, setSelectedDataMigrationProjectId] = useState("");
+  const [selectedRecoveryPlanId, setSelectedRecoveryPlanId] = useState("");
   const [emergencyAlert, setEmergencyAlert] = useState<EmergencyActivationAlertRead | null>(null);
   const [selectedEquipmentFile, setSelectedEquipmentFile] = useState<File | null>(null);
   const [infrastructureStatus, setInfrastructureStatus] = useState<InfrastructureStatus | null>(null);
@@ -2604,6 +2614,49 @@ export default function HomePage() {
     provider: "mpesa",
     method: "stk_push",
     external_payment_id: "MPESA-DEMO-001"
+  });
+  const [dataMigrationProjectForm, setDataMigrationProjectForm] = useState({
+    name: "Legacy SportsEngine import",
+    source_system: "sportsengine",
+    source_format: "csv",
+    migration_type: "initial_import",
+    data_domains: "people,teams,rosters,fees",
+    risk_level: "medium",
+    records_expected: 120,
+    notes: "Move member, team, roster, guardian, and dues history into AfroLete."
+  });
+  const [dataMigrationRunForm, setDataMigrationRunForm] = useState({
+    run_type: "import",
+    status: "succeeded",
+    records_seen: 120,
+    records_created: 80,
+    records_updated: 36,
+    records_skipped: 4,
+    error_count: 0,
+    checksum: "sha256:demo-import",
+    mapping_summary: "Mapped people, teams, guardians, rosters, and club dues.",
+    report_url: "https://example.test/reports/migration-import"
+  });
+  const [recoveryPlanForm, setRecoveryPlanForm] = useState({
+    name: "Club continuity plan",
+    scope: "tenant_operational_data",
+    rpo_minutes: 60,
+    rto_minutes: 240,
+    backup_frequency: "daily",
+    storage_location: "lindela-minio/afrolete-backups",
+    retention_days: 90,
+    encryption_policy: "OpenBao-managed keys",
+    status: "active"
+  });
+  const [recoveryDrillForm, setRecoveryDrillForm] = useState({
+    drill_type: "restore_test",
+    status: "passed",
+    rpo_minutes_observed: 45,
+    rto_minutes_observed: 180,
+    data_loss_summary: "No data loss beyond accepted backup window.",
+    result_summary: "Tenant restored into isolated rehearsal environment.",
+    action_items: "Automate quarterly evidence collection.",
+    evidence_url: "https://example.test/evidence/recovery-drill"
   });
   const [athleteForm, setAthleteForm] = useState({
     display_name: "Amani Otieno",
@@ -4045,6 +4098,37 @@ export default function HomePage() {
       subscriptions.some((subscription) => subscription.id === current) ? current : subscriptions[0]?.id ?? ""
     );
   }, []);
+
+  const loadMigrationAndRecovery = useCallback(async (organizationId: string) => {
+    const [projects, plans] = await Promise.all([
+      apiRequest<OrganizationDataMigrationProjectRead[]>(`/organizations/${organizationId}/data-migration-projects`, { identity }),
+      apiRequest<OrganizationRecoveryPlanRead[]>(`/organizations/${organizationId}/recovery-plans`, { identity })
+    ]);
+    setDataMigrationProjects(projects);
+    setRecoveryPlans(plans);
+    setSelectedDataMigrationProjectId((current) =>
+      projects.some((project) => project.id === current) ? current : projects[0]?.id ?? ""
+    );
+    setSelectedRecoveryPlanId((current) =>
+      plans.some((plan) => plan.id === current) ? current : plans[0]?.id ?? ""
+    );
+  }, [identity]);
+
+  const loadDataMigrationRuns = useCallback(async (projectId: string) => {
+    const data = await apiRequest<OrganizationDataMigrationRunRead[]>(
+      `/organizations/data-migration-projects/${projectId}/runs`,
+      { identity }
+    );
+    setDataMigrationRuns(data);
+  }, [identity]);
+
+  const loadRecoveryDrills = useCallback(async (planId: string) => {
+    const data = await apiRequest<OrganizationRecoveryDrillRead[]>(
+      `/organizations/recovery-plans/${planId}/drills`,
+      { identity }
+    );
+    setRecoveryDrills(data);
+  }, [identity]);
 
   const loadRegistrationInquiries = useCallback(
     async (organizationId: string) => {
@@ -5570,6 +5654,12 @@ export default function HomePage() {
       setMemberSubscriptions([]);
       setMemberSubscriptionPayment(null);
       setSelectedMemberSubscriptionId("");
+      setDataMigrationProjects([]);
+      setDataMigrationRuns([]);
+      setRecoveryPlans([]);
+      setRecoveryDrills([]);
+      setSelectedDataMigrationProjectId("");
+      setSelectedRecoveryPlanId("");
       setEvents([]);
       setWeatherAssessments([]);
       setWeatherAlert(null);
@@ -5986,6 +6076,7 @@ export default function HomePage() {
       await loadOrganizationOperatingUnits(selectedOrganizationId);
       await loadAwardPrograms(selectedOrganizationId);
       await loadMemberDues(selectedOrganizationId);
+      await loadMigrationAndRecovery(selectedOrganizationId);
       await loadRegistrationInquiries(selectedOrganizationId);
       await loadEvents(selectedOrganizationId);
       await loadSafeguardingIncidents(selectedOrganizationId);
@@ -6022,6 +6113,7 @@ export default function HomePage() {
     loadOrganizationOperatingUnits,
     loadAwardPrograms,
     loadMemberDues,
+    loadMigrationAndRecovery,
     loadRegistrationInquiries,
     loadEvents,
     loadSafeguardingIncidents,
@@ -6093,6 +6185,30 @@ export default function HomePage() {
       () => undefined
     );
   }, [selectedAwardCategoryId, loadAwardNominations, runAction]);
+
+  useEffect(() => {
+    if (!selectedDataMigrationProjectId) {
+      setDataMigrationRuns([]);
+      return;
+    }
+    runAction(
+      "load-data-migration-runs",
+      () => loadDataMigrationRuns(selectedDataMigrationProjectId),
+      () => undefined
+    );
+  }, [selectedDataMigrationProjectId, loadDataMigrationRuns, runAction]);
+
+  useEffect(() => {
+    if (!selectedRecoveryPlanId) {
+      setRecoveryDrills([]);
+      return;
+    }
+    runAction(
+      "load-recovery-drills",
+      () => loadRecoveryDrills(selectedRecoveryPlanId),
+      () => undefined
+    );
+  }, [selectedRecoveryPlanId, loadRecoveryDrills, runAction]);
 
   useEffect(() => {
     if (!selectedOrganizationId) {
@@ -6752,6 +6868,105 @@ export default function HomePage() {
           )
         );
         addLog(`Recorded ${payment.provider.toUpperCase()} dues payment`, "good");
+      }
+    );
+  };
+
+  const createDataMigrationProject = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before opening a migration project", "bad");
+      return;
+    }
+    runAction(
+      "create-data-migration-project",
+      () =>
+        apiRequest<OrganizationDataMigrationProjectRead>(
+          `/organizations/${selectedOrganizationId}/data-migration-projects`,
+          {
+            method: "POST",
+            identity,
+            body: dataMigrationProjectForm
+          }
+        ),
+      (project) => {
+        setDataMigrationProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
+        setSelectedDataMigrationProjectId(project.id);
+        addLog(`${project.source_system} migration opened`, "good");
+      }
+    );
+  };
+
+  const createDataMigrationRun = () => {
+    const projectId = selectedDataMigrationProjectId || dataMigrationProjects[0]?.id;
+    if (!projectId) {
+      addLog("Create or select a migration project first", "bad");
+      return;
+    }
+    runAction(
+      "create-data-migration-run",
+      () =>
+        apiRequest<OrganizationDataMigrationRunRead>(
+          `/organizations/data-migration-projects/${projectId}/runs`,
+          {
+            method: "POST",
+            identity,
+            body: dataMigrationRunForm
+          }
+        ),
+      (run) => {
+        setDataMigrationRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+        if (selectedOrganizationId) {
+          void loadMigrationAndRecovery(selectedOrganizationId);
+        }
+        addLog(`${run.run_type.replaceAll("_", " ")} migration run ${run.status}`, "good");
+      }
+    );
+  };
+
+  const createRecoveryPlan = () => {
+    if (!selectedOrganizationId) {
+      addLog("Select an organization before creating a recovery plan", "bad");
+      return;
+    }
+    runAction(
+      "create-recovery-plan",
+      () =>
+        apiRequest<OrganizationRecoveryPlanRead>(`/organizations/${selectedOrganizationId}/recovery-plans`, {
+          method: "POST",
+          identity,
+          body: recoveryPlanForm
+        }),
+      (plan) => {
+        setRecoveryPlans((current) => [plan, ...current.filter((item) => item.id !== plan.id)]);
+        setSelectedRecoveryPlanId(plan.id);
+        addLog(`${plan.name} recovery plan ready`, "good");
+      }
+    );
+  };
+
+  const createRecoveryDrill = () => {
+    const planId = selectedRecoveryPlanId || recoveryPlans[0]?.id;
+    if (!planId) {
+      addLog("Create or select a recovery plan first", "bad");
+      return;
+    }
+    runAction(
+      "create-recovery-drill",
+      () =>
+        apiRequest<OrganizationRecoveryDrillRead>(
+          `/organizations/recovery-plans/${planId}/drills`,
+          {
+            method: "POST",
+            identity,
+            body: recoveryDrillForm
+          }
+        ),
+      (drill) => {
+        setRecoveryDrills((current) => [drill, ...current.filter((item) => item.id !== drill.id)]);
+        if (selectedOrganizationId) {
+          void loadMigrationAndRecovery(selectedOrganizationId);
+        }
+        addLog(`${drill.drill_type.replaceAll("_", " ")} ${drill.status}`, "good");
       }
     );
   };
@@ -21469,6 +21684,130 @@ export default function HomePage() {
                     <strong>{shortcut.phrase}</strong>
                     <span>{shortcut.action_sequence.join(" -> ") || shortcut.intent.replaceAll("_", " ")}</span>
                     <small>{shortcut.trained_sample_count} sample(s) · sensitivity {Math.round(shortcut.sensitivity * 100)}%</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel form-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Migration and DR</p>
+                <h2>Imports and continuity</h2>
+              </div>
+              <div className="event-toolbar">
+                <button type="button" onClick={createDataMigrationProject} disabled={busyAction !== null}>Project</button>
+                <button type="button" onClick={createDataMigrationRun} disabled={busyAction !== null}>Run</button>
+                <button type="button" onClick={createRecoveryPlan} disabled={busyAction !== null}>Plan</button>
+                <button type="button" onClick={createRecoveryDrill} disabled={busyAction !== null}>Drill</button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Source
+                <input value={dataMigrationProjectForm.source_system} onChange={(event) => setDataMigrationProjectForm({ ...dataMigrationProjectForm, source_system: event.target.value })} />
+              </label>
+              <label>
+                Migration
+                <input value={dataMigrationProjectForm.name} onChange={(event) => setDataMigrationProjectForm({ ...dataMigrationProjectForm, name: event.target.value })} />
+              </label>
+              <label>
+                Domains
+                <input value={dataMigrationProjectForm.data_domains} onChange={(event) => setDataMigrationProjectForm({ ...dataMigrationProjectForm, data_domains: event.target.value })} />
+              </label>
+              <label>
+                Expected rows
+                <input type="number" min="0" value={dataMigrationProjectForm.records_expected} onChange={(event) => setDataMigrationProjectForm({ ...dataMigrationProjectForm, records_expected: Number(event.target.value) })} />
+              </label>
+              <label>
+                Run type
+                <select value={dataMigrationRunForm.run_type} onChange={(event) => setDataMigrationRunForm({ ...dataMigrationRunForm, run_type: event.target.value })}>
+                  <option value="mapping_preview">Mapping preview</option>
+                  <option value="validation">Validation</option>
+                  <option value="dry_run">Dry run</option>
+                  <option value="import">Import</option>
+                  <option value="reconciliation">Reconciliation</option>
+                  <option value="rollback">Rollback</option>
+                </select>
+              </label>
+              <label>
+                Run status
+                <select value={dataMigrationRunForm.status} onChange={(event) => setDataMigrationRunForm({ ...dataMigrationRunForm, status: event.target.value })}>
+                  <option value="queued">Queued</option>
+                  <option value="running">Running</option>
+                  <option value="succeeded">Succeeded</option>
+                  <option value="partial">Partial</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </label>
+              <label>
+                Created
+                <input type="number" min="0" value={dataMigrationRunForm.records_created} onChange={(event) => setDataMigrationRunForm({ ...dataMigrationRunForm, records_created: Number(event.target.value) })} />
+              </label>
+              <label>
+                Updated
+                <input type="number" min="0" value={dataMigrationRunForm.records_updated} onChange={(event) => setDataMigrationRunForm({ ...dataMigrationRunForm, records_updated: Number(event.target.value) })} />
+              </label>
+              <label>
+                Recovery plan
+                <input value={recoveryPlanForm.name} onChange={(event) => setRecoveryPlanForm({ ...recoveryPlanForm, name: event.target.value })} />
+              </label>
+              <label>
+                RPO minutes
+                <input type="number" min="0" value={recoveryPlanForm.rpo_minutes} onChange={(event) => setRecoveryPlanForm({ ...recoveryPlanForm, rpo_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                RTO minutes
+                <input type="number" min="0" value={recoveryPlanForm.rto_minutes} onChange={(event) => setRecoveryPlanForm({ ...recoveryPlanForm, rto_minutes: Number(event.target.value) })} />
+              </label>
+              <label>
+                Drill status
+                <select value={recoveryDrillForm.status} onChange={(event) => setRecoveryDrillForm({ ...recoveryDrillForm, status: event.target.value })}>
+                  <option value="planned">Planned</option>
+                  <option value="running">Running</option>
+                  <option value="passed">Passed</option>
+                  <option value="failed">Failed</option>
+                  <option value="blocked">Blocked</option>
+                </select>
+              </label>
+            </div>
+            <div className="task-list">
+              {dataMigrationProjects.slice(0, 3).map((project) => (
+                <article key={project.id} className={`task-card ${project.id === selectedDataMigrationProjectId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{project.name}</strong>
+                    <span>{project.source_system} · {project.status.replaceAll("_", " ")} · risk {project.risk_level}</span>
+                    <small>{project.records_imported}/{project.records_expected ?? "unknown"} imported · {project.run_count} run(s) · {project.error_count} error(s)</small>
+                  </div>
+                  <button type="button" onClick={() => setSelectedDataMigrationProjectId(project.id)}>Select</button>
+                </article>
+              ))}
+              {dataMigrationRuns.slice(0, 3).map((run) => (
+                <article key={run.id} className="task-card">
+                  <div>
+                    <strong>{run.run_type.replaceAll("_", " ")} · {run.status}</strong>
+                    <span>{run.records_seen} seen · {run.records_created} created · {run.records_updated} updated · {run.records_skipped} skipped</span>
+                    <small>{run.mapping_summary ?? run.checksum ?? "Migration run evidence"}</small>
+                  </div>
+                </article>
+              ))}
+              {recoveryPlans.slice(0, 3).map((plan) => (
+                <article key={plan.id} className={`task-card ${plan.id === selectedRecoveryPlanId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{plan.name}</strong>
+                    <span>RPO {plan.rpo_minutes}m · RTO {plan.rto_minutes}m · {plan.status}</span>
+                    <small>{plan.backup_frequency} backups · {plan.retention_days}d retention · {plan.drill_count} drill(s)</small>
+                  </div>
+                  <button type="button" onClick={() => setSelectedRecoveryPlanId(plan.id)}>Select</button>
+                </article>
+              ))}
+              {recoveryDrills.slice(0, 3).map((drill) => (
+                <article key={drill.id} className="task-card">
+                  <div>
+                    <strong>{drill.drill_type.replaceAll("_", " ")} · {drill.status}</strong>
+                    <span>Observed RPO {drill.rpo_minutes_observed ?? "-"}m · RTO {drill.rto_minutes_observed ?? "-"}m</span>
+                    <small>{drill.result_summary ?? drill.action_items ?? "Recovery rehearsal evidence"}</small>
                   </div>
                 </article>
               ))}

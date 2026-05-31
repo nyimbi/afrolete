@@ -298,6 +298,143 @@ def test_organization_program_season_and_group_crud(client, identity_headers) ->
     assert members[0]["subject_id"] == member["subject_id"]
 
 
+def test_organization_data_migration_and_recovery_crud(client, identity_headers) -> None:
+    organization = client.post(
+        "/api/v1/organizations",
+        headers=identity_headers,
+        json={
+            "name": "Continuity Ready Club",
+            "organization_type": "club",
+            "country_code": "KE",
+            "primary_sport": "football",
+        },
+    ).json()
+
+    project_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/data-migration-projects",
+        headers=identity_headers,
+        json={
+            "name": "Legacy SportsEngine import",
+            "source_system": "sportsengine",
+            "source_format": "csv",
+            "migration_type": "initial_import",
+            "data_domains": "people,teams,rosters,fees",
+            "risk_level": "medium",
+            "records_expected": 120,
+            "notes": "Move member, team, roster, and dues history into AfroLete.",
+        },
+    )
+    assert project_response.status_code == 201
+    project = project_response.json()
+    assert project["run_count"] == 0
+    assert project["records_imported"] == 0
+
+    validation_response = client.post(
+        f"/api/v1/organizations/data-migration-projects/{project['id']}/runs",
+        headers=identity_headers,
+        json={
+            "run_type": "validation",
+            "status": "partial",
+            "records_seen": 120,
+            "records_skipped": 4,
+            "error_count": 2,
+            "mapping_summary": "Mapped people, teams, guardians, and fee plans; two rows need cleanup.",
+            "report_url": "https://example.test/reports/migration-validation",
+        },
+    )
+    assert validation_response.status_code == 201
+    assert validation_response.json()["records_seen"] == 120
+
+    import_response = client.post(
+        f"/api/v1/organizations/data-migration-projects/{project['id']}/runs",
+        headers=identity_headers,
+        json={
+            "run_type": "import",
+            "status": "succeeded",
+            "records_seen": 120,
+            "records_created": 80,
+            "records_updated": 36,
+            "records_skipped": 4,
+            "error_count": 0,
+            "checksum": "sha256:demo-import",
+            "notes": "Dry-run corrections applied before import.",
+        },
+    )
+    assert import_response.status_code == 201
+
+    projects_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/data-migration-projects",
+        headers=identity_headers,
+    )
+    assert projects_response.status_code == 200
+    listed_project = projects_response.json()[0]
+    assert listed_project["run_count"] == 2
+    assert listed_project["records_imported"] == 116
+    assert listed_project["error_count"] == 2
+    assert listed_project["status"] == "reconciled"
+
+    runs_response = client.get(
+        f"/api/v1/organizations/data-migration-projects/{project['id']}/runs",
+        headers=identity_headers,
+    )
+    assert runs_response.status_code == 200
+    assert len(runs_response.json()) == 2
+
+    plan_response = client.post(
+        f"/api/v1/organizations/{organization['id']}/recovery-plans",
+        headers=identity_headers,
+        json={
+            "name": "Club continuity plan",
+            "scope": "tenant_operational_data",
+            "rpo_minutes": 60,
+            "rto_minutes": 240,
+            "backup_frequency": "daily",
+            "storage_location": "lindela-minio/afrolete-backups",
+            "retention_days": 90,
+            "encryption_policy": "OpenBao-managed keys",
+            "status": "active",
+            "notes": "Covers PostgreSQL tenant data and object-storage evidence.",
+        },
+    )
+    assert plan_response.status_code == 201
+    plan = plan_response.json()
+    assert plan["drill_count"] == 0
+
+    drill_response = client.post(
+        f"/api/v1/organizations/recovery-plans/{plan['id']}/drills",
+        headers=identity_headers,
+        json={
+            "drill_type": "restore_test",
+            "status": "passed",
+            "rpo_minutes_observed": 45,
+            "rto_minutes_observed": 180,
+            "data_loss_summary": "No data loss beyond accepted backup window.",
+            "result_summary": "Tenant restored into isolated rehearsal environment.",
+            "action_items": "Automate quarterly evidence collection.",
+            "evidence_url": "https://example.test/evidence/recovery-drill",
+        },
+    )
+    assert drill_response.status_code == 201
+    assert drill_response.json()["status"] == "passed"
+
+    plans_response = client.get(
+        f"/api/v1/organizations/{organization['id']}/recovery-plans",
+        headers=identity_headers,
+    )
+    assert plans_response.status_code == 200
+    listed_plan = plans_response.json()[0]
+    assert listed_plan["drill_count"] == 1
+    assert listed_plan["last_tested_at"] is not None
+    assert listed_plan["status"] == "active"
+
+    drills_response = client.get(
+        f"/api/v1/organizations/recovery-plans/{plan['id']}/drills",
+        headers=identity_headers,
+    )
+    assert drills_response.status_code == 200
+    assert drills_response.json()[0]["rto_minutes_observed"] == 180
+
+
 def test_organization_awards_nomination_voting_and_certificate_crud(client, identity_headers) -> None:
     organization = client.post(
         "/api/v1/organizations",
